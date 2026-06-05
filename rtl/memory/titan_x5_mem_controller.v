@@ -17,12 +17,12 @@ module titan_x5_mem_controller #(
     input  wire                       req_valid,
     input wire [AXI_ADDR_WIDTH-1:0] req_addr,
     input  wire                       req_write,
-    input wire [AXI_DATA_WIDTH-1:0] req_wdata,
+    input wire [31:0] req_wdata,
     input wire [3:0] req_len, // burst length (0-15)
     output reg                        req_ready,
 
     output reg                        resp_valid,
-    output reg [AXI_DATA_WIDTH-1:0] resp_rdata,
+    output reg [31:0] resp_rdata,
 
     // axi4 master interface
     // ar channel
@@ -78,6 +78,7 @@ module titan_x5_mem_controller #(
     localparam B_WAIT  = 3'd5;
 
     reg [2:0] state, next_state;
+    reg [AXI_ADDR_WIDTH-1:0] saved_req_addr;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -89,6 +90,7 @@ module titan_x5_mem_controller #(
             m_axi_bready <= 0;
             req_ready <= 0;
             resp_valid <= 0;
+            saved_req_addr <= 0;
         end else begin
             state <= next_state;
 
@@ -98,6 +100,7 @@ module titan_x5_mem_controller #(
                     resp_valid <= 1'b0;
                     if (req_valid && req_ready) begin
                         req_ready <= 1'b0;
+                        saved_req_addr <= req_addr;
                         if (req_write) begin
                             m_axi_awvalid <= 1'b1;
                             m_axi_awaddr <= req_addr;
@@ -120,7 +123,9 @@ module titan_x5_mem_controller #(
                 R_WAIT: begin
                     if (m_axi_rvalid && m_axi_rready) begin
                         resp_valid <= 1'b1;
-                        resp_rdata <= m_axi_rdata;
+                        // multiplex the 32-bit word from the AXI_DATA_WIDTH bus using the byte offset
+                        // index is (saved_req_addr % (AXI_DATA_WIDTH/8)) / 4
+                        resp_rdata <= m_axi_rdata[((saved_req_addr % (AXI_DATA_WIDTH/8)) / 4) * 32 +: 32];
                         if (m_axi_rlast) begin
                             m_axi_rready <= 1'b0;
                         end
@@ -132,8 +137,9 @@ module titan_x5_mem_controller #(
                     if (m_axi_awready && m_axi_awvalid) begin
                         m_axi_awvalid <= 1'b0;
                         m_axi_wvalid <= 1'b1;
-                        m_axi_wdata <= req_wdata; // single beat simplify
-                        m_axi_wstrb <= {(AXI_DATA_WIDTH/8){1'b1}};
+                        // duplicate the 32-bit data across the entire bus
+                        m_axi_wdata <= {(AXI_DATA_WIDTH/32){req_wdata}}; 
+                        m_axi_wstrb <= ( {((AXI_DATA_WIDTH/8)+1){1'b0}} + 4'hF ) << ((saved_req_addr % (AXI_DATA_WIDTH/8)) / 4 * 4);
                         m_axi_wlast <= 1'b1;
                     end
                 end

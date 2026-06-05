@@ -1,6 +1,0 @@
-<testsuites name="results">
-  <testsuite name="all" package="all">
-    <property name="random_seed" value="1780648240" />
-    <testcase name="test_rasterizer_and_sr" classname="test_graphics_pipeline" file="C:\Users\singb\Downloads\gpuuhj\tb\test_graphics_pipeline.py" lineno="6" time="0.07105302810668945" sim_time_ns="240.0" ratio_time="3377.7589273131152" />
-  </testsuite>
-</testsuites>

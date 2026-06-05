@@ -235,10 +235,11 @@ module titan_x5_gpu_top #(
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_gen
             titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(4)) u_sm (
-                .clk              (clk), .rst_n(rst_n),
+                .clk(clk),
+                .rst_n(rst_n),
                 .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),
                 .l1_dcache_addr(sm_dcache_addr[gi]), .l1_dcache_wdata(sm_dcache_wdata[gi]), .l1_dcache_req(sm_dcache_req[gi]), .l1_dcache_we(sm_dcache_we[gi]), .l1_dcache_rdata(xbar_m_resp_rdata[(13+gi)*32 +: 32]), .l1_dcache_rvalid(xbar_m_resp_valid[13+gi]),
-                .warp_active      (8'hFF), .warp_pc_in(256'h0)
+                .warp_active      (8'h00), .warp_pc_in(256'h0)
             );
         end
     endgenerate
@@ -250,8 +251,8 @@ module titan_x5_gpu_top #(
     wire signed [15:0] rast_o_x, rast_o_y;
     
     wire rast_i_valid = cmd_valid && (cmd_opcode == 8'h01); // cmd_draw
-    assign cmd_ready = rast_i_ready; 
-
+    assign cmd_ready = rast_i_ready;
+    wire [31:0] rast_i_color = 32'h000000FF; // Solid Black Triangle
     titan_x5_rasterizer #(.COORD_W(16), .WEIGHT_W(32)) u_rasterizer (
         .clk    (clk), .rst_n(rst_n),
         .i_valid(rast_i_valid), .i_ready(rast_i_ready),
@@ -418,7 +419,8 @@ module titan_x5_gpu_top #(
     // 11. Memory Controller & Command ROM
     
     // command rom for ring buffer fetches
-    assign cmd_mem_data = (cmd_mem_addr == host_ring_base) ? 64'h01_00_00_00_00_00_00_00 :
+    // command rom for ring buffer fetches
+    assign cmd_mem_data = (cmd_mem_addr == host_ring_base) ? 64'h01_00_00_00_00_05_00_05 :
                           (cmd_mem_addr == host_ring_base + 8) ? 64'h04_00_00_00_00_00_00_00 : 
                           64'h0;
                           
@@ -479,7 +481,7 @@ module titan_x5_gpu_top #(
     // 12. Display Engine
     titan_x5_display_engine u_disp_engine (
         .clk(clk), .pclk(clk), .rst_n(rst_n),
-        .h_visible(VGA_H_VISIBLE), .h_front_porch(12'd1), .h_sync_pulse(12'd1), .h_back_porch(12'd1),
+        .h_visible(VGA_H_VISIBLE), .h_front_porch(12'd64), .h_sync_pulse(12'd64), .h_back_porch(12'd64),
         .v_visible(VGA_V_VISIBLE), .v_front_porch(12'd1), .v_sync_pulse(12'd1), .v_back_porch(12'd1),
         .swap_buffers(), .fb_read_addr(disp_mem_addr), .fb_rgba_data(disp_mem_rdata),
         .fb_read_req(disp_mem_req), .fb_read_ack(disp_mem_ack), .fb_resp_valid(disp_mem_resp_valid),

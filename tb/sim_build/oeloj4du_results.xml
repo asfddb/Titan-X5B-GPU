@@ -1,8 +1,0 @@
-<testsuites name="results">
-  <testsuite name="all" package="all">
-    <property name="random_seed" value="1780647732" />
-    <testcase name="test_system_vga_reconstruction" classname="test_system" file="C:\Users\singb\Downloads\gpuuhj\tb\test_system.py" lineno="8" time="0.04135298728942871" sim_time_ns="0.0" ratio_time="0.0">
-      <failure error_type="ValueError" error_msg="Cannot convert Logic('X') to bool" />
-    </testcase>
-  </testsuite>
-</testsuites>

@@ -60,22 +60,10 @@ module titan_x5_display_engine (
         end
     end
     
-    // hsync and vsync generation (active low typically, parameterized here as active high for simplicity)
-    always @(posedge pclk or negedge rst_n) begin
-        if (!rst_n) begin
-            vga_hsync <= 1'b0;
-            vga_vsync <= 1'b0;
-            vga_de    <= 1'b0;
-        end else begin
-            vga_hsync <= (h_counter >= h_visible + h_front_porch) && 
-                         (h_counter < h_visible + h_front_porch + h_sync_pulse);
-                         
-            vga_vsync <= (v_counter >= v_visible + v_front_porch) && 
-                         (v_counter < v_visible + v_front_porch + v_sync_pulse);
-                         
-            vga_de    <= (h_counter < h_visible) && (v_counter < v_visible);
-        end
-    end
+    // hsync and vsync generation
+    wire next_hsync = (h_counter >= h_visible + h_front_porch) && (h_counter < h_visible + h_front_porch + h_sync_pulse);
+    wire next_vsync = (v_counter >= v_visible + v_front_porch) && (v_counter < v_visible + v_front_porch + v_sync_pulse);
+    wire next_de    = (h_counter < h_visible) && (v_counter < v_visible);
     
     // clock domain crossing (cdc) asynchronous fifo
     wire        fifo_full;
@@ -129,22 +117,30 @@ module titan_x5_display_engine (
     assign fb_read_req  = !fifo_full && !pending_read;
     
     // pixel stream from fifo
-    assign fifo_rinc = vga_de && !fifo_empty;
+    assign fifo_rinc = next_de && !fifo_empty;
     
     // rgb output (pixel clock domain)
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
+            vga_hsync <= 1'b0;
+            vga_vsync <= 1'b0;
+            vga_de    <= 1'b0;
             vga_r <= 8'd0;
             vga_g <= 8'd0;
             vga_b <= 8'd0;
-        end else if (vga_de && !fifo_empty) begin
-            vga_r <= fifo_rdata[31:24]; // R
-            vga_g <= fifo_rdata[23:16]; // G
-            vga_b <= fifo_rdata[15:8];  // B
         end else begin
-            vga_r <= 8'd0;
-            vga_g <= 8'd0;
-            vga_b <= 8'd0;
+            vga_hsync <= next_hsync;
+            vga_vsync <= next_vsync;
+            vga_de    <= next_de;
+            if (next_de && !fifo_empty) begin
+                vga_r <= fifo_rdata[31:24]; // R
+                vga_g <= fifo_rdata[23:16]; // G
+                vga_b <= fifo_rdata[15:8];  // B
+            end else begin
+                vga_r <= 8'd0;
+                vga_g <= 8'd0;
+                vga_b <= 8'd0;
+            end
         end
     end
     

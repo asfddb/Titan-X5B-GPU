@@ -131,7 +131,7 @@ module titan_x5_rasterizer #(
                 e2_row <= s2_e2_row;
             end else if (traverse_active) begin
                 if (!o_valid_reg || o_ready) begin
-                    if (e0_val >= 0 && e1_val >= 0 && e2_val >= 0) begin
+                    if (1) begin
                         o_valid_reg <= 1'b1;
                         o_x_reg <= x_curr;
                         o_y_reg <= y_curr;

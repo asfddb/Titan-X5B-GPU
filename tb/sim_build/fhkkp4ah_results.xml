@@ -1,0 +1,8 @@
+<testsuites name="results">
+  <testsuite name="all" package="all">
+    <property name="random_seed" value="1780656136" />
+    <testcase name="test_system_vga_reconstruction" classname="test_system" file="C:\Users\singb\Downloads\gpuuhj\tb\test_system.py" lineno="8" time="48.696065187454224" sim_time_ns="230780.0" ratio_time="4739.191947267576">
+      <failure error_type="AssertionError" error_msg="FORCING FAIL TO SEE OUTPUT LOGS&#10;assert False" />
+    </testcase>
+  </testsuite>
+</testsuites>

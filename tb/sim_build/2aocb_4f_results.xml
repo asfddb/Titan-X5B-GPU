@@ -1,8 +1,0 @@
-<testsuites name="results">
-  <testsuite name="all" package="all">
-    <property name="random_seed" value="1780645767" />
-    <testcase name="test_rasterizer_and_sr" classname="test_graphics_pipeline" file="C:\Users\singb\Downloads\gpuuhj\tb\test_graphics_pipeline.py" lineno="6" time="0.013998031616210938" sim_time_ns="240.0" ratio_time="17145.267747649545">
-      <failure error_type="AssertionError" error_msg="Expected 55 pixels, but got 16!&#10;assert 16 == 55" />
-    </testcase>
-  </testsuite>
-</testsuites>
