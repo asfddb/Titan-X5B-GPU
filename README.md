@@ -19,6 +19,24 @@
 
 ---
 
+## 📸 Visual Verification
+
+### Authentic Hardware Rendered Output
+The `tb_graphics_pipeline.v` testbench inputs a geometric triangle at coordinates `(10,10)`, `(20,10)`, `(10,20)`. The image below is a 1-to-1 visual plot of the exact pixel coordinates that the RTL rasterizer hardware generated during the simulation:
+
+<p align="center">
+  <img src="docs/assets/rendered_triangle.png" alt="Rendered Triangle from Testbench" width="600"/>
+</p>
+
+### Authentic Simulation Waveforms
+Below is the logic analyzer output generated directly from the Icarus Verilog `.vcd` dump of the testbench. It shows the real internal AXI and pipeline signals during the simulation:
+
+<p align="center">
+  <img src="docs/assets/simulation_waveforms.png" alt="Real Simulation Waveforms" width="800"/>
+</p>
+
+---
+
 ## Overview
 
 Titan X5-B is an experimental, synthesizable GPU architecture written in SystemVerilog. It is designed as an educational project to explore modern graphics, tensor math, and compute pipelines at the RTL level.
@@ -182,23 +200,7 @@ Time=60000  | CLK=0 | RST=1 | Host PTR=10000010   ← Command dispatched
 ===============================================================
   TEST PASSED: RTL Simulation Completed Without Assertion Failures
 
-### Authentic Simulation Waveforms
 
-Below is the logic analyzer output generated directly from the Icarus Verilog `.vcd` dump of the testbench. It shows the real internal AXI and pipeline signals during the simulation:
-
-<p align="center">
-  <img src="docs/assets/simulation_waveforms.png" alt="Real Simulation Waveforms" width="800"/>
-</p>
-
-### Authentic Hardware Rendered Output
-
-The `tb_graphics_pipeline.v` testbench inputs a geometric triangle at coordinates `(10,10)`, `(20,10)`, `(10,20)`. The image below is a 1-to-1 visual plot of the exact pixel coordinates that the RTL rasterizer hardware generated during the simulation:
-
-<p align="center">
-  <img src="docs/assets/rendered_triangle.png" alt="Rendered Triangle from Testbench" width="600"/>
-</p>
-
----
 
 ## 🔋 Synthesis Breakdown
 
