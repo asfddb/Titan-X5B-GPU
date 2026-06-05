@@ -17,29 +17,27 @@
 
 
 
----
 
-## 📸 Visual Verification
-
-### Authentic Hardware Rendered Output
-The `tb_graphics_pipeline.v` testbench inputs a geometric triangle at coordinates `(10,10)`, `(20,10)`, `(10,20)`. The image below is a 1-to-1 visual plot of the exact pixel coordinates that the RTL rasterizer hardware generated during the simulation:
-
-<p align="center">
-  <img src="docs/assets/rendered_triangle.png" alt="Rendered Triangle from Testbench" width="600"/>
-</p>
-
-### Authentic Simulation Waveforms
-Below is the logic analyzer output generated directly from the Icarus Verilog `.vcd` dump of the testbench. It shows the real internal AXI and pipeline signals during the simulation:
-
-<p align="center">
-  <img src="docs/assets/simulation_waveforms.png" alt="Real Simulation Waveforms" width="800"/>
-</p>
-
----
 
 ## Overview
 
 Titan X5-B is an experimental, synthesizable GPU architecture written in SystemVerilog. It is designed as an educational project to explore modern graphics, tensor math, and compute pipelines at the RTL level.
+
+---
+
+## 📸 Titan Command Center (Silicon Validation Dashboard)
+
+This project includes a fully-functional React+Vite dashboard that hooks directly into the **Icarus Verilog RTL Simulator**. It allows you to run testbenches, view logic analyzer waveforms, monitor active silicon yields, and verify rendering output in real-time.
+
+<p align="center">
+  <img src="docs/assets/titan_command_center.png" alt="Titan Command Center Dashboard" width="900"/>
+</p>
+
+To launch the dashboard locally:
+```bash
+python telemetry_server.py
+cd titan-cloud && npm install && npm run dev
+```
 
 What it actually has inside:
 - **Tensor Cores**: 16x16 systolic array (trying to mimic FP16/FP4 inference)
