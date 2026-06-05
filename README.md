@@ -181,22 +181,7 @@ Time=60000  | CLK=0 | RST=1 | Host PTR=10000010   ← Command dispatched
 ...
 ===============================================================
   TEST PASSED: RTL Simulation Completed Without Assertion Failures
-===============================================================
-```
 
-### Visual Verification
-
-Because the 3-million-gate architecture is currently too large for low-cost FPGAs, I have implemented visual verification directly through the Icarus Verilog testbench. The testbench intercepts the VGA/Display Engine output signals and dumps them into an image file to prove the graphics pipeline renders correctly.
-
-**1. Simulation Output (Rendered Triangle)**
-<p align="center">
-  <img src="docs/assets/rendered_triangle.png" alt="Rendered Triangle from Testbench" width="600"/>
-</p>
-
-**2. Internal Pipeline Verification (GTKWave)**
-<p align="center">
-  <img src="docs/assets/real_gtkwave_screenshot.png" alt="GTKWave AXI Transactions" width="800"/>
-</p>
 ---
 
 ## 🔋 Synthesis Breakdown
