@@ -241,12 +241,4 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - [ ] Power estimation with OpenSTA
 - [ ] ASIC tape-out targeting TSMC 3nm
 
----
 
-## ⭐ Star This Repo
-
-If an independent student from India designing a 3-million-gate GPU doesn't deserve a GitHub star, what does?
-
-<p align="center">
-  <strong>The future of silicon is open.</strong>
-</p>
