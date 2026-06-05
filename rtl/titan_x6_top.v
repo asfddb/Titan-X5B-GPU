@@ -11,35 +11,33 @@ module titan_x6_top #(
     input  wire                     clk,
     input  wire                     rst_n,
 
-    // Control Interface (Simplified mapped registers)
+    // control interface (simplified mapped registers)
     input  wire                     ctrl_en,
     input  wire                     ctrl_mode, // 0 = FP8, 1 = INT4
 
-    // External Chiplet Interface (UCIe)
-    output wire [NUM_LANES-1:0]     ucie_tx_lanes,
-    input  wire [NUM_LANES-1:0]     ucie_rx_lanes,
+    // external chiplet interface (ucie)
+    output wire [NUM_LANES-1:0] ucie_tx_lanes,
+    input wire [NUM_LANES-1:0] ucie_rx_lanes,
 
-    // Photonic Sensor Interface
+    // photonic sensor interface
     input  wire                     photonics_en,
-    input  wire [31:0]              photonics_data,
+    input wire [31:0] photonics_data,
     input  wire                     photonics_valid,
 
-    // Status / Output
+    // status / output
     output wire                     tensor_valid,
-    output wire [511:0]             tensor_acc_out,
+    output wire [511:0] tensor_acc_out,
     output wire                     hdc_match_valid,
-    output wire [15:0]              hdc_confidence,
+    output wire [15:0] hdc_confidence,
     output wire                     hdc_is_match
 );
 
-    // -------------------------------------------------------------
-    // UCIe PHY Instantiation (Die-to-Die Fabric)
-    // -------------------------------------------------------------
+    // ucie phy instantiation (die-to-die fabric)
     wire                  core_rx_valid;
     wire [FLIT_WIDTH-1:0] core_rx_flit;
     wire                  core_tx_ready;
     
-    // For this super-node, we loop back the Tensor Core output into the TX if needed,
+    // for this super-node, we loop back the tensor core output into the tx if needed,
     // but for simplicity in this top level, we tie TX to a dummy stream or forward HDC results.
     wire                  core_tx_valid = hdc_match_valid;
     wire [FLIT_WIDTH-1:0] core_tx_flit  = { {(FLIT_WIDTH-16){1'b0}}, hdc_confidence };
@@ -59,11 +57,9 @@ module titan_x6_top #(
         .phy_rx_lanes   (ucie_rx_lanes)
     );
 
-    // -------------------------------------------------------------
-    // Tensor Core Array (AI Matrix Compute)
-    // -------------------------------------------------------------
-    // We feed the Tensor Core Activations and Weights directly from the UCIe RX flit!
-    // Flit is 256 bits: Lower 128 = Activations, Upper 128 = Weights.
+    // tensor core array (ai matrix compute)
+    // we feed the tensor core activations and weights directly from the ucie rx flit!
+    // flit is 256 bits: lower 128 = activations, upper 128 = weights.
     wire [(TENSOR_DIM * DATA_WIDTH)-1:0] tc_act_in    = core_rx_flit[127:0];
     wire [(TENSOR_DIM * DATA_WIDTH)-1:0] tc_weight_in = core_rx_flit[255:128];
     
@@ -75,7 +71,7 @@ module titan_x6_top #(
     ) u_tensor_core (
         .clk        (clk),
         .rst_n      (rst_n),
-        .en         (ctrl_en & core_rx_valid), // Only compute when we receive a valid flit
+        .en         (ctrl_en & core_rx_valid), // only compute when we receive a valid flit
         .mode       (ctrl_mode),
         .act_in     (tc_act_in),
         .weight_in  (tc_weight_in),
@@ -83,12 +79,10 @@ module titan_x6_top #(
         .out_valid  (tensor_valid)
     );
 
-    // -------------------------------------------------------------
-    // Neuromorphic HDC Engine (Physics Compute)
-    // -------------------------------------------------------------
-    // The HDC compares incoming photonic data against a target hypervector.
-    // For this integration, we use the Tensor Core's output (512 bits) as the reference hypervector!
-    // This allows AI models to generate dynamic similarity targets.
+    // neuromorphic hdc engine (physics compute)
+    // the hdc compares incoming photonic data against a target hypervector.
+    // for this integration, we use the tensor core's output (512 bits) as the reference hypervector!
+    // this allows ai models to generate dynamic similarity targets.
     
     titan_x6_hdc_photonics #(
         .DATA_WIDTH(32),
@@ -100,7 +94,7 @@ module titan_x6_top #(
         .photonics_en       (photonics_en),
         .data_in            (photonics_data),
         .data_valid         (photonics_valid),
-        .ref_hv             (tensor_acc_out), // Dynamic Tensor Core target
+        .ref_hv             (tensor_acc_out), // dynamic tensor core target
         .match_valid        (hdc_match_valid),
         .confidence_metric  (hdc_confidence),
         .is_match           (hdc_is_match)

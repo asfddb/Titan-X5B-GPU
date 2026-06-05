@@ -13,31 +13,31 @@ module titan_x5_dma_engine #(
     input  wire clk,
     input  wire rst_n,
 
-    // Control Interface (AXI-Lite slave mapped)
+    // control interface (axi-lite slave mapped)
     input  wire                    ctrl_req_valid,
-    input  wire [ADDR_WIDTH-1:0]   ctrl_req_addr,
-    input  wire [DATA_WIDTH-1:0]   ctrl_req_wdata,
+    input wire [ADDR_WIDTH-1:0] ctrl_req_addr,
+    input wire [DATA_WIDTH-1:0] ctrl_req_wdata,
     input  wire                    ctrl_req_write,
     output wire                    ctrl_req_ready,
 
     output wire                    ctrl_resp_valid,
-    output wire [DATA_WIDTH-1:0]   ctrl_resp_rdata,
+    output wire [DATA_WIDTH-1:0] ctrl_resp_rdata,
     
-    // Interrupt output
+    // interrupt output
     output reg                     dma_interrupt,
 
-    // Master Memory Interface
+    // master memory interface
     output reg                     mem_req_valid,
-    output reg  [ADDR_WIDTH-1:0]   mem_req_addr,
+    output reg [ADDR_WIDTH-1:0] mem_req_addr,
     output reg                     mem_req_write,
-    output reg  [DATA_WIDTH-1:0]   mem_req_wdata,
+    output reg [DATA_WIDTH-1:0] mem_req_wdata,
     input  wire                    mem_req_ready,
 
     input  wire                    mem_resp_valid,
-    input  wire [DATA_WIDTH-1:0]   mem_resp_rdata
+    input wire [DATA_WIDTH-1:0] mem_resp_rdata
 );
 
-    // DMA Registers
+    // dma registers
     reg [ADDR_WIDTH-1:0] src_addr;
     reg [ADDR_WIDTH-1:0] dst_addr;
     reg [15:0]           x_count;
@@ -47,7 +47,7 @@ module titan_x5_dma_engine #(
     reg                  start;
     reg                  busy;
 
-    // FSM States
+    // fsm states
     localparam IDLE       = 3'd0;
     localparam READ_DATA  = 3'd1;
     localparam WAIT_READ  = 3'd2;
@@ -57,12 +57,12 @@ module titan_x5_dma_engine #(
 
     reg [2:0] state, next_state;
 
-    // Internal Counters
+    // internal counters
     reg [15:0] current_x;
     reg [15:0] current_y;
-    reg [DATA_WIDTH-1:0] buffer; // Simple single-word buffer
+    reg [DATA_WIDTH-1:0] buffer; // simple single-word buffer
 
-    // Control logic
+    // control logic
     assign ctrl_req_ready = !busy;
     assign ctrl_resp_valid = ctrl_req_valid && !busy;
     assign ctrl_resp_rdata = 32'b0;
@@ -88,7 +88,7 @@ module titan_x5_dma_engine #(
                     8'h18: start <= ctrl_req_wdata[0];
                 endcase
             end else begin
-                start <= 0; // Auto-clear start bit
+                start <= 0; // auto-clear start bit
             end
         end
     end
@@ -133,7 +133,7 @@ module titan_x5_dma_engine #(
                 WAIT_WRITE: begin
                     if (mem_req_ready) begin
                         mem_req_valid <= 1'b0;
-                        // Increment logic
+                        // increment logic
                         if (current_x == x_count - 1) begin
                             current_x <= 0;
                             current_y <= current_y + 1;

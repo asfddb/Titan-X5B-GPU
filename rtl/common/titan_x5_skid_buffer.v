@@ -12,7 +12,7 @@ module titan_x5_skid_buffer #(
 
     input  wire                  i_valid,
     output wire                  i_ready,
-    input  wire [DATA_WIDTH-1:0] i_data,
+    input wire [DATA_WIDTH-1:0] i_data,
 
     output wire                  o_valid,
     input  wire                  o_ready,
@@ -37,7 +37,7 @@ module titan_x5_skid_buffer #(
             skid_reg   <= {DATA_WIDTH{1'b0}};
         end else begin
             if (o_ready || !valid_reg) begin
-                // Output is transferring or empty
+                // output is transferring or empty
                 valid_reg <= i_valid || skid_valid;
                 if (skid_valid) begin
                     data_reg   <= skid_reg;
@@ -46,7 +46,7 @@ module titan_x5_skid_buffer #(
                     data_reg <= i_data;
                 end
             end else if (i_valid && i_ready) begin
-                // Output is stalled, but we can accept one more into skid
+                // output is stalled, but we can accept one more into skid
                 skid_valid <= 1'b1;
                 skid_reg   <= i_data;
             end

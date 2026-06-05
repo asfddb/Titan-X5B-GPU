@@ -4,64 +4,62 @@ module titan_x5_pipeline (
     input  wire clk,
     input  wire rst_n,
     
-    // Interface with Warp Scheduler
-    input  wire [2:0]  sched_warp_id,
+    // interface with warp scheduler
+    input wire [2:0] sched_warp_id,
     input  wire        sched_valid,
-    input  wire [31:0] sched_pc,
+    input wire [31:0] sched_pc,
     
-    // Instruction Cache / Memory Interface
+    // instruction cache / memory interface
     output wire [31:0] if_pc,
     output wire        if_req,
-    input  wire [31:0] if_inst,
+    input wire [31:0] if_inst,
     input  wire        if_inst_valid,
     
-    // Register File Interface
-    output wire [5:0]  rf_rd_addr1,
-    output wire [5:0]  rf_rd_addr2,
-    output wire [5:0]  rf_rd_addr3,
-    input  wire [1023:0] rf_rd_data1,
-    input  wire [1023:0] rf_rd_data2,
-    input  wire [1023:0] rf_rd_data3,
+    // register file interface
+    output wire [5:0] rf_rd_addr1,
+    output wire [5:0] rf_rd_addr2,
+    output wire [5:0] rf_rd_addr3,
+    input wire [1023:0] rf_rd_data1,
+    input wire [1023:0] rf_rd_data2,
+    input wire [1023:0] rf_rd_data3,
     
-    output wire [5:0]  rf_wr_addr,
+    output wire [5:0] rf_wr_addr,
     output wire [1023:0] rf_wr_data,
     output wire        rf_wr_en,
     
-    // ALU Interface
+    // alu interface
     output wire        alu_valid_in,
-    output wire [4:0]  alu_opcode,
+    output wire [4:0] alu_opcode,
     output wire [1023:0] alu_src1,
     output wire [1023:0] alu_src2,
     output wire [1023:0] alu_src3,
     input  wire        alu_valid_out,
-    input  wire [1023:0] alu_result,
+    input wire [1023:0] alu_result,
     
-    // Data Cache / Memory Interface (MEM stage)
+    // data cache / memory interface (mem stage)
     output wire        mem_req,
     output wire        mem_we,
     output wire [1023:0] mem_addr,
     output wire [1023:0] mem_wdata,
-    input  wire [1023:0] mem_rdata,
+    input wire [1023:0] mem_rdata,
     input  wire        mem_rvalid,
     
-    // Pipeline Outputs to Scheduler (Scoreboard updates)
+    // pipeline outputs to scheduler (scoreboard updates)
     output wire        id_valid_out,
-    output wire [2:0]  id_warp_out,
-    output wire [5:0]  id_dest_reg_out,
+    output wire [2:0] id_warp_out,
+    output wire [5:0] id_dest_reg_out,
     
     output wire        wb_valid_out,
-    output wire [2:0]  wb_warp_out,
-    output wire [5:0]  wb_dest_reg_out,
+    output wire [2:0] wb_warp_out,
+    output wire [5:0] wb_dest_reg_out,
 
-    // Tensor Core Datapath
+    // tensor core datapath
     output wire        wmma_valid,
     output wire [1023:0] wmma_a,
     output wire [1023:0] wmma_b
 );
 
-    // ==========================================
-    // IF Stage
-    // ==========================================
+    // if stage
     reg [2:0]  if_warp;
     reg        if_valid;
     
@@ -78,9 +76,7 @@ module titan_x5_pipeline (
         end
     end
 
-    // ==========================================
-    // Instruction FIFO (8 entries)
-    // ==========================================
+    // instruction fifo (8 entries)
     reg [2:0]  fifo_warp [0:7];
     reg [31:0] fifo_inst [0:7];
     reg [3:0]  fifo_wp;
@@ -116,9 +112,7 @@ module titan_x5_pipeline (
     wire [2:0]  id_warp_raw = fifo_warp[fifo_rp[2:0]];
     wire        id_inst_valid_raw = !fifo_empty;
 
-    // ==========================================
-    // ID Stage
-    // ==========================================
+    // id stage
     wire [4:0]  dec_opcode;
     wire [5:0]  dec_rd, dec_rs1, dec_rs2, dec_rs3;
     wire [15:0] dec_imm;
@@ -146,7 +140,7 @@ module titan_x5_pipeline (
 
     wire [1023:0] id_imm_ext = {32{{16'd0, dec_imm}}};
 
-    // Forwarding & Hazards
+    // forwarding & hazards
     wire ex_valid, mem_valid, wb_valid;
     wire [2:0] ex_warp, mem_warp, wb_warp;
     wire [5:0] ex_rd, mem_rd, wb_rd;
@@ -207,9 +201,7 @@ module titan_x5_pipeline (
     assign id_warp_out = id_warp_reg;
     assign id_dest_reg_out = id_rd;
 
-    // ==========================================
-    // EX Stage
-    // ==========================================
+    // ex stage
     wire ex_launch = id_valid_reg && id_ready && (id_is_alu || id_is_load || id_is_store || id_is_wmma);
     
     reg ex_valid_reg;
@@ -220,7 +212,7 @@ module titan_x5_pipeline (
     reg [1023:0] ex_wmma_a_reg, ex_wmma_b_reg;
     
     assign alu_valid_in = ex_launch && !id_is_wmma;
-    assign alu_opcode   = (id_is_load || id_is_store) ? 5'd0 : id_opcode; // ADD for address calc
+    assign alu_opcode   = (id_is_load || id_is_store) ? 5'd0 : id_opcode; // add for address calc
     assign alu_src1     = id_data1;
     assign alu_src2     = id_data2;
     assign alu_src3     = id_data3;
@@ -260,9 +252,7 @@ module titan_x5_pipeline (
     assign wmma_a     = ex_wmma_a_reg;
     assign wmma_b     = ex_wmma_b_reg;
 
-    // ==========================================
-    // MEM Stage
-    // ==========================================
+    // mem stage
     reg mem_valid_reg;
     reg [2:0] mem_warp_reg;
     reg [5:0] mem_rd_reg;
@@ -295,9 +285,7 @@ module titan_x5_pipeline (
     assign mem_rd = mem_rd_reg;
     assign mem_res = mem_alu_res_reg;
 
-    // ==========================================
-    // WB Stage
-    // ==========================================
+    // wb stage
     reg wb_valid_reg;
     reg [2:0] wb_warp_reg;
     reg [5:0] wb_rd_reg;

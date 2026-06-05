@@ -26,21 +26,21 @@ module titan_x6_hdc_photonics #(
     input  wire                    clk,
     input  wire                    rst_n,
 
-    // Photonic-to-electronic transducer interface
+    // photonic-to-electronic transducer interface
     input  wire                    photonics_en,
-    input  wire [DATA_WIDTH-1:0]   data_in,
+    input wire [DATA_WIDTH-1:0] data_in,
     input  wire                    data_valid,
 
-    // Reference memory interface (for similarity check)
-    input  wire [HV_DIM-1:0]       ref_hv,
+    // reference memory interface (for similarity check)
+    input wire [HV_DIM-1:0] ref_hv,
 
-    // Output
+    // output
     output reg                     match_valid,
-    output reg  [METRIC_WIDTH-1:0] confidence_metric,
+    output reg [METRIC_WIDTH-1:0] confidence_metric,
     output reg                     is_match
 );
 
-    // Constant function for integer logarithm base 2
+    // constant function for integer logarithm base 2
     function integer clog2;
         input integer value;
         begin
@@ -51,23 +51,23 @@ module titan_x6_hdc_photonics #(
         end
     endfunction
 
-    // Architectural constraints (chunk-based sequential processing)
+    // architectural constraints (chunk-based sequential processing)
     localparam CHUNK_SIZE = 32;
     localparam NUM_CHUNKS = HV_DIM / CHUNK_SIZE;
     localparam CHUNK_BITS = clog2(NUM_CHUNKS) > 0 ? clog2(NUM_CHUNKS) : 1;
 
-    // FSM States
+    // fsm states
     localparam STATE_IDLE   = 2'd0;
     localparam STATE_PROC   = 2'd1;
     localparam STATE_FINISH = 2'd2;
 
     reg [1:0]              state_q, state_d;
-    reg [CHUNK_BITS:0]     chunk_cnt_q, chunk_cnt_d; // Extended by 1 bit to prevent overflow
+    reg [CHUNK_BITS:0]     chunk_cnt_q, chunk_cnt_d; // extended by 1 bit to prevent overflow
     reg [DATA_WIDTH-1:0]   data_reg_q, data_reg_d;
     reg [31:0]             lfsr_q, lfsr_d;
     reg [METRIC_WIDTH-1:0] distance_acc_q, distance_acc_d;
     
-    // Output Pipeline Registers
+    // output pipeline registers
     reg                    match_valid_q, match_valid_d;
     reg [METRIC_WIDTH-1:0] confidence_metric_q, confidence_metric_d;
     reg                    is_match_q, is_match_d;
@@ -78,9 +78,9 @@ module titan_x6_hdc_photonics #(
         is_match          = is_match_q;
     end
 
-    // Standard 32-bit Popcount Function for Hamming Distance
+    // standard 32-bit popcount function for hamming distance
     function [5:0] popcount32;
-        input [31:0] in;
+    input [31:0] in;
         integer i;
         begin
             popcount32 = 6'd0;
@@ -92,35 +92,35 @@ module titan_x6_hdc_photonics #(
 
     // 32-bit Fibonacci LFSR for repeatable orthogonal basis generation
     function [31:0] next_lfsr;
-        input [31:0] current;
+    input [31:0] current;
         reg feedback;
         begin
-            // Characteristic polynomial for maximal length: x^32 + x^22 + x^2 + x + 1
+            // characteristic polynomial for maximal length: x^32 + x^22 + x^2 + x + 1
             feedback = current[31] ^ current[21] ^ current[1] ^ current[0];
             next_lfsr = {current[30:0], feedback};
         end
     endfunction
 
-    // Combinatorial evaluation signals
+    // combinatorial evaluation signals
     reg [CHUNK_SIZE-1:0] current_ref_chunk;
     reg [CHUNK_SIZE-1:0] current_hv_chunk;
     reg [CHUNK_SIZE-1:0] current_cmp_chunk;
     reg [5:0]            current_popcnt;
 
     always @* begin
-        // Retain state by default
+        // retain state by default
         state_d             = state_q;
         chunk_cnt_d         = chunk_cnt_q;
         data_reg_d          = data_reg_q;
         lfsr_d              = lfsr_q;
         distance_acc_d      = distance_acc_q;
         
-        // Match pulse default
+        // match pulse default
         match_valid_d       = 1'b0;
         confidence_metric_d = confidence_metric_q;
         is_match_d          = is_match_q;
 
-        // Combinatorial variables init
+        // combinatorial variables init
         current_ref_chunk = {CHUNK_SIZE{1'b0}};
         current_hv_chunk  = {CHUNK_SIZE{1'b0}};
         current_cmp_chunk = {CHUNK_SIZE{1'b0}};
@@ -132,7 +132,7 @@ module titan_x6_hdc_photonics #(
                     data_reg_d     = data_in;
                     chunk_cnt_d    = 0;
                     distance_acc_d = {METRIC_WIDTH{1'b0}};
-                    // Seed the basis generator. For repeatable basis projection per sample.
+                    // seed the basis generator. for repeatable basis projection per sample.
                     lfsr_d         = 32'hACE1_0001; 
                     state_d        = STATE_PROC;
                 end
@@ -140,22 +140,22 @@ module titan_x6_hdc_photonics #(
 
             STATE_PROC: begin
                 if (chunk_cnt_q < NUM_CHUNKS) begin
-                    // Extract spatial reference chunk using Verilog-2001 dynamic part-select
+                    // extract spatial reference chunk using verilog-2001 dynamic part-select
                     current_ref_chunk = ref_hv[chunk_cnt_q * CHUNK_SIZE +: CHUNK_SIZE];
                     
-                    // Spatial mapping: XOR incoming 32-bit data with evolving 32-bit basis
+                    // spatial mapping: xor incoming 32-bit data with evolving 32-bit basis
                     current_hv_chunk  = data_reg_q ^ lfsr_q;
                     
-                    // Similarity match (Bipolar/Binary Cosine via XOR -> Hamming Distance)
+                    // similarity match (bipolar/binary cosine via xor -> hamming distance)
                     current_cmp_chunk = current_hv_chunk ^ current_ref_chunk;
                     
-                    // Popcount computation
+                    // popcount computation
                     current_popcnt    = popcount32(current_cmp_chunk);
                     
-                    // Accumulate Hamming Distance
+                    // accumulate hamming distance
                     distance_acc_d    = distance_acc_q + current_popcnt;
                     
-                    // Advance LFSR orthogonal basis
+                    // advance lfsr orthogonal basis
                     lfsr_d            = next_lfsr(lfsr_q);
                     
                     if (chunk_cnt_q == (NUM_CHUNKS - 1)) begin
@@ -171,11 +171,11 @@ module titan_x6_hdc_photonics #(
             STATE_FINISH: begin
                 match_valid_d       = 1'b1;
                 
-                // Confidence metric: Inversely proportional to Hamming distance
-                // Max confidence = HV_DIM (perfect match, distance 0)
+                // confidence metric: inversely proportional to hamming distance
+                // max confidence = hv_dim (perfect match, distance 0)
                 confidence_metric_d = HV_DIM - distance_acc_q;
                 
-                // Threshold determination: match is affirmed if similarity is high
+                // threshold determination: match is affirmed if similarity is high
                 // e.g. Distance < (HV_DIM/4) means > 75% bitwise match.
                 if (distance_acc_q < (HV_DIM >> 2)) begin
                     is_match_d = 1'b1;
@@ -192,7 +192,7 @@ module titan_x6_hdc_photonics #(
         endcase
     end
 
-    // Sequential Register Update
+    // sequential register update
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state_q             <= STATE_IDLE;

@@ -16,30 +16,30 @@ module titan_x5_rt_core #(
     input  wire        clk,
     input  wire        rst_n,
     
-    // Control interface
+    // control interface
     input  wire        start_traversal,
-    input  wire [31:0] root_node_ptr,
+    input wire [31:0] root_node_ptr,
     output reg         traversal_done,
-    output reg  [31:0] hit_triangle_id,
+    output reg [31:0] hit_triangle_id,
     output reg         hit_valid,
-    output reg  [W-1:0] hit_t, 
-    output reg  [W-1:0] hit_u, 
-    output reg  [W-1:0] hit_v, 
+    output reg [W-1:0] hit_t,
+    output reg [W-1:0] hit_u,
+    output reg [W-1:0] hit_v,
     
-    // Memory interface for BVH fetch
-    output reg  [31:0] bvh_fetch_addr,
+    // memory interface for bvh fetch
+    output reg [31:0] bvh_fetch_addr,
     output reg         bvh_fetch_req,
     input  wire        bvh_fetch_ack,
     // 384-bit wide cache line to hold full triangle or BVH inner node
-    input  wire [383:0] bvh_data, 
+    input wire [383:0] bvh_data,
     
-    // Ray data
+    // ray data
     input  wire signed [W-1:0] ray_o_x, ray_o_y, ray_o_z,
     input  wire signed [W-1:0] ray_d_x, ray_d_y, ray_d_z,
     input  wire signed [W-1:0] ray_inv_d_x, ray_inv_d_y, ray_inv_d_z
 );
 
-    // Fixed-point ops
+    // fixed-point ops
     function automatic signed [W-1:0] fx_mul;
         input signed [W-1:0] a;
         input signed [W-1:0] b;
@@ -86,7 +86,7 @@ module titan_x5_rt_core #(
         end
     endfunction
 
-    // Traversal Stack
+    // traversal stack
     reg [31:0] stack [0:31];
     reg [5:0]  sp;
     
@@ -104,7 +104,7 @@ module titan_x5_rt_core #(
     localparam STATE_TRI_EVAL1      = 5'd11;
     localparam STATE_TRI_DIV        = 5'd12;
     localparam STATE_TRI_EVAL2      = 5'd13;
-    localparam STATE_CLUSTER_INTER  = 5'd14; // RTX Mega Geometry Cluster Intersection
+    localparam STATE_CLUSTER_INTER  = 5'd14; // rtx mega geometry cluster intersection
     localparam STATE_POP            = 5'd15;
     localparam STATE_DONE           = 5'd16;
     
@@ -112,7 +112,7 @@ module titan_x5_rt_core #(
     reg [31:0] current_node;
     reg signed [W-1:0] closest_t;
 
-    // Node Evaluation Registers
+    // node evaluation registers
     wire signed [W-1:0] aabb_min_x = $signed(bvh_data[63:32]);
     wire signed [W-1:0] aabb_min_y = $signed(bvh_data[95:64]);
     wire signed [W-1:0] aabb_min_z = $signed(bvh_data[127:96]);
@@ -125,7 +125,7 @@ module titan_x5_rt_core #(
     reg signed [W-1:0] tmin_x, tmax_x, tmin_y, tmax_y, tmin_z, tmax_z;
     reg signed [W-1:0] tmin, tmax;
 
-    // Triangle Evaluation Registers
+    // triangle evaluation registers
     wire signed [W-1:0] v0_x = $signed(bvh_data[63:32]);
     wire signed [W-1:0] v0_y = $signed(bvh_data[95:64]);
     wire signed [W-1:0] v0_z = $signed(bvh_data[127:96]);
@@ -220,10 +220,10 @@ module titan_x5_rt_core #(
                 STATE_NODE_EVAL: begin
                     if ((tmax >= tmin) && (tmax >= 0) && (tmin < closest_t)) begin
                         if (sp < 6'd32) begin
-                            stack[sp] <= bvh_data[31:1] + 1; // Push Right child
+                            stack[sp] <= bvh_data[31:1] + 1; // push right child
                             sp <= sp + 1;
                         end
-                        current_node <= bvh_data[31:1]; // Traverse Left child
+                        current_node <= bvh_data[31:1]; // traverse left child
                         state <= STATE_FETCH;
                     end else begin
                         state <= STATE_POP;
@@ -285,17 +285,17 @@ module titan_x5_rt_core #(
                         hit_u <= quo_u;
                         hit_v <= quo_v;
                     end
-                    // Mega Geometry: Before popping, check if this triangle is part of a compressed cluster
+                    // mega geometry: before popping, check if this triangle is part of a compressed cluster
                     if (bvh_data[383]) begin
-                        state <= STATE_CLUSTER_INTER; // Process next triangle in compressed cluster
+                        state <= STATE_CLUSTER_INTER; // process next triangle in compressed cluster
                     end else begin
                         state <= STATE_POP;
                     end
                 end
                 
                 STATE_CLUSTER_INTER: begin
-                    // RTX Mega Geometry: Hardware decompression of micro-mesh triangles.
-                    // Instead of full memory fetch, we iterate over local compressed vertices.
+                    // rtx mega geometry: hardware decompression of micro-mesh triangles.
+                    // instead of full memory fetch, we iterate over local compressed vertices.
                     // (Simulated logic bypasses fetch and loops back to intersection math)
                     state <= STATE_TRI_SUB;
                 end

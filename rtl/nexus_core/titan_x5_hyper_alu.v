@@ -12,11 +12,11 @@ module titan_x5_hyper_alu (
     input  wire        clk,
     input  wire        rst_n,
     input  wire        start,
-    input  wire [1:0]  op,    // 0: Bind, 1: Bundle, 2: Permute
-    input  wire [63:0] hv_a,
-    input  wire [63:0] hv_b,
-    input  wire [63:0] hv_c,
-    output reg  [63:0] hv_out,
+    input wire [1:0] op, // 0: Bind, 1: Bundle, 2: Permute
+    input wire [63:0] hv_a,
+    input wire [63:0] hv_b,
+    input wire [63:0] hv_c,
+    output reg [63:0] hv_out,
     output reg         valid_out,
     output reg         done
 );
@@ -37,15 +37,15 @@ module titan_x5_hyper_alu (
     wire [63:0] a_val  = mem_a[idx];
     wire [63:0] b_val  = mem_b[idx];
     wire [63:0] c_val  = mem_c[idx];
-    // For 1-bit left rotate across the entire 1024-bit vector
+    // for 1-bit left rotate across the entire 1024-bit vector
     wire [63:0] a_prev = (idx == 4'd0) ? mem_a[15] : mem_a[idx - 1];
 
     reg [63:0] res;
     always @(*) begin
         case (latched_op)
-            2'd0: res = a_val ^ b_val;                                      // Bind
-            2'd1: res = (a_val & b_val) | (b_val & c_val) | (a_val & c_val); // Bundle
-            2'd2: res = {a_val[62:0], a_prev[63]};                          // Permute
+            2'd0: res = a_val ^ b_val;                                      // bind
+            2'd1: res = (a_val & b_val) | (b_val & c_val) | (a_val & c_val); // bundle
+            2'd2: res = {a_val[62:0], a_prev[63]};                          // permute
             default: res = 64'd0;
         endcase
     end

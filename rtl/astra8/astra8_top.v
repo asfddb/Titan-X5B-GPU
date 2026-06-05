@@ -8,26 +8,24 @@ module astra8_top #(
     input  wire clk,
     input  wire rst_n,
 
-    // Wetware Interface
-    input  wire [(GRID_DIM*GRID_DIM)-1:0] quantum_thermal_noise,
+    // wetware interface
+    input wire [(GRID_DIM*GRID_DIM)-1:0] quantum_thermal_noise,
     
-    // Metamaterial Interface
-    input  wire [31:0] acoustic_wave_freq,
-    input  wire [(GRID_DIM*GRID_DIM*2)-1:0] logic_reconfiguration,
+    // metamaterial interface
+    input wire [31:0] acoustic_wave_freq,
+    input wire [(GRID_DIM*GRID_DIM*2)-1:0] logic_reconfiguration,
     
-    // Quantum Teleportation Fabric
-    input  wire [31:0] teleport_target,
-    input  wire [DATA_WIDTH-1:0] teleport_payload,
+    // quantum teleportation fabric
+    input wire [31:0] teleport_target,
+    input wire [DATA_WIDTH-1:0] teleport_payload,
     input  wire trigger_teleport,
     
-    // Outputs
+    // outputs
     output wire [DATA_WIDTH-1:0] rx_teleport_payload,
     output wire [31:0] wetware_glial_tide
 );
 
-    // -------------------------------------------------------------
-    // MAS Fabric (Morphogenetic Astroglial Syncytium)
-    // -------------------------------------------------------------
+    // mas fabric (morphogenetic astroglial syncytium)
     wire [(GRID_DIM*GRID_DIM*2)-1:0] glial_gradients;
     
     astra8_mas_wetware #(
@@ -42,9 +40,7 @@ module astra8_top #(
         .routing_modulations(glial_gradients)
     );
 
-    // -------------------------------------------------------------
-    // PTM-BISL (Programmable Topological Metamaterial)
-    // -------------------------------------------------------------
+    // ptm-bisl (programmable topological metamaterial)
     wire [DATA_WIDTH-1:0] topological_mesh_out;
     wire [(GRID_DIM*GRID_DIM*2)-1:0] lattice_state;
     
@@ -63,9 +59,7 @@ module astra8_top #(
         .lattice_state(lattice_state)
     );
 
-    // -------------------------------------------------------------
-    // PESR (Photonic Entanglement-Swapping Router)
-    // -------------------------------------------------------------
+    // pesr (photonic entanglement-swapping router)
     wire [NUM_NODES-1:0] ready_vec;
     wire [(NUM_NODES*DATA_WIDTH)-1:0] data_out_flat;
     
@@ -84,7 +78,7 @@ module astra8_top #(
         .data_out(data_out_flat)
     );
 
-    // Output assignment
+    // output assignment
     assign rx_teleport_payload = data_out_flat[teleport_target[1:0] * DATA_WIDTH +: DATA_WIDTH];
     assign wetware_glial_tide = { 24'b0, glial_gradients[7:0] };
 

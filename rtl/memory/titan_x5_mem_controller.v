@@ -13,60 +13,60 @@ module titan_x5_mem_controller #(
     input wire clk,
     input wire rst_n,
 
-    // Internal Request Interface
+    // internal request interface
     input  wire                       req_valid,
-    input  wire [AXI_ADDR_WIDTH-1:0]  req_addr,
+    input wire [AXI_ADDR_WIDTH-1:0] req_addr,
     input  wire                       req_write,
-    input  wire [AXI_DATA_WIDTH-1:0]  req_wdata,
-    input  wire [3:0]                 req_len, // Burst length (0-15)
+    input wire [AXI_DATA_WIDTH-1:0] req_wdata,
+    input wire [3:0] req_len, // burst length (0-15)
     output reg                        req_ready,
 
     output reg                        resp_valid,
-    output reg  [AXI_DATA_WIDTH-1:0]  resp_rdata,
+    output reg [AXI_DATA_WIDTH-1:0] resp_rdata,
 
-    // AXI4 Master Interface
-    // AR Channel
-    output reg  [AXI_ID_WIDTH-1:0]    m_axi_arid,
-    output reg  [AXI_ADDR_WIDTH-1:0]  m_axi_araddr,
-    output reg  [7:0]                 m_axi_arlen,
-    output wire [2:0]                 m_axi_arsize,
-    output wire [1:0]                 m_axi_arburst,
+    // axi4 master interface
+    // ar channel
+    output reg [AXI_ID_WIDTH-1:0] m_axi_arid,
+    output reg [AXI_ADDR_WIDTH-1:0] m_axi_araddr,
+    output reg [7:0] m_axi_arlen,
+    output wire [2:0] m_axi_arsize,
+    output wire [1:0] m_axi_arburst,
     output reg                        m_axi_arvalid,
     input  wire                       m_axi_arready,
     
-    // R Channel
-    input  wire [AXI_ID_WIDTH-1:0]    m_axi_rid,
-    input  wire [AXI_DATA_WIDTH-1:0]  m_axi_rdata,
-    input  wire [1:0]                 m_axi_rresp,
+    // r channel
+    input wire [AXI_ID_WIDTH-1:0] m_axi_rid,
+    input wire [AXI_DATA_WIDTH-1:0] m_axi_rdata,
+    input wire [1:0] m_axi_rresp,
     input  wire                       m_axi_rlast,
     input  wire                       m_axi_rvalid,
     output reg                        m_axi_rready,
 
-    // AW Channel
-    output reg  [AXI_ID_WIDTH-1:0]    m_axi_awid,
-    output reg  [AXI_ADDR_WIDTH-1:0]  m_axi_awaddr,
-    output reg  [7:0]                 m_axi_awlen,
-    output wire [2:0]                 m_axi_awsize,
-    output wire [1:0]                 m_axi_awburst,
+    // aw channel
+    output reg [AXI_ID_WIDTH-1:0] m_axi_awid,
+    output reg [AXI_ADDR_WIDTH-1:0] m_axi_awaddr,
+    output reg [7:0] m_axi_awlen,
+    output wire [2:0] m_axi_awsize,
+    output wire [1:0] m_axi_awburst,
     output reg                        m_axi_awvalid,
     input  wire                       m_axi_awready,
     
-    // W Channel
-    output reg  [AXI_DATA_WIDTH-1:0]  m_axi_wdata,
-    output reg  [(AXI_DATA_WIDTH/8)-1:0] m_axi_wstrb,
+    // w channel
+    output reg [AXI_DATA_WIDTH-1:0] m_axi_wdata,
+    output reg [(AXI_DATA_WIDTH/8)-1:0] m_axi_wstrb,
     output reg                        m_axi_wlast,
     output reg                        m_axi_wvalid,
     input  wire                       m_axi_wready,
     
-    // B Channel
-    input  wire [AXI_ID_WIDTH-1:0]    m_axi_bid,
-    input  wire [1:0]                 m_axi_bresp,
+    // b channel
+    input wire [AXI_ID_WIDTH-1:0] m_axi_bid,
+    input wire [1:0] m_axi_bresp,
     input  wire                       m_axi_bvalid,
     output reg                        m_axi_bready
 );
 
     assign m_axi_arsize = 3'b101; // 32 bytes
-    assign m_axi_arburst = 2'b01; // INCR
+    assign m_axi_arburst = 2'b01; // incr
     assign m_axi_awsize = 3'b101; 
     assign m_axi_awburst = 2'b01;
 
@@ -132,7 +132,7 @@ module titan_x5_mem_controller #(
                     if (m_axi_awready && m_axi_awvalid) begin
                         m_axi_awvalid <= 1'b0;
                         m_axi_wvalid <= 1'b1;
-                        m_axi_wdata <= req_wdata; // Single beat simplify
+                        m_axi_wdata <= req_wdata; // single beat simplify
                         m_axi_wstrb <= {(AXI_DATA_WIDTH/8){1'b1}};
                         m_axi_wlast <= 1'b1;
                     end

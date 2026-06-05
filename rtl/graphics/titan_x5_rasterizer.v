@@ -13,21 +13,21 @@ module titan_x5_rasterizer #(
     input  wire clk,
     input  wire rst_n,
     
-    // Triangle Input
+    // triangle input
     input  wire i_valid,
     output wire i_ready,
-    input  wire [15:0] v0_x, v0_y,
-    input  wire [15:0] v1_x, v1_y,
-    input  wire [15:0] v2_x, v2_y,
+    input wire [15:0] v0_x, v0_y,
+    input wire [15:0] v1_x, v1_y,
+    input wire [15:0] v2_x, v2_y,
     
-    // Pixel Output
+    // pixel output
     output wire o_valid,
     input  wire o_ready,
     output wire signed [COORD_W-1:0] o_x, o_y,
     output wire signed [WEIGHT_W-1:0] o_w0, o_w1, o_w2
 );
 
-    // Stage 1: Bounding Box & Deltas
+    // stage 1: bounding box & deltas
     reg s1_valid;
     wire s1_ready;
     reg signed [COORD_W-1:0] s1_min_x, s1_max_x, s1_min_y, s1_max_y;
@@ -65,7 +65,7 @@ module titan_x5_rasterizer #(
         end
     end
 
-    // Stage 2: Initial Edge Equations
+    // stage 2: initial edge equations
     reg s2_valid;
     wire s2_ready;
     reg signed [COORD_W-1:0] s2_min_x, s2_max_x, s2_min_y, s2_max_y;
@@ -93,7 +93,7 @@ module titan_x5_rasterizer #(
         end
     end
 
-    // Stage 3: Traversal Logic
+    // stage 3: traversal logic
     reg traverse_active;
     reg signed [COORD_W-1:0] x_curr, y_curr;
     reg signed [WEIGHT_W-1:0] e0_val, e1_val, e2_val;
@@ -144,7 +144,7 @@ module titan_x5_rasterizer #(
                     
                     if (x_curr == s2_max_x) begin
                         if (y_curr == s2_max_y) begin
-                            traverse_active <= 0; // Finished
+                            traverse_active <= 0; // finished
                         end else begin
                             x_curr <= s2_min_x;
                             y_curr <= y_curr + 1;

@@ -15,25 +15,25 @@ module titan_x5_crossbar #(
     input wire clk,
     input wire rst_n,
 
-    // Master Interfaces
-    input  wire [NUM_MASTERS-1:0]                  m_req_valid,
-    input  wire [NUM_MASTERS*ADDR_WIDTH-1:0]       m_req_addr,
-    input  wire [NUM_MASTERS*DATA_WIDTH-1:0]       m_req_wdata,
-    input  wire [NUM_MASTERS-1:0]                  m_req_write,
-    output wire [NUM_MASTERS-1:0]                  m_req_ready,
+    // master interfaces
+    input wire [NUM_MASTERS-1:0] m_req_valid,
+    input wire [NUM_MASTERS*ADDR_WIDTH-1:0] m_req_addr,
+    input wire [NUM_MASTERS*DATA_WIDTH-1:0] m_req_wdata,
+    input wire [NUM_MASTERS-1:0] m_req_write,
+    output wire [NUM_MASTERS-1:0] m_req_ready,
 
-    output wire [NUM_MASTERS-1:0]                  m_resp_valid,
-    output wire [NUM_MASTERS*DATA_WIDTH-1:0]       m_resp_rdata,
+    output wire [NUM_MASTERS-1:0] m_resp_valid,
+    output wire [NUM_MASTERS*DATA_WIDTH-1:0] m_resp_rdata,
 
-    // Slave Interfaces
-    output wire [NUM_SLAVES-1:0]                   s_req_valid,
-    output wire [NUM_SLAVES*ADDR_WIDTH-1:0]        s_req_addr,
-    output wire [NUM_SLAVES*DATA_WIDTH-1:0]        s_req_wdata,
-    output wire [NUM_SLAVES-1:0]                   s_req_write,
-    input  wire [NUM_SLAVES-1:0]                   s_req_ready,
+    // slave interfaces
+    output wire [NUM_SLAVES-1:0] s_req_valid,
+    output wire [NUM_SLAVES*ADDR_WIDTH-1:0] s_req_addr,
+    output wire [NUM_SLAVES*DATA_WIDTH-1:0] s_req_wdata,
+    output wire [NUM_SLAVES-1:0] s_req_write,
+    input wire [NUM_SLAVES-1:0] s_req_ready,
 
-    input  wire [NUM_SLAVES-1:0]                   s_resp_valid,
-    input  wire [NUM_SLAVES*DATA_WIDTH-1:0]        s_resp_rdata
+    input wire [NUM_SLAVES-1:0] s_resp_valid,
+    input wire [NUM_SLAVES*DATA_WIDTH-1:0] s_resp_rdata
 );
 
     function integer clog2;
@@ -48,7 +48,7 @@ module titan_x5_crossbar #(
     localparam SLAVE_BITS = (NUM_SLAVES > 1) ? clog2(NUM_SLAVES) : 1;
     localparam MASTER_BITS = (NUM_MASTERS > 1) ? clog2(NUM_MASTERS) : 1;
 
-    // Arbitration: Basic Round Robin
+    // arbitration: basic round robin
     reg [MASTER_BITS-1:0] rr_ptr [0:NUM_SLAVES-1]; 
     reg [MASTER_BITS-1:0] grant  [0:NUM_SLAVES-1];
     reg                   grant_valid [0:NUM_SLAVES-1];
@@ -72,7 +72,7 @@ module titan_x5_crossbar #(
         end
     end
 
-    // Combinational arbitration logic
+    // combinational arbitration logic
     wire [SLAVE_BITS-1:0] req_dest [0:NUM_MASTERS-1]; 
     
     genvar gi;
@@ -101,7 +101,7 @@ module titan_x5_crossbar #(
         end
     end
 
-    // Request tracking FIFO per slave
+    // request tracking fifo per slave
     localparam FIFO_DEPTH = 16;
     localparam FIFO_BITS = clog2(FIFO_DEPTH) > 0 ? clog2(FIFO_DEPTH) : 1;
     
@@ -147,7 +147,7 @@ module titan_x5_crossbar #(
         end
     endgenerate
 
-    // Multiplexing
+    // multiplexing
     generate
         for (gi = 0; gi < NUM_SLAVES; gi = gi + 1) begin : slave_mux
             assign s_req_valid[gi] = grant_valid[gi] && (fifo_count[gi] < FIFO_DEPTH);
@@ -164,7 +164,7 @@ module titan_x5_crossbar #(
         end
     endgenerate
 
-    // Response routing based on tracked request master ID
+    // response routing based on tracked request master id
     genvar m_idx, s_idx_gen;
     generate
         for (m_idx = 0; m_idx < NUM_MASTERS; m_idx = m_idx + 1) begin : m_resp_gen

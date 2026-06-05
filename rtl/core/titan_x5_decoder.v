@@ -7,12 +7,12 @@
  * Custom 32-bit instruction format with 3-source operand support and predication.
  */
 module titan_x5_decoder (
-    input  wire [31:0] inst,
-    output wire [4:0]  opcode,
-    output wire [5:0]  rd,
-    output wire [5:0]  rs1,
-    output wire [5:0]  rs2,
-    output wire [5:0]  rs3,
+    input wire [31:0] inst,
+    output wire [4:0] opcode,
+    output wire [5:0] rd,
+    output wire [5:0] rs1,
+    output wire [5:0] rs2,
+    output wire [5:0] rs3,
     output wire [15:0] imm,
     output wire        use_imm,
     output wire        is_branch,
@@ -20,16 +20,16 @@ module titan_x5_decoder (
     output wire        is_mem_store,
     output wire        is_alu,
     output wire        is_valid,
-    // New decode outputs
-    output wire        is_wmma,        // Tensor Core WMMA instruction
-    output wire        is_sfu,         // Special Function Unit (sin/cos/rsqrt)
-    output wire        is_atomic,      // Atomic memory operation
-    output wire        is_barrier,     // Thread barrier synchronization
-    output wire        is_predicated,  // Instruction is predicated
-    output wire [1:0]  pred_reg        // Predicate register selector
+    // new decode outputs
+    output wire        is_wmma,        // tensor core wmma instruction
+    output wire        is_sfu,         // special function unit (sin/cos/rsqrt)
+    output wire        is_atomic,      // atomic memory operation
+    output wire        is_barrier,     // thread barrier synchronization
+    output wire        is_predicated,  // instruction is predicated
+    output wire [1:0] pred_reg // predicate register selector
 );
 
-    // Instruction format (Custom 32-bit Titan X5 ISA v2):
+    // instruction format (custom 32-bit titan x5 isa v2):
     // [31:27] Opcode (5 bits)         = 32 instructions
     // [26:21] rd  (6 bits)            = 64 registers
     // [20:15] rs1 (6 bits)
@@ -39,8 +39,8 @@ module titan_x5_decoder (
     // [1]     pred_sel[0]             = Predicate register bit 0
     // [0]     use_imm                 = Immediate mode flag
     //
-    // When use_imm=1: rs2 and rs3 fields are reinterpreted as a 12-bit immediate
-    // Immediate: inst[14:3] zero-extended to 16 bits
+    // when use_imm=1: rs2 and rs3 fields are reinterpreted as a 12-bit immediate
+    // immediate: inst[14:3] zero-extended to 16 bits
 
     assign opcode  = inst[31:27];
     assign rd      = inst[26:21];
@@ -53,9 +53,7 @@ module titan_x5_decoder (
     assign pred_reg     = inst[2:1];
     assign is_predicated = (pred_reg != 2'b00); // p0 = always true (no predication)
 
-    // =========================================================================
-    // Opcode Map (Titan X5 ISA v2)
-    // =========================================================================
+    // opcode map (titan x5 isa v2)
     // 0:  ADD       - Integer Addition
     // 1:  SUB       - Integer Subtraction
     // 2:  MUL       - Integer Multiplication (lower 32 bits)
@@ -103,6 +101,6 @@ module titan_x5_decoder (
     assign is_sfu       = (opcode >= 5'd27) && (opcode <= 5'd29);
     assign is_atomic    = (opcode >= 5'd30);
 
-    assign is_valid     = 1'b1; // All 32 opcodes are valid in v2 ISA
+    assign is_valid     = 1'b1; // all 32 opcodes are valid in v2 isa
 
 endmodule

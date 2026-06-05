@@ -10,9 +10,9 @@ module titan_x5_associative_memory (
     input  wire        rst_n,
     input  wire        start_train,
     input  wire        start_query,
-    input  wire [1:0]  concept_id,
-    input  wire [63:0] hv_in,
-    output reg  [1:0]  match_id,
+    input wire [1:0] concept_id,
+    input wire [63:0] hv_in,
+    output reg [1:0] match_id,
     output reg         valid_out,
     output reg         done
 );
@@ -34,7 +34,7 @@ module titan_x5_associative_memory (
     localparam COMPARE = 2'd3;
 
     function [6:0] popcount64;
-        input [63:0] val;
+    input [63:0] val;
         integer i;
         begin
             popcount64 = 0;
@@ -118,7 +118,7 @@ module titan_x5_associative_memory (
                 end
                 
                 COMPARE: begin
-                    // Find lowest Hamming distance
+                    // find lowest hamming distance
                     if (dist_0 <= dist_1 && dist_0 <= dist_2 && dist_0 <= dist_3)
                         match_id <= 2'd0;
                     else if (dist_1 <= dist_0 && dist_1 <= dist_2 && dist_1 <= dist_3)

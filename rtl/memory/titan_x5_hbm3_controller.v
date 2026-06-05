@@ -18,98 +18,98 @@ module titan_x5_hbm3_controller #(
 
     // 1024-bit Internal Request Interface
     input  wire                       req_valid,
-    input  wire [AXI_ADDR_WIDTH-1:0]  req_addr,
+    input wire [AXI_ADDR_WIDTH-1:0] req_addr,
     input  wire                       req_write,
-    input  wire [AXI_DATA_WIDTH-1:0]  req_wdata,
-    input  wire [3:0]                 req_len,
+    input wire [AXI_DATA_WIDTH-1:0] req_wdata,
+    input wire [3:0] req_len,
     output wire                       req_ready,
 
     output wire                       resp_valid,
-    output wire [AXI_DATA_WIDTH-1:0]  resp_rdata,
+    output wire [AXI_DATA_WIDTH-1:0] resp_rdata,
 
-    // AXI4 Master Interface - Pseudo Channel 0 (Lower 64B)
-    output wire [AXI_ID_WIDTH-1:0]    pc0_axi_arid,
-    output wire [AXI_ADDR_WIDTH-1:0]  pc0_axi_araddr,
-    output wire [7:0]                 pc0_axi_arlen,
-    output wire [2:0]                 pc0_axi_arsize,
-    output wire [1:0]                 pc0_axi_arburst,
+    // axi4 master interface - pseudo channel 0 (lower 64b)
+    output wire [AXI_ID_WIDTH-1:0] pc0_axi_arid,
+    output wire [AXI_ADDR_WIDTH-1:0] pc0_axi_araddr,
+    output wire [7:0] pc0_axi_arlen,
+    output wire [2:0] pc0_axi_arsize,
+    output wire [1:0] pc0_axi_arburst,
     output wire                       pc0_axi_arvalid,
     input  wire                       pc0_axi_arready,
     
-    input  wire [AXI_ID_WIDTH-1:0]    pc0_axi_rid,
-    input  wire [PC_DATA_WIDTH-1:0]   pc0_axi_rdata,
-    input  wire [1:0]                 pc0_axi_rresp,
+    input wire [AXI_ID_WIDTH-1:0] pc0_axi_rid,
+    input wire [PC_DATA_WIDTH-1:0] pc0_axi_rdata,
+    input wire [1:0] pc0_axi_rresp,
     input  wire                       pc0_axi_rlast,
     input  wire                       pc0_axi_rvalid,
     output wire                       pc0_axi_rready,
 
-    output wire [AXI_ID_WIDTH-1:0]    pc0_axi_awid,
-    output wire [AXI_ADDR_WIDTH-1:0]  pc0_axi_awaddr,
-    output wire [7:0]                 pc0_axi_awlen,
-    output wire [2:0]                 pc0_axi_awsize,
-    output wire [1:0]                 pc0_axi_awburst,
+    output wire [AXI_ID_WIDTH-1:0] pc0_axi_awid,
+    output wire [AXI_ADDR_WIDTH-1:0] pc0_axi_awaddr,
+    output wire [7:0] pc0_axi_awlen,
+    output wire [2:0] pc0_axi_awsize,
+    output wire [1:0] pc0_axi_awburst,
     output wire                       pc0_axi_awvalid,
     input  wire                       pc0_axi_awready,
     
-    output wire [PC_DATA_WIDTH-1:0]   pc0_axi_wdata,
+    output wire [PC_DATA_WIDTH-1:0] pc0_axi_wdata,
     output wire [(PC_DATA_WIDTH/8)-1:0] pc0_axi_wstrb,
     output wire                       pc0_axi_wlast,
     output wire                       pc0_axi_wvalid,
     input  wire                       pc0_axi_wready,
     
-    input  wire [AXI_ID_WIDTH-1:0]    pc0_axi_bid,
-    input  wire [1:0]                 pc0_axi_bresp,
+    input wire [AXI_ID_WIDTH-1:0] pc0_axi_bid,
+    input wire [1:0] pc0_axi_bresp,
     input  wire                       pc0_axi_bvalid,
     output wire                       pc0_axi_bready,
 
-    // AXI4 Master Interface - Pseudo Channel 1 (Upper 64B)
-    output wire [AXI_ID_WIDTH-1:0]    pc1_axi_arid,
-    output wire [AXI_ADDR_WIDTH-1:0]  pc1_axi_araddr,
-    output wire [7:0]                 pc1_axi_arlen,
-    output wire [2:0]                 pc1_axi_arsize,
-    output wire [1:0]                 pc1_axi_arburst,
+    // axi4 master interface - pseudo channel 1 (upper 64b)
+    output wire [AXI_ID_WIDTH-1:0] pc1_axi_arid,
+    output wire [AXI_ADDR_WIDTH-1:0] pc1_axi_araddr,
+    output wire [7:0] pc1_axi_arlen,
+    output wire [2:0] pc1_axi_arsize,
+    output wire [1:0] pc1_axi_arburst,
     output wire                       pc1_axi_arvalid,
     input  wire                       pc1_axi_arready,
     
-    input  wire [AXI_ID_WIDTH-1:0]    pc1_axi_rid,
-    input  wire [PC_DATA_WIDTH-1:0]   pc1_axi_rdata,
-    input  wire [1:0]                 pc1_axi_rresp,
+    input wire [AXI_ID_WIDTH-1:0] pc1_axi_rid,
+    input wire [PC_DATA_WIDTH-1:0] pc1_axi_rdata,
+    input wire [1:0] pc1_axi_rresp,
     input  wire                       pc1_axi_rlast,
     input  wire                       pc1_axi_rvalid,
     output wire                       pc1_axi_rready,
 
-    output wire [AXI_ID_WIDTH-1:0]    pc1_axi_awid,
-    output wire [AXI_ADDR_WIDTH-1:0]  pc1_axi_awaddr,
-    output wire [7:0]                 pc1_axi_awlen,
-    output wire [2:0]                 pc1_axi_awsize,
-    output wire [1:0]                 pc1_axi_awburst,
+    output wire [AXI_ID_WIDTH-1:0] pc1_axi_awid,
+    output wire [AXI_ADDR_WIDTH-1:0] pc1_axi_awaddr,
+    output wire [7:0] pc1_axi_awlen,
+    output wire [2:0] pc1_axi_awsize,
+    output wire [1:0] pc1_axi_awburst,
     output wire                       pc1_axi_awvalid,
     input  wire                       pc1_axi_awready,
     
-    output wire [PC_DATA_WIDTH-1:0]   pc1_axi_wdata,
+    output wire [PC_DATA_WIDTH-1:0] pc1_axi_wdata,
     output wire [(PC_DATA_WIDTH/8)-1:0] pc1_axi_wstrb,
     output wire                       pc1_axi_wlast,
     output wire                       pc1_axi_wvalid,
     input  wire                       pc1_axi_wready,
     
-    input  wire [AXI_ID_WIDTH-1:0]    pc1_axi_bid,
-    input  wire [1:0]                 pc1_axi_bresp,
+    input wire [AXI_ID_WIDTH-1:0] pc1_axi_bid,
+    input wire [1:0] pc1_axi_bresp,
     input  wire                       pc1_axi_bvalid,
     output wire                       pc1_axi_bready
 );
 
-    // AXI properties for 512-bit (64-byte) pseudo-channels
+    // axi properties for 512-bit (64-byte) pseudo-channels
     assign pc0_axi_arsize = 3'b110; // 64 bytes
-    assign pc0_axi_arburst = 2'b01; // INCR
+    assign pc0_axi_arburst = 2'b01; // incr
     assign pc0_axi_awsize = 3'b110; 
     assign pc0_axi_awburst = 2'b01;
 
     assign pc1_axi_arsize = 3'b110; // 64 bytes
-    assign pc1_axi_arburst = 2'b01; // INCR
+    assign pc1_axi_arburst = 2'b01; // incr
     assign pc1_axi_awsize = 3'b110; 
     assign pc1_axi_awburst = 2'b01;
 
-    // FSM States
+    // fsm states
     localparam IDLE    = 3'd0;
     localparam AR_WAIT = 3'd1;
     localparam R_WAIT  = 3'd2;
@@ -119,10 +119,10 @@ module titan_x5_hbm3_controller #(
 
     reg [2:0] state, next_state;
 
-    // Acknowledgement tracking for both PCs
+    // acknowledgement tracking for both pcs
     reg pc0_done, pc1_done;
 
-    // AXI Registers
+    // axi registers
     reg pc0_arvalid_reg, pc1_arvalid_reg;
     reg pc0_awvalid_reg, pc1_awvalid_reg;
     reg pc0_wvalid_reg,  pc1_wvalid_reg;
@@ -133,7 +133,7 @@ module titan_x5_hbm3_controller #(
     reg [7:0]                latched_len;
     reg [AXI_DATA_WIDTH-1:0] latched_wdata;
 
-    // Assign outputs
+    // assign outputs
     assign pc0_axi_arvalid = pc0_arvalid_reg;
     assign pc1_axi_arvalid = pc1_arvalid_reg;
     assign pc0_axi_awvalid = pc0_awvalid_reg;
@@ -145,7 +145,7 @@ module titan_x5_hbm3_controller #(
     assign pc0_axi_rready  = pc0_rready_reg;
     assign pc1_axi_rready  = pc1_rready_reg;
 
-    // HBM3 Controller distributes the single request to both PCs
+    // hbm3 controller distributes the single request to both pcs
     assign pc0_axi_araddr = latched_addr;
     assign pc1_axi_araddr = latched_addr; 
     assign pc0_axi_awaddr = latched_addr;
@@ -172,7 +172,7 @@ module titan_x5_hbm3_controller #(
 
     assign req_ready  = (state == IDLE);
     
-    // Combine responses
+    // combine responses
     assign resp_valid = (state == R_WAIT) && pc0_axi_rvalid && pc1_axi_rvalid;
     assign resp_rdata = {pc1_axi_rdata, pc0_axi_rdata};
 

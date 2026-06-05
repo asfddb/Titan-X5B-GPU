@@ -1,74 +1,70 @@
 `timescale 1ns / 1ps
 
-// ----------------------------------------------------------------------------
-// Module: titan_x5_gpu_top
-// Description: Full system integration of Titan X5 GPU.
-// Modified to wire the graphics pipeline:
-// CmdProc -> Rasterizer -> TMU -> ROP -> MemController -> VRAM
-// ----------------------------------------------------------------------------
+// module: titan_x5_gpu_top
+// description: full system integration of titan x5 gpu.
+// modified to wire the graphics pipeline:
+// cmdproc -> rasterizer -> tmu -> rop -> memcontroller -> vram
 module titan_x5_gpu_top (
     input  wire        clk,
     input  wire        rst_n,
 
-    // Host Interface (drives command processor ring buffer)
-    input  wire [31:0] host_ring_base,
-    input  wire [31:0] host_ring_wptr,
+    // host interface (drives command processor ring buffer)
+    input wire [31:0] host_ring_base,
+    input wire [31:0] host_ring_wptr,
     output wire [31:0] host_ring_rptr,
     output wire        host_intr,
 
-    // AXI4 VRAM Interface (from memory controller)
-    output wire [3:0]   vram_arid,
-    output wire [31:0]  vram_araddr,
-    output wire [7:0]   vram_arlen,
-    output wire [2:0]   vram_arsize,
-    output wire [1:0]   vram_arburst,
+    // axi4 vram interface (from memory controller)
+    output wire [3:0] vram_arid,
+    output wire [31:0] vram_araddr,
+    output wire [7:0] vram_arlen,
+    output wire [2:0] vram_arsize,
+    output wire [1:0] vram_arburst,
     output wire         vram_arvalid,
     input  wire         vram_arready,
-    input  wire [3:0]   vram_rid,
-    input  wire [511:0] vram_rdata,
-    input  wire [1:0]   vram_rresp,
+    input wire [3:0] vram_rid,
+    input wire [511:0] vram_rdata,
+    input wire [1:0] vram_rresp,
     input  wire         vram_rlast,
     input  wire         vram_rvalid,
     output wire         vram_rready,
-    output wire [3:0]   vram_awid,
-    output wire [31:0]  vram_awaddr,
-    output wire [7:0]   vram_awlen,
-    output wire [2:0]   vram_awsize,
-    output wire [1:0]   vram_awburst,
+    output wire [3:0] vram_awid,
+    output wire [31:0] vram_awaddr,
+    output wire [7:0] vram_awlen,
+    output wire [2:0] vram_awsize,
+    output wire [1:0] vram_awburst,
     output wire         vram_awvalid,
     input  wire         vram_awready,
     output wire [511:0] vram_wdata,
-    output wire [63:0]  vram_wstrb,
+    output wire [63:0] vram_wstrb,
     output wire         vram_wlast,
     output wire         vram_wvalid,
     input  wire         vram_wready,
-    input  wire [3:0]   vram_bid,
-    input  wire [1:0]   vram_bresp,
+    input wire [3:0] vram_bid,
+    input wire [1:0] vram_bresp,
     input  wire         vram_bvalid,
     output wire         vram_bready,
 
-    // Video Output
+    // video output
     output wire        vga_hsync,
     output wire        vga_vsync,
-    output wire [7:0]  vga_r,
-    output wire [7:0]  vga_g,
-    output wire [7:0]  vga_b,
+    output wire [7:0] vga_r,
+    output wire [7:0] vga_g,
+    output wire [7:0] vga_b,
     output wire        vga_de
 );
 
-    // -------------------------------------------------------------------------
     // 1. Command Processor
-    // -------------------------------------------------------------------------
     wire        cmd_valid;
     wire [7:0]  cmd_opcode;
     wire [55:0] cmd_payload;
     wire        cmd_ready;
-    // ROP interface
+    // rop interface
     wire        rop_o_ready;
     wire        mc_req_ready;
     wire        rop_mem_req;
     
-    // Crossbar Interface
+    // crossbar interface
     wire [18:0] xbar_m_req_valid;
     wire [19*32-1:0] xbar_m_req_addr;
     wire [19*32-1:0] xbar_m_req_wdata;
@@ -85,7 +81,7 @@ module titan_x5_gpu_top (
     wire [1:0] xbar_s_resp_valid;
     wire [2*32-1:0]  xbar_s_resp_rdata;
 
-    // Helper wires for modules
+    // helper wires for modules
     wire [31:0] sm_icache_addr [0:3];
     wire [3:0]  sm_icache_req;
     wire [31:0] sm_dcache_addr [0:3];
@@ -107,16 +103,15 @@ module titan_x5_gpu_top (
     wire [63:0] cmd_mem_data;
 
 
-    // -------------------------------------------------------------------------
-    // CROSSBAR MASTER ASSIGNMENTS
-    // Master 0: Command Processor
+    // crossbar master assignments
+    // master 0: command processor
     assign xbar_m_req_valid[0] = cmd_mem_req;
     assign xbar_m_req_addr[31:0] = cmd_mem_addr;
     assign xbar_m_req_wdata[31:0] = cmd_mem_data[31:0];
-    assign xbar_m_req_write[0] = 1'b0; // CmdProc currently only reads in this test
+    assign xbar_m_req_write[0] = 1'b0; // cmdproc currently only reads in this test
     // cmd_mem_ack is handled by xbar_m_req_ready[0]
 
-    // Masters 1-4: TMUs
+    // masters 1-4: tmus
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : tmu_xbar_assign
             assign xbar_m_req_valid[1+gi] = tmu_mem_req[gi];
@@ -126,7 +121,7 @@ module titan_x5_gpu_top (
         end
     endgenerate
 
-    // Masters 5-8: ROPs
+    // masters 5-8: rops
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : rop_xbar_assign
             assign xbar_m_req_valid[5+gi] = rop_m_req[gi];
@@ -136,7 +131,7 @@ module titan_x5_gpu_top (
         end
     endgenerate
 
-    // Masters 9-12: SM I-Caches
+    // masters 9-12: sm i-caches
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_i_xbar_assign
             assign xbar_m_req_valid[9+gi] = sm_icache_req[gi];
@@ -146,7 +141,7 @@ module titan_x5_gpu_top (
         end
     endgenerate
 
-    // Masters 13-16: SM D-Caches
+    // masters 13-16: sm d-caches
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_d_xbar_assign
             assign xbar_m_req_valid[13+gi] = sm_dcache_req[gi];
@@ -156,7 +151,7 @@ module titan_x5_gpu_top (
         end
     endgenerate
 
-    // Master 17: DMA Engine
+    // master 17: dma engine
     wire dma_mem_req_valid, dma_mem_req_write;
     wire [31:0] dma_mem_req_addr, dma_mem_req_wdata;
     assign xbar_m_req_valid[17] = dma_mem_req_valid;
@@ -164,7 +159,7 @@ module titan_x5_gpu_top (
     assign xbar_m_req_wdata[17*32 +: 32] = dma_mem_req_wdata;
     assign xbar_m_req_write[17] = dma_mem_req_write;
 
-    // Master 18: RT Core
+    // master 18: rt core
     wire rt_bvh_fetch_req;
     wire [31:0] rt_bvh_fetch_addr;
     assign xbar_m_req_valid[18] = rt_bvh_fetch_req;
@@ -172,7 +167,7 @@ module titan_x5_gpu_top (
     assign xbar_m_req_wdata[18*32 +: 32] = 32'h0;
     assign xbar_m_req_write[18] = 1'b0;
 
-    // Crossbar Instantiation
+    // crossbar instantiation
     titan_x5_crossbar #(
         .NUM_MASTERS(19),
         .NUM_SLAVES(2),
@@ -219,9 +214,7 @@ module titan_x5_gpu_top (
         .intr_req       (host_intr)
     );
 
-    // -------------------------------------------------------------------------
     // 2. Streaming Multiprocessors (4x)
-    // -------------------------------------------------------------------------
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_gen
@@ -234,15 +227,13 @@ module titan_x5_gpu_top (
         end
     endgenerate
 
-    // -------------------------------------------------------------------------
     // 3. Rasterizer
-    // -------------------------------------------------------------------------
     wire rast_o_valid;
     wire rast_o_ready;
     wire rast_i_ready;
     wire signed [15:0] rast_o_x, rast_o_y;
     
-    wire rast_i_valid = cmd_valid && (cmd_opcode == 8'h01); // CMD_DRAW
+    wire rast_i_valid = cmd_valid && (cmd_opcode == 8'h01); // cmd_draw
     assign cmd_ready = rast_i_ready; 
 
     titan_x5_rasterizer #(.COORD_W(16), .WEIGHT_W(32)) u_rasterizer (
@@ -255,9 +246,7 @@ module titan_x5_gpu_top (
         .o_x(rast_o_x), .o_y(rast_o_y), .o_w0(), .o_w1(), .o_w2()
     );
 
-    // -------------------------------------------------------------------------
     // 4. TMUs (4x)
-    // -------------------------------------------------------------------------
     wire tmu_o_valid;
     wire tmu_o_ready;
     wire [31:0] tmu_o_color;
@@ -283,7 +272,7 @@ module titan_x5_gpu_top (
                     .o_x          (tmu_o_x),
                     .o_y          (tmu_o_y),
                     .dbg_state    (dbg_tmu_state),
-                    .mem_req(tmu_mem_req[gi]), .mem_gnt(xbar_m_req_ready[1+gi]), .mem_addr(tmu_mem_addr[gi]), .mem_valid(xbar_m_resp_valid[1+gi]), .mem_rdata(xbar_m_resp_rdata[(1+gi)*32 +: 32]) // Return white color for texture
+                    .mem_req(tmu_mem_req[gi]), .mem_gnt(xbar_m_req_ready[1+gi]), .mem_addr(tmu_mem_addr[gi]), .mem_valid(xbar_m_resp_valid[1+gi]), .mem_rdata(xbar_m_resp_rdata[(1+gi)*32 +: 32]) // return white color for texture
                 );
             end else begin
                 titan_x5_tmu u_tmu (
@@ -304,9 +293,7 @@ module titan_x5_gpu_top (
         end
     endgenerate
 
-    // -------------------------------------------------------------------------
     // 4.5 SR Engine (inserted between TMU0 and ROP0 for testing)
-    // -------------------------------------------------------------------------
     wire sr_o_valid;
     wire [31:0] sr_o_color;
     wire sr_o_hit;
@@ -319,10 +306,8 @@ module titan_x5_gpu_top (
         .o_valid(sr_o_valid), .o_ready(rop_o_ready), .o_data(sr_o_color), .o_hit(sr_o_hit)
     );
 
-    // -------------------------------------------------------------------------
     // 5. ROP
-    // -------------------------------------------------------------------------
-    // ROP memory ports are now routed through the crossbar (masters 5-8)
+    // rop memory ports are now routed through the crossbar (masters 5-8)
 
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : rop_gen
@@ -330,9 +315,9 @@ module titan_x5_gpu_top (
                 titan_x5_rop u_rop (
                     .clk             (clk), .rst_n(rst_n),
                     .i_valid         (sr_o_valid), .i_ready(rop_o_ready),
-                    .i_x             (tmu_o_x), .i_y(tmu_o_y), // SR Engine latency causes desync here, accepted as proper structural wiring
+                    .i_x             (tmu_o_x), .i_y(tmu_o_y), // sr engine latency causes desync here, accepted as proper structural wiring
                     .i_z             (32'h00000000), .i_color(sr_o_color),
-                    .cfg_depth_func  (3'd7),  // Always pass
+                    .cfg_depth_func  (3'd7),  // always pass
                     .cfg_depth_write (1'b0),
                     .cfg_stencil_func(3'd7),
                     .cfg_stencil_ref (8'h0),
@@ -368,13 +353,11 @@ module titan_x5_gpu_top (
         end
     endgenerate
 
-    // DEBUG WIRES
+    // debug wires
     wire [2:0] dbg_tmu_state;
     wire [2:0] dbg_rop_state;
 
-    // -------------------------------------------------------------------------
     // 6. RT Core & 7. SR Engine & 8. DMA & 9. Power & 10. Perf
-    // -------------------------------------------------------------------------
     
     wire rt_start = cmd_valid && (cmd_opcode == 8'h03);
     
@@ -390,18 +373,18 @@ module titan_x5_gpu_top (
         .hit_t(), .hit_u(), .hit_v()
     );
 
-    // SR Engine moved above to sit between TMU and ROP
+    // sr engine moved above to sit between tmu and rop
 
     wire dma_interrupt;
     titan_x5_dma_engine #(.ADDR_WIDTH(32), .DATA_WIDTH(32)) u_dma (
         .clk(clk), .rst_n(rst_n), 
-        // Control interface connected to Crossbar Slave 1
+        // control interface connected to crossbar slave 1
         .ctrl_req_valid(xbar_s_req_valid[1]), .ctrl_req_addr(xbar_s_req_addr[1*32 +: 32]),
         .ctrl_req_wdata(xbar_s_req_wdata[1*32 +: 32]), .ctrl_req_write(xbar_s_req_write[1]), 
         .ctrl_req_ready(xbar_s_req_ready[1]), .ctrl_resp_valid(xbar_s_resp_valid[1]), 
         .ctrl_resp_rdata(xbar_s_resp_rdata[1*32 +: 32]),
         .dma_interrupt(dma_interrupt), 
-        // Master interface connected to Crossbar Master 17
+        // master interface connected to crossbar master 17
         .mem_req_valid(dma_mem_req_valid), .mem_req_addr(dma_mem_req_addr), .mem_req_write(dma_mem_req_write),
         .mem_req_wdata(dma_mem_req_wdata), .mem_req_ready(xbar_m_req_ready[17]), 
         .mem_resp_valid(xbar_m_resp_valid[17]), .mem_resp_rdata(xbar_m_resp_rdata[17*32 +: 32])
@@ -416,11 +399,9 @@ module titan_x5_gpu_top (
         .clk(clk), .rst_n(rst_n), .event_pulses(32'h0), .read_en(1'b0), .read_addr(5'h0), .read_data()
     );
 
-    // -------------------------------------------------------------------------
     // 11. Memory Controller & Command ROM
-    // -------------------------------------------------------------------------
     
-    // Command ROM for Ring Buffer fetches
+    // command rom for ring buffer fetches
     assign cmd_mem_data = (cmd_mem_addr == host_ring_base) ? 64'h01_00_00_00_00_00_00_00 :
                           (cmd_mem_addr == host_ring_base + 8) ? 64'h04_00_00_00_00_00_00_00 : 
                           64'h0;
@@ -432,7 +413,7 @@ module titan_x5_gpu_top (
     end
     assign cmd_mem_ack = cmd_mem_ack_r;
 
-    // Connect ROP to Mem Controller
+    // connect rop to mem controller
     
     
     titan_x5_mem_controller #(
@@ -479,9 +460,7 @@ module titan_x5_gpu_top (
         .m_axi_bready  (vram_bready)
     );
 
-    // -------------------------------------------------------------------------
     // 12. Display Engine
-    // -------------------------------------------------------------------------
     titan_x5_display_engine u_disp_engine (
         .clk(clk), .pclk(clk), .rst_n(rst_n),
         .h_visible(12'd1920), .h_front_porch(12'd88), .h_sync_pulse(12'd44), .h_back_porch(12'd148),
@@ -490,9 +469,7 @@ module titan_x5_gpu_top (
         .fb_read_req(), .fb_read_ack(1'b1),
         .vga_hsync(vga_hsync), .vga_vsync(vga_vsync), .vga_r(vga_r), .vga_g(vga_g), .vga_b(vga_b), .vga_de(vga_de)
     );
-    // -------------------------------------------------------------------------
-    // Project Blackwell: GDDR7 PAM3 PHY Integration
-    // -------------------------------------------------------------------------
+    // project blackwell: gddr7 pam3 phy integration
     wire [511:0] gddr7_tx_pins;
     wire [511:0] gddr7_rx_pins;
     
@@ -508,9 +485,7 @@ module titan_x5_gpu_top (
         .gddr7_dq_rx(gddr7_rx_pins)
     );
 
-    // -------------------------------------------------------------------------
-    // Project Blackwell: Neural Shader Dispatch Integration
-    // -------------------------------------------------------------------------
+    // project blackwell: neural shader dispatch integration
     wire ns_tensor_req;
     wire [31:0] ns_tensor_opcode;
     wire [511:0] ns_tensor_payload;
@@ -518,7 +493,7 @@ module titan_x5_gpu_top (
     titan_x5_neural_shader_dispatch neural_shader_core (
         .clk(clk),
         .rst_n(rst_n),
-        .i_shader_valid(1'b0), // Driven by Rasterizer in full system
+        .i_shader_valid(1'b0), // driven by rasterizer in full system
         .i_material_id(32'h0),
         .i_spatial_vector(128'h0),
         .o_shader_ready(),

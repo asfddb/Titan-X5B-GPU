@@ -16,25 +16,25 @@ module titan_x5_wafer_top (
     input  wire        clk_hbm,
     input  wire        rst_n,
 
-    // HBM3 Physical Interface (PC0 & PC1) - Abstracted to AXI for simulation
-    output wire [3:0]   m_axi_pc0_arid,
-    output wire [32:0]  m_axi_pc0_araddr,
-    output wire [7:0]   m_axi_pc0_arlen,
-    output wire [2:0]   m_axi_pc0_arsize,
-    output wire [1:0]   m_axi_pc0_arburst,
+    // hbm3 physical interface (pc0 & pc1) - abstracted to axi for simulation
+    output wire [3:0] m_axi_pc0_arid,
+    output wire [32:0] m_axi_pc0_araddr,
+    output wire [7:0] m_axi_pc0_arlen,
+    output wire [2:0] m_axi_pc0_arsize,
+    output wire [1:0] m_axi_pc0_arburst,
     output wire         m_axi_pc0_arvalid,
     input  wire         m_axi_pc0_arready,
-    input  wire [3:0]   m_axi_pc0_rid,
-    input  wire [511:0] m_axi_pc0_rdata,
-    input  wire [1:0]   m_axi_pc0_rresp,
+    input wire [3:0] m_axi_pc0_rid,
+    input wire [511:0] m_axi_pc0_rdata,
+    input wire [1:0] m_axi_pc0_rresp,
     input  wire         m_axi_pc0_rlast,
     input  wire         m_axi_pc0_rvalid,
     output wire         m_axi_pc0_rready,
     
     // ... [Other HBM3 PC0/PC1 ports would be mapped here to physical PHY]
     
-    // High-speed PCIe Gen5 x16 Host Interface (Abstracted)
-    input  wire [127:0] pcie_rx_data,
+    // high-speed pcie gen5 x16 host interface (abstracted)
+    input wire [127:0] pcie_rx_data,
     input  wire         pcie_rx_valid,
     output wire         pcie_rx_ready,
     output wire [127:0] pcie_tx_data,
@@ -42,9 +42,7 @@ module titan_x5_wafer_top (
     input  wire         pcie_tx_ready
 );
 
-    // ==========================================
     // 1. 2D Mesh NoC Backbone
-    // ==========================================
     // 128-bit Flit width for NoC routing
     localparam FLIT_W = 128 + 8 + 8 + 2 + 2; 
     
@@ -63,9 +61,7 @@ module titan_x5_wafer_top (
         // ... Port connections to adjacent routers in the mesh ...
     );
 
-    // ==========================================
     // 2. Hardware RT Core Integration
-    // ==========================================
     wire        rt_start;
     wire        rt_done;
     wire [31:0] rt_hit_id;
@@ -82,9 +78,7 @@ module titan_x5_wafer_top (
         // ... Ray vectors and Memory BVH fetch interface ...
     );
 
-    // ==========================================
     // 3. HBM3 Memory Subsystem
-    // ==========================================
     wire         hbm_req_valid;
     wire [32:0]  hbm_req_addr;
     wire [1023:0] hbm_req_wdata;
@@ -104,7 +98,7 @@ module titan_x5_wafer_top (
         .resp_valid(hbm_resp_valid),
         .resp_rdata(hbm_resp_rdata),
         
-        // HBM3 Dual 512-bit Pseudo Channels map to physical pads here
+        // hbm3 dual 512-bit pseudo channels map to physical pads here
         .pc0_axi_arid(m_axi_pc0_arid),
         .pc0_axi_araddr(m_axi_pc0_araddr),
         .pc0_axi_arlen(m_axi_pc0_arlen),
@@ -121,9 +115,7 @@ module titan_x5_wafer_top (
         // ... PC1 mappings ...
     );
 
-    // ==========================================
     // 4. Titan X5 Shader Multiprocessors (SM)
-    // ==========================================
     // (Existing Compute/Tensor Core logic would be instantiated here 
     // and adapted to NoC Flit packets rather than AXI transactions)
     

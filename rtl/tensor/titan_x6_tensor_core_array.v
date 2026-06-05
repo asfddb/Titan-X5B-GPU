@@ -1,9 +1,9 @@
 `timescale 1ns/1ps
 
-// FP4 (E2M1) Multiplier that outputs FP32
+// fp4 (e2m1) multiplier that outputs fp32
 module fp4_mul_to_fp32 (
-    input  wire [3:0] a,
-    input  wire [3:0] b,
+    input wire [3:0] a,
+    input wire [3:0] b,
     output wire [31:0] result
 );
     wire a_zero = (a[2:0] == 3'b000);
@@ -34,7 +34,7 @@ module fp4_mul_to_fp32 (
     assign result = {sign, res_exp, res_mant};
 endmodule
 
-// Processing Element (PE) for Matrix Multiply-Accumulate
+// processing element (pe) for matrix multiply-accumulate
 module mac_pe #(
     parameter DATA_WIDTH = 16,
     parameter ACC_WIDTH  = 32
@@ -42,22 +42,22 @@ module mac_pe #(
     input  wire                   clk,
     input  wire                   rst_n,
     input  wire                   en,
-    input  wire [1:0]             mode, // 0: FP16, 1: FP8, 2: NVFP4 (E2M1)
+    input wire [1:0] mode, // 0: FP16, 1: FP8, 2: NVFP4 (E2M1)
     
-    input  wire [DATA_WIDTH-1:0]  act_in,
-    input  wire [DATA_WIDTH-1:0]  weight_in,
-    input  wire [ACC_WIDTH-1:0]   acc_in,
+    input wire [DATA_WIDTH-1:0] act_in,
+    input wire [DATA_WIDTH-1:0] weight_in,
+    input wire [ACC_WIDTH-1:0] acc_in,
     
-    output reg  [DATA_WIDTH-1:0]  act_out,
-    output reg  [DATA_WIDTH-1:0]  weight_out,
-    output reg  [ACC_WIDTH-1:0]   acc_out
+    output reg [DATA_WIDTH-1:0] act_out,
+    output reg [DATA_WIDTH-1:0] weight_out,
+    output reg [ACC_WIDTH-1:0] acc_out
 );
 
-    // FP8 to FP16 conversion (E4M3)
+    // fp8 to fp16 conversion (e4m3)
     wire [15:0] fp8_act_fp16 = {act_in[7], act_in[6:3] + 5'd15 - 5'd7, act_in[2:0], 7'b0};
     wire [15:0] fp8_weight_fp16 = {weight_in[7], weight_in[6:3] + 5'd15 - 5'd7, weight_in[2:0], 7'b0};
 
-    // Standard FP16/FP8 Path
+    // standard fp16/fp8 path
     wire [15:0] act_fp16 = (mode == 1) ? fp8_act_fp16 : act_in;
     wire [15:0] weight_fp16 = (mode == 1) ? fp8_weight_fp16 : weight_in;
 
@@ -71,7 +71,7 @@ module mac_pe #(
     wire [31:0] fp32_prod_standard = (fp16_prod == 16'b0) ? 32'b0 : 
                             {fp16_prod[15], fp16_prod[14:10] + 8'd127 - 8'd15, fp16_prod[9:0], 13'b0};
 
-    // Dynamic SIMD FP4 Path (4x Throughput)
+    // dynamic simd fp4 path (4x throughput)
     wire [31:0] fp4_prod0, fp4_prod1, fp4_prod2, fp4_prod3;
     
     fp4_mul_to_fp32 fp4_m0(.a(act_in[3:0]),   .b(weight_in[3:0]),   .result(fp4_prod0));
@@ -79,13 +79,13 @@ module mac_pe #(
     fp4_mul_to_fp32 fp4_m2(.a(act_in[11:8]),  .b(weight_in[11:8]),  .result(fp4_prod2));
     fp4_mul_to_fp32 fp4_m3(.a(act_in[15:12]), .b(weight_in[15:12]), .result(fp4_prod3));
 
-    // Adder Tree for FP4
+    // adder tree for fp4
     wire [31:0] fp4_sum01, fp4_sum23, fp4_sum_all;
     fp32_add add_01(.a(fp4_prod0), .b(fp4_prod1), .result(fp4_sum01));
     fp32_add add_23(.a(fp4_prod2), .b(fp4_prod3), .result(fp4_sum23));
     fp32_add add_all(.a(fp4_sum01), .b(fp4_sum23), .result(fp4_sum_all));
 
-    // Final Mux and Accumulation
+    // final mux and accumulation
     wire [31:0] active_prod = (mode == 2) ? fp4_sum_all : fp32_prod_standard;
     
     wire [31:0] next_acc;
@@ -106,9 +106,9 @@ module mac_pe #(
 endmodule
 
 module fp32_add (
-    input  wire [31:0] a,
-    input  wire [31:0] b,
-    output reg  [31:0] result
+    input wire [31:0] a,
+    input wire [31:0] b,
+    output reg [31:0] result
 );
     wire sign_a = a[31];
     wire [7:0] exp_a = a[30:23];
@@ -200,7 +200,7 @@ module fp32_add (
     end
 endmodule
 
-// Massive Systolic Array
+// massive systolic array
 module titan_x6_tensor_core_array #(
     parameter ARRAY_SIZE_X = 16,
     parameter ARRAY_SIZE_Y = 16,
@@ -210,38 +210,38 @@ module titan_x6_tensor_core_array #(
     input  wire                                     clk,
     input  wire                                     rst_n,
     input  wire                                     en,
-    input  wire [1:0]                               mode, // 0: FP16, 1: FP8, 2: NVFP4
+    input wire [1:0] mode, // 0: FP16, 1: FP8, 2: NVFP4
     
-    // Activation inputs (fed from left side of array, per row)
-    input  wire [(ARRAY_SIZE_Y * DATA_WIDTH)-1:0]   act_in,
+    // activation inputs (fed from left side of array, per row)
+    input wire [(ARRAY_SIZE_Y * DATA_WIDTH)-1:0] act_in,
     
-    // Weight inputs (fed from top side of array, per column)
-    input  wire [(ARRAY_SIZE_X * DATA_WIDTH)-1:0]   weight_in,
+    // weight inputs (fed from top side of array, per column)
+    input wire [(ARRAY_SIZE_X * DATA_WIDTH)-1:0] weight_in,
     
-    // Output accumulation (emerging from bottom side of array, per column)
-    output wire [(ARRAY_SIZE_X * ACC_WIDTH)-1:0]    acc_out,
+    // output accumulation (emerging from bottom side of array, per column)
+    output wire [(ARRAY_SIZE_X * ACC_WIDTH)-1:0] acc_out,
     output wire                                     out_valid
 );
 
-    // Flattened wire arrays for PE interconnections
+    // flattened wire arrays for pe interconnections
     wire [DATA_WIDTH-1:0] act_wire   [0 : ARRAY_SIZE_Y * (ARRAY_SIZE_X + 1) - 1];
     wire [DATA_WIDTH-1:0] weight_wire[0 : (ARRAY_SIZE_Y + 1) * ARRAY_SIZE_X - 1];
     wire [ACC_WIDTH-1:0]  acc_wire   [0 : (ARRAY_SIZE_Y + 1) * ARRAY_SIZE_X - 1];
 
     genvar i, j;
     generate
-        // Initialize Row Inputs (Activations)
+        // initialize row inputs (activations)
         for (i = 0; i < ARRAY_SIZE_Y; i = i + 1) begin : g_act_init
             assign act_wire[i * (ARRAY_SIZE_X + 1) + 0] = act_in[i * DATA_WIDTH +: DATA_WIDTH];
         end
 
-        // Initialize Column Inputs (Weights and Initial Accumulator values)
+        // initialize column inputs (weights and initial accumulator values)
         for (j = 0; j < ARRAY_SIZE_X; j = j + 1) begin : g_weight_init
             assign weight_wire[0 * ARRAY_SIZE_X + j] = weight_in[j * DATA_WIDTH +: DATA_WIDTH];
             assign acc_wire[0 * ARRAY_SIZE_X + j]    = {ACC_WIDTH{1'b0}};
         end
 
-        // Instantiate the 2D grid of PEs
+        // instantiate the 2d grid of pes
         for (i = 0; i < ARRAY_SIZE_Y; i = i + 1) begin : g_row
             for (j = 0; j < ARRAY_SIZE_X; j = j + 1) begin : g_col
                 mac_pe #(
@@ -252,11 +252,11 @@ module titan_x6_tensor_core_array #(
                     .rst_n     (rst_n),
                     .en        (en),
                     .mode      (mode),
-                    // Inputs from top/left
+                    // inputs from top/left
                     .act_in    (act_wire   [i * (ARRAY_SIZE_X + 1) + j]),
                     .weight_in (weight_wire[i * ARRAY_SIZE_X + j]),
                     .acc_in    (acc_wire   [i * ARRAY_SIZE_X + j]),
-                    // Outputs to bottom/right
+                    // outputs to bottom/right
                     .act_out   (act_wire   [i * (ARRAY_SIZE_X + 1) + j + 1]),
                     .weight_out(weight_wire[(i + 1) * ARRAY_SIZE_X + j]),
                     .acc_out   (acc_wire   [(i + 1) * ARRAY_SIZE_X + j])
@@ -264,7 +264,7 @@ module titan_x6_tensor_core_array #(
             end
         end
 
-        // Assign Output Accumulators (Bottom of the array)
+        // assign output accumulators (bottom of the array)
         for (j = 0; j < ARRAY_SIZE_X; j = j + 1) begin : g_acc_out
             assign acc_out[j * ACC_WIDTH +: ACC_WIDTH] = acc_wire[ARRAY_SIZE_Y * ARRAY_SIZE_X + j];
         end

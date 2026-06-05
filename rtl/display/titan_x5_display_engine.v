@@ -6,34 +6,34 @@
  * and double-buffering support.
  */
 module titan_x5_display_engine (
-    input  wire        clk,        // Core clock
-    input  wire        pclk,       // Pixel clock
+    input  wire        clk,        // core clock
+    input  wire        pclk,       // pixel clock
     input  wire        rst_n,
     
-    // Configuration
-    input  wire [11:0] h_visible,
-    input  wire [11:0] h_front_porch,
-    input  wire [11:0] h_sync_pulse,
-    input  wire [11:0] h_back_porch,
-    input  wire [11:0] v_visible,
-    input  wire [11:0] v_front_porch,
-    input  wire [11:0] v_sync_pulse,
-    input  wire [11:0] v_back_porch,
+    // configuration
+    input wire [11:0] h_visible,
+    input wire [11:0] h_front_porch,
+    input wire [11:0] h_sync_pulse,
+    input wire [11:0] h_back_porch,
+    input wire [11:0] v_visible,
+    input wire [11:0] v_front_porch,
+    input wire [11:0] v_sync_pulse,
+    input wire [11:0] v_back_porch,
     
-    // Framebuffer Interface (runs on core clk)
+    // framebuffer interface (runs on core clk)
     output wire        swap_buffers,
     output wire [31:0] fb_read_addr,
-    input  wire [31:0] fb_rgba_data,
+    input wire [31:0] fb_rgba_data,
     output wire        fb_read_req,
     input  wire        fb_read_ack,
     
-    // VGA Output
+    // vga output
     output reg         vga_hsync,
     output reg         vga_vsync,
-    output reg  [7:0]  vga_r,
-    output reg  [7:0]  vga_g,
-    output reg  [7:0]  vga_b,
-    output reg         vga_de // Data Enable
+    output reg [7:0] vga_r,
+    output reg [7:0] vga_g,
+    output reg [7:0] vga_b,
+    output reg         vga_de // data enable
 );
 
     reg [11:0] h_counter;
@@ -59,7 +59,7 @@ module titan_x5_display_engine (
         end
     end
     
-    // Hsync and Vsync generation (Active Low typically, parameterized here as Active High for simplicity)
+    // hsync and vsync generation (active low typically, parameterized here as active high for simplicity)
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
             vga_hsync <= 1'b0;
@@ -76,9 +76,7 @@ module titan_x5_display_engine (
         end
     end
     
-    // ==========================================
-    // Clock Domain Crossing (CDC) Asynchronous FIFO
-    // ==========================================
+    // clock domain crossing (cdc) asynchronous fifo
     wire        fifo_full;
     wire        fifo_empty;
     wire [31:0] fifo_rdata;
@@ -101,7 +99,7 @@ module titan_x5_display_engine (
         .rempty(fifo_empty)
     );
 
-    // Framebuffer read address mapping (Now in core clk domain, simplified fetching)
+    // framebuffer read address mapping (now in core clk domain, simplified fetching)
     reg [31:0] fetch_addr;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -117,10 +115,10 @@ module titan_x5_display_engine (
     assign fb_read_addr = fetch_addr;
     assign fb_read_req  = !fifo_full;
     
-    // Pixel stream from FIFO
+    // pixel stream from fifo
     assign fifo_rinc = vga_de && !fifo_empty;
     
-    // RGB Output (Pixel clock domain)
+    // rgb output (pixel clock domain)
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
             vga_r <= 8'd0;
@@ -137,8 +135,8 @@ module titan_x5_display_engine (
         end
     end
     
-    // Double buffering support: Swap buffers at the end of the visible frame
-    // Cross swap signal from pclk to clk using double-flop
+    // double buffering support: swap buffers at the end of the visible frame
+    // cross swap signal from pclk to clk using double-flop
     reg pclk_swap;
     reg clk_swap_q1, clk_swap_q2;
     always @(posedge pclk) pclk_swap <= (h_counter == 0 && v_counter == v_total - 1);

@@ -12,63 +12,61 @@ module titan_x5_warp_scheduler #(
     input  wire clk,
     input  wire rst_n,
     
-    // Fetch state from outside
-    input  wire [NUM_WARPS-1:0] warp_active,
-    input  wire [NUM_WARPS*32-1:0] warp_pc,
+    // fetch state from outside
+    input wire [NUM_WARPS-1:0] warp_active,
+    input wire [NUM_WARPS*32-1:0] warp_pc,
     
-    // Dependency Tracking (Scoreboard from WB stage)
+    // dependency tracking (scoreboard from wb stage)
     input  wire        wb_valid,
-    input  wire [2:0]  wb_warp_id,
-    input  wire [5:0]  wb_reg,
+    input wire [2:0] wb_warp_id,
+    input wire [5:0] wb_reg,
     
-    // Instruction Issue (from Decode stage)
+    // instruction issue (from decode stage)
     input  wire        id_valid,
-    input  wire [2:0]  id_warp_id,
-    input  wire [5:0]  id_dest_reg,
+    input wire [2:0] id_warp_id,
+    input wire [5:0] id_dest_reg,
     
-    // Source register hazard check inputs
-    input  wire [5:0]  id_src_reg1,
-    input  wire [5:0]  id_src_reg2,
+    // source register hazard check inputs
+    input wire [5:0] id_src_reg1,
+    input wire [5:0] id_src_reg2,
     
-    // Barrier interface
+    // barrier interface
     input  wire        barrier_req,
-    input  wire [2:0]  barrier_warp_id,
+    input wire [2:0] barrier_warp_id,
     
-    // Outputs to Fetch Stage
-    output reg  [2:0]  sched_warp_id,
+    // outputs to fetch stage
+    output reg [2:0] sched_warp_id,
     output reg         sched_valid,
-    output reg  [31:0] sched_pc,
+    output reg [31:0] sched_pc,
     
-    // Status outputs
+    // status outputs
     output wire [NUM_WARPS-1:0] warp_stalled,
     output wire [NUM_WARPS-1:0] warp_ready
 );
 
-    // Scoreboard: 64 registers per warp (1 = pending writeback)
+    // scoreboard: 64 registers per warp (1 = pending writeback)
     reg [63:0] scoreboard [0:NUM_WARPS-1];
     
-    // Starvation prevention: age counter per warp
+    // starvation prevention: age counter per warp
     reg [7:0] age_counter [0:NUM_WARPS-1];
     localparam STARVATION_THRESHOLD = 8'd32;
     
-    // Barrier state: warps waiting at a barrier
+    // barrier state: warps waiting at a barrier
     reg [NUM_WARPS-1:0] barrier_waiting;
     
-    // Round-robin pointer
+    // round-robin pointer
     reg [2:0] rr_ptr;
     
     integer i;
-    reg [2:0] w; // Use reg for combinational loop variable
+    reg [2:0] w; // use reg for combinational loop variable
     
-    // =========================================================================
-    // Hazard Detection (RAW - Read After Write)
-    // =========================================================================
-    // A warp is stalled if any of its source registers are pending in the scoreboard
+    // hazard detection (raw - read after write)
+    // a warp is stalled if any of its source registers are pending in the scoreboard
     reg [NUM_WARPS-1:0] has_hazard;
     
     always @(*) begin
         for (i = 0; i < NUM_WARPS; i = i + 1) begin
-            // Hazard if any register is pending in the scoreboard for this warp
+            // hazard if any register is pending in the scoreboard for this warp
             has_hazard[i] = (scoreboard[i] != 64'd0); 
         end
     end
@@ -76,9 +74,7 @@ module titan_x5_warp_scheduler #(
     assign warp_stalled = has_hazard | barrier_waiting;
     assign warp_ready   = warp_active & ~warp_stalled;
 
-    // =========================================================================
-    // Scoreboard Update
-    // =========================================================================
+    // scoreboard update
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             rr_ptr <= 0;
@@ -88,26 +84,26 @@ module titan_x5_warp_scheduler #(
                 age_counter[i] <= 8'd0;
             end
         end else begin
-            // Mark destination register as pending on decode
+            // mark destination register as pending on decode
             if (id_valid) begin
                 scoreboard[id_warp_id][id_dest_reg] <= 1'b1;
             end
             
-            // Clear pending register on writeback
+            // clear pending register on writeback
             if (wb_valid) begin
                 scoreboard[wb_warp_id][wb_reg] <= 1'b0;
             end
             
-            // Barrier handling
+            // barrier handling
             if (barrier_req) begin
                 barrier_waiting[barrier_warp_id] <= 1'b1;
             end
-            // Release all warps when ALL active warps hit the barrier
+            // release all warps when all active warps hit the barrier
             if ((barrier_waiting & warp_active) == warp_active && warp_active != 0) begin
                 barrier_waiting <= {NUM_WARPS{1'b0}};
             end
             
-            // Age counter: increment for stalled warps, reset for scheduled warps
+            // age counter: increment for stalled warps, reset for scheduled warps
             for (i = 0; i < NUM_WARPS; i = i + 1) begin
                 if (sched_valid && sched_warp_id == i[2:0]) begin
                     age_counter[i] <= 8'd0;
@@ -121,9 +117,7 @@ module titan_x5_warp_scheduler #(
         end
     end
 
-    // =========================================================================
-    // GTO Scheduling: Prefer oldest starving warp, then round-robin ready warps
-    // =========================================================================
+    // gto scheduling: prefer oldest starving warp, then round-robin ready warps
     reg [2:0] sel_warp;
     reg       sel_valid;
     reg       found_starving;
@@ -135,7 +129,7 @@ module titan_x5_warp_scheduler #(
         found_starving = 1'b0;
         oldest_age = 8'd0;
         
-        // Pass 1: Check for starving warps (age > threshold) — highest priority
+        // pass 1: check for starving warps (age > threshold) — highest priority
         for (i = 0; i < NUM_WARPS; i = i + 1) begin
             if (warp_ready[i] && age_counter[i] >= STARVATION_THRESHOLD && !found_starving) begin
                 if (age_counter[i] > oldest_age) begin
@@ -147,7 +141,7 @@ module titan_x5_warp_scheduler #(
             end
         end
         
-        // Pass 2: Round-robin among ready warps (if no starving warp found)
+        // pass 2: round-robin among ready warps (if no starving warp found)
         if (!found_starving) begin
             for (i = 0; i < NUM_WARPS; i = i + 1) begin
                 w = (rr_ptr + i[2:0]) % NUM_WARPS;
@@ -159,9 +153,7 @@ module titan_x5_warp_scheduler #(
         end
     end
 
-    // =========================================================================
-    // Output Register
-    // =========================================================================
+    // output register
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             sched_valid   <= 1'b0;

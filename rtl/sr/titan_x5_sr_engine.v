@@ -11,21 +11,21 @@ module titan_x5_sr_engine #(
     input  wire                  clk,
     input  wire                  rst_n,
 
-    // Input Interface
+    // input interface
     input  wire                  i_valid,
     output wire                  i_ready,
-    input  wire [63:0]           i_hash,
-    input  wire [DATA_WIDTH-1:0] i_data,
+    input wire [63:0] i_hash,
+    input wire [DATA_WIDTH-1:0] i_data,
     input  wire                  i_write,
 
-    // Output Interface
+    // output interface
     output wire                  o_valid,
     input  wire                  o_ready,
     output wire [DATA_WIDTH-1:0] o_data,
     output wire                  o_hit
 );
 
-    // Input Skid Buffer
+    // input skid buffer
     wire                  skid_i_valid;
     wire                  skid_i_ready;
     wire [63:0]           skid_i_hash;
@@ -46,7 +46,7 @@ module titan_x5_sr_engine #(
         .o_data ({skid_i_write, skid_i_hash, skid_i_data})
     );
 
-    // Cache Storage (16 sets, 4 ways)
+    // cache storage (16 sets, 4 ways)
     reg [31:0]           tag_ram  [0:3][0:15];
     reg [DATA_WIDTH-1:0] data_ram [0:3][0:15];
     reg                  valid_ram[0:3][0:15];
@@ -66,12 +66,12 @@ module titan_x5_sr_engine #(
         end else begin
             if (skid_i_valid && skid_i_ready && skid_i_write) begin
                 valid_ram[repl_way[skid_i_hash[3:0]]][skid_i_hash[3:0]] <= 1'b1;
-                repl_way[skid_i_hash[3:0]] <= repl_way[skid_i_hash[3:0]] + 2'd1; // Round-robin replacement
+                repl_way[skid_i_hash[3:0]] <= repl_way[skid_i_hash[3:0]] + 2'd1; // round-robin replacement
             end
         end
     end
 
-    // RAM writes
+    // ram writes
     always @(posedge clk) begin
         if (skid_i_valid && skid_i_ready && skid_i_write) begin
             tag_ram[repl_way[skid_i_hash[3:0]]][skid_i_hash[3:0]]  <= skid_i_hash[35:4];
@@ -79,7 +79,7 @@ module titan_x5_sr_engine #(
         end
     end
 
-    // Stage 1: Read Cache 
+    // stage 1: read cache 
     wire stage2_ready; 
     reg        s1_valid;
     reg [31:0] s1_tag;
@@ -125,7 +125,7 @@ module titan_x5_sr_engine #(
         end
     end
 
-    // Stage 2: Tag Compare
+    // stage 2: tag compare
     reg [DATA_WIDTH-1:0] s2_out_data;
     reg                  s2_out_hit;
 
@@ -134,7 +134,7 @@ module titan_x5_sr_engine #(
         s2_out_data = {DATA_WIDTH{1'b0}};
         
         if (s1_is_write) begin
-            s2_out_hit = 1'b1; // Writes logically always hit
+            s2_out_hit = 1'b1; // writes logically always hit
         end else begin
             if (s1_read_valid[0] && (s1_read_tags[0] == s1_tag)) begin s2_out_hit = 1'b1; s2_out_data = s1_read_data[0]; end
             else if (s1_read_valid[1] && (s1_read_tags[1] == s1_tag)) begin s2_out_hit = 1'b1; s2_out_data = s1_read_data[1]; end
@@ -143,7 +143,7 @@ module titan_x5_sr_engine #(
         end
     end
 
-    // Output Skid Buffer
+    // output skid buffer
     titan_x5_skid_buffer #(
         .DATA_WIDTH(DATA_WIDTH + 1)
     ) out_skid (

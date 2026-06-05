@@ -1,15 +1,14 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// ==============================================================================
-// Module: astra8_entanglement_router
-// Project: Project Astra-8
-// Description: Photonic Entanglement-Swapping Router (PESR) simulation model.
-//              Simulates a centralized Spontaneous Parametric Down-Conversion
+// module: astra8_entanglement_router
+// project: project astra-8
+// description: photonic entanglement-swapping router (pesr) simulation model.
+//              simulates a centralized spontaneous parametric down-conversion
 //              (SPDC) pump distributing EPR pairs and performs instantaneous
 //              tensor teleportation via homodyne Bell-state measurement logic.
 //
-// Cycle 18 Changelog:
+// cycle 18 changelog:
 //   [OPT]  Simplified the watchdog mechanism by eliminating the secondary 
 //          `watchdog_sub_counter` register, tracking both the idle time and 
 //          periodic warning triggers using a single self-resetting counter.
@@ -18,12 +17,11 @@
 //          for large node counts or payload widths.
 //   [DBG]  Added simulation-only active checks for out-of-bounds or self-looping
 //          teleportation requests, logging errors to accelerate stimulus debugging.
-// ==============================================================================
 
 module astra8_entanglement_router #(
     parameter NUM_NODES      = 4,
     parameter PAYLOAD_WIDTH  = 256,
-    // Auto-derived. Override only for explicit width-padding use cases.
+    // auto-derived. override only for explicit width-padding use cases.
     parameter NODE_ADDR_W    = (NUM_NODES <= 1)    ? 1 :
                                (NUM_NODES <= 2)    ? 1 :
                                (NUM_NODES <= 4)    ? 2 :
@@ -41,27 +39,25 @@ module astra8_entanglement_router #(
     input  wire                                 clk,
     input  wire                                 rst_n,
 
-    // SPDC Pump Interface (EPR Pair Distribution)
+    // spdc pump interface (epr pair distribution)
     input  wire                                 spdc_pump_en,
-    output reg  [NUM_NODES-1:0]                 entanglement_ready,
+    output reg [NUM_NODES-1:0] entanglement_ready,
 
-    // Teleportation Interface (Homodyne Bell-state Measurement)
-    input  wire [NUM_NODES-1:0]                 bell_state_meas_req,
-    input  wire [NODE_ADDR_W-1:0]               src_node,
-    input  wire [NODE_ADDR_W-1:0]               dst_node,
-    input  wire [PAYLOAD_WIDTH-1:0]             data_in,
+    // teleportation interface (homodyne bell-state measurement)
+    input wire [NUM_NODES-1:0] bell_state_meas_req,
+    input wire [NODE_ADDR_W-1:0] src_node,
+    input wire [NODE_ADDR_W-1:0] dst_node,
+    input wire [PAYLOAD_WIDTH-1:0] data_in,
 
-    // Teleported Data Out (Flattened bus per Node) — combinational
+    // teleported data out (flattened bus per node) — combinational
     output wire [(NUM_NODES*PAYLOAD_WIDTH)-1:0] data_out,
 
-    // Status / Diagnostic
+    // status / diagnostic
     // teleport_active is HIGH on the SAME cycle data_out carries valid payload.
     output wire                                 teleport_active
 );
 
-    // --------------------------------------------------------------------------
-    // Parameter Validation (Simulation Only)
-    // --------------------------------------------------------------------------
+    // parameter validation (simulation only)
 `ifndef SYNTHESIS
     initial begin
         if (NUM_NODES < 2) begin
@@ -72,43 +68,37 @@ module astra8_entanglement_router #(
             $display("FATAL [%m]: PAYLOAD_WIDTH (%0d) must be >= 1.", PAYLOAD_WIDTH);
             $finish;
         end
-        // Ensure address width can represent all node indices [0, NUM_NODES-1]
+        // ensure address width can represent all node indices [0, num_nodes-1]
         if (((NUM_NODES - 1) >> NODE_ADDR_W) != 0) begin
             $display("FATAL [%m]: NODE_ADDR_W (%0d) too small for NUM_NODES (%0d).", NODE_ADDR_W, NUM_NODES);
             $finish;
         end
-        // Warn if address space is much larger than node count (waste)
+        // warn if address space is much larger than node count (waste)
         if ((1 << NODE_ADDR_W) > (NUM_NODES * 2)) begin
             $display("WARN [%m]: NODE_ADDR_W (%0d) is overprovisioned for NUM_NODES (%0d).", NODE_ADDR_W, NUM_NODES);
         end
     end
 `endif
 
-    // --------------------------------------------------------------------------
-    // Bounds-Safe Node Verification & Validation Lookups
-    // --------------------------------------------------------------------------
+    // bounds-safe node verification & validation lookups
     wire src_in_bounds = (src_node < NUM_NODES);
     wire dst_in_bounds = (dst_node < NUM_NODES);
 
-    // Safe clamped indices for internal array/vector lookups
+    // safe clamped indices for internal array/vector lookups
     wire [NODE_ADDR_W-1:0] safe_src_node = src_in_bounds ? src_node : {NODE_ADDR_W{1'b0}};
     wire [NODE_ADDR_W-1:0] safe_dst_node = dst_in_bounds ? dst_node : {NODE_ADDR_W{1'b0}};
 
-    // Explicit offset calculation is no longer needed due to generate-based multiplexing.
+    // explicit offset calculation is no longer needed due to generate-based multiplexing.
 
-    // Dynamic indexing is bounds-safe; returns 0 if index is out-of-bounds or invalid.
+    // dynamic indexing is bounds-safe; returns 0 if index is out-of-bounds or invalid.
     wire src_valid = src_in_bounds & entanglement_ready[safe_src_node] & bell_state_meas_req[safe_src_node];
     wire dst_valid = dst_in_bounds & entanglement_ready[safe_dst_node] & bell_state_meas_req[safe_dst_node];
 
-    // --------------------------------------------------------------------------
-    // Teleportation Activation Logic
-    // --------------------------------------------------------------------------
+    // teleportation activation logic
     wire distinct_nodes = (safe_src_node != safe_dst_node);
     wire teleport_valid = distinct_nodes & src_valid & dst_valid;
 
-    // --------------------------------------------------------------------------
-    // SPDC Pump + Teleport Consumption: Atomic Compose
-    // --------------------------------------------------------------------------
+    // spdc pump + teleport consumption: atomic compose
     wire [NUM_NODES-1:0] consumed_mask;
     generate
         genvar j;
@@ -121,19 +111,15 @@ module astra8_entanglement_router #(
         if (!rst_n) begin
             entanglement_ready <= {NUM_NODES{1'b0}};
         end else begin
-            // Atomic: consume then replenish (or hold). Allows back-to-back transactions.
+            // atomic: consume then replenish (or hold). allows back-to-back transactions.
             entanglement_ready <= (entanglement_ready & ~consumed_mask) | {NUM_NODES{spdc_pump_en}};
         end
     end
 
-    // --------------------------------------------------------------------------
-    // Teleport Status — combinational, aligned with data_out
-    // --------------------------------------------------------------------------
+    // teleport status — combinational, aligned with data_out
     assign teleport_active = teleport_valid;
 
-    // --------------------------------------------------------------------------
-    // Procedural Teleportation Datapath (Combinational Demux)
-    // --------------------------------------------------------------------------
+    // procedural teleportation datapath (combinational demux)
     generate
         genvar i;
         for (i = 0; i < NUM_NODES; i = i + 1) begin : gen_data_out_mux
@@ -142,9 +128,7 @@ module astra8_entanglement_router #(
         end
     endgenerate
 
-    // --------------------------------------------------------------------------
-    // Simulation-Only Telemetry, Diagnostics & Watchdog
-    // --------------------------------------------------------------------------
+    // simulation-only telemetry, diagnostics & watchdog
 `ifndef SYNTHESIS
     reg [31:0] teleport_count;
     reg [31:0] pump_count;
@@ -165,23 +149,23 @@ module astra8_entanglement_router #(
             pump_count           <= 32'd0;
             idle_watchdog        <= 32'd0;
         end else begin
-            // Pump event counter (saturating)
+            // pump event counter (saturating)
             if (spdc_pump_en && pump_count != COUNTER_SAT) begin
                 pump_count <= pump_count + 32'd1;
             end
 
             if (teleport_valid) begin
-                // Teleport event counter (saturating)
+                // teleport event counter (saturating)
                 if (teleport_count != COUNTER_SAT)
                     teleport_count <= teleport_count + 32'd1;
                 
                 idle_watchdog        <= 32'd0;
 
-                // Detailed per-teleport logging
+                // detailed per-teleport logging
                 $display("[%0t] PESR: Teleport #%0d | src=%0d -> dst=%0d | data=0x%h",
                          $time, teleport_count + 32'd1, safe_src_node, safe_dst_node, data_in);
             end else begin
-                // Idle watchdog counter: reset periodically to prevent rollover/spam
+                // idle watchdog counter: reset periodically to prevent rollover/spam
                 if (idle_watchdog == WATCHDOG_THRESHOLD - 32'd1) begin
                     idle_watchdog <= 32'd0;
                     $display("WARN [%m] [%0t]: No teleportation for %0d cycles. Check stimulus.",
@@ -193,7 +177,7 @@ module astra8_entanglement_router #(
         end
     end
 
-    // Simulation-only checks for invalid stimulus
+    // simulation-only checks for invalid stimulus
     always @(posedge clk) begin
         if (rst_n) begin
             if (bell_state_meas_req != {NUM_NODES{1'b0}}) begin

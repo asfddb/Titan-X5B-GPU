@@ -12,10 +12,10 @@ module titan_x5_2048_alu (
     input  wire clk,
     input  wire rst_n,
     input  wire valid_in,
-    input  wire [2:0] opcode, // 0: ADD, 1: SUB, 2: AND, 3: OR, 4: XOR
-    input  wire [2047:0] src1,
-    input  wire [2047:0] src2,
-    output reg  [2047:0] result,
+    input wire [2:0] opcode, // 0: ADD, 1: SUB, 2: AND, 3: OR, 4: XOR
+    input wire [2047:0] src1,
+    input wire [2047:0] src2,
+    output reg [2047:0] result,
     output reg  valid_out
 );
 

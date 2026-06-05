@@ -4,14 +4,14 @@ module titan_x5_async_fifo #(
     parameter DATA_WIDTH = 32,
     parameter DEPTH_LOG2 = 4
 ) (
-    // Write Domain
+    // write domain
     input  wire                  wclk,
     input  wire                  wrst_n,
     input  wire                  winc,
-    input  wire [DATA_WIDTH-1:0] wdata,
+    input wire [DATA_WIDTH-1:0] wdata,
     output wire                  wfull,
     
-    // Read Domain
+    // read domain
     input  wire                  rclk,
     input  wire                  rrst_n,
     input  wire                  rinc,
@@ -29,11 +29,11 @@ module titan_x5_async_fifo #(
     reg [DEPTH_LOG2:0] wq1_rptr, wq2_rptr;
     reg [DEPTH_LOG2:0] rq1_wptr, rq2_wptr;
     
-    // Binary to Gray
+    // binary to gray
     wire [DEPTH_LOG2:0] wptr_gray_next = (wptr_bin + 1'b1) ^ ((wptr_bin + 1'b1) >> 1);
     wire [DEPTH_LOG2:0] rptr_gray_next = (rptr_bin + 1'b1) ^ ((rptr_bin + 1'b1) >> 1);
     
-    // Write Domain Logic
+    // write domain logic
     always @(posedge wclk or negedge wrst_n) begin
         if (!wrst_n) begin
             wptr_bin <= 0;
@@ -45,7 +45,7 @@ module titan_x5_async_fifo #(
         end
     end
     
-    // Read Domain Logic
+    // read domain logic
     always @(posedge rclk or negedge rrst_n) begin
         if (!rrst_n) begin
             rptr_bin <= 0;
@@ -58,7 +58,7 @@ module titan_x5_async_fifo #(
     
     assign rdata = mem[rptr_bin[DEPTH_LOG2-1:0]];
     
-    // Synchronizers
+    // synchronizers
     always @(posedge wclk or negedge wrst_n) begin
         if (!wrst_n) {wq2_rptr, wq1_rptr} <= 0;
         else         {wq2_rptr, wq1_rptr} <= {wq1_rptr, rptr_gray};
@@ -69,7 +69,7 @@ module titan_x5_async_fifo #(
         else         {rq2_wptr, rq1_wptr} <= {rq1_wptr, wptr_gray};
     end
     
-    // Flags
+    // flags
     assign wfull = (wptr_gray == {~wq2_rptr[DEPTH_LOG2:DEPTH_LOG2-1], wq2_rptr[DEPTH_LOG2-2:0]});
     assign rempty = (rptr_gray == rq2_wptr);
 

@@ -1,26 +1,24 @@
-// ============================================================================
-// TITAN X-INFINITY WAFER-SCALE ENGINE (WSE)
-// Generated Grid: 16 x 16 (256 Cores)
-// Architecture: X/Y Addressed 2D Mesh NoC
-// ============================================================================
+// titan x-infinity wafer-scale engine (wse)
+// generated grid: 16 x 16 (256 cores)
+// architecture: x/y addressed 2d mesh noc
 `timescale 1ns/1ps
 
 module titan_x_infinity_wse (
     input  wire clk,
     input  wire rst_n,
-    input  wire [256-1:0] defect_fuses,
+    input wire [256-1:0] defect_fuses,
     
-    input  wire [1023:0] io_in_top,
+    input wire [1023:0] io_in_top,
     output wire [1023:0] io_out_top,
-    input  wire [1023:0] io_in_bottom,
+    input wire [1023:0] io_in_bottom,
     output wire [1023:0] io_out_bottom,
-    input  wire [1023:0] io_in_left,
+    input wire [1023:0] io_in_left,
     output wire [1023:0] io_out_left,
-    input  wire [1023:0] io_in_right,
+    input wire [1023:0] io_in_right,
     output wire [1023:0] io_out_right
 );
 
-    // NoC Interconnect Wires
+    // noc interconnect wires
     wire [63:0] n_out_r0_c0, s_out_r0_c0, e_out_r0_c0, w_out_r0_c0;
     wire [63:0] n_out_r0_c1, s_out_r0_c1, e_out_r0_c1, w_out_r0_c1;
     wire [63:0] n_out_r0_c2, s_out_r0_c2, e_out_r0_c2, w_out_r0_c2;
@@ -278,7 +276,7 @@ module titan_x_infinity_wse (
     wire [63:0] n_out_r15_c14, s_out_r15_c14, e_out_r15_c14, w_out_r15_c14;
     wire [63:0] n_out_r15_c15, s_out_r15_c15, e_out_r15_c15, w_out_r15_c15;
 
-    // Core Instantiations
+    // core instantiations
     titan_x_wse_sm #(
         .CORE_X(16'd0), .CORE_Y(16'd0)
     ) u_core_r0_c0 (
@@ -2583,7 +2581,7 @@ module titan_x_infinity_wse (
         .noc_out_e(e_out_r15_c15), .noc_out_w(w_out_r15_c15)
     );
 
-    // Edge I/O Assignments
+    // edge i/o assignments
     assign io_out_top[63:0] = n_out_r0_c0;
     assign io_out_bottom[63:0] = s_out_r15_c0;
     assign io_out_top[127:64] = n_out_r0_c1;

@@ -9,13 +9,13 @@ module titan_x5_perf_counters (
     input  wire        clk,
     input  wire        rst_n,
     
-    // Events mapping
-    input  wire [31:0] event_pulses, // 32 distinct events
+    // events mapping
+    input wire [31:0] event_pulses, // 32 distinct events
     
-    // APB/AXI-Lite style read interface
+    // apb/axi-lite style read interface
     input  wire        read_en,
-    input  wire [4:0]  read_addr,    // Selects 1 of 32 counters
-    output reg  [47:0] read_data
+    input wire [4:0] read_addr, // selects 1 of 32 counters
+    output reg [47:0] read_data
 );
 
     // 32 x 48-bit counters
@@ -30,14 +30,14 @@ module titan_x5_perf_counters (
             end
             read_data <= 48'd0;
         end else begin
-            // Increment counters on event pulses
+            // increment counters on event pulses
             for (i = 0; i < 32; i = i + 1) begin
                 if (event_pulses[i]) begin
                     counters[i] <= counters[i] + 1;
                 end
             end
             
-            // Read interface
+            // read interface
             if (read_en) begin
                 read_data <= counters[read_addr];
             end

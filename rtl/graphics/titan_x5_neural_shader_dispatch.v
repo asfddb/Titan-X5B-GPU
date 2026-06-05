@@ -13,28 +13,28 @@ module titan_x5_neural_shader_dispatch (
     input  wire         clk,
     input  wire         rst_n,
     
-    // Interface from Shader Execution (SM)
+    // interface from shader execution (sm)
     input  wire         i_shader_valid,
-    input  wire [31:0]  i_material_id,     // Which Neural Material to invoke
-    input  wire [127:0] i_spatial_vector,  // (x, y, z) normals, incoming light vectors
+    input wire [31:0] i_material_id, // which neural material to invoke
+    input wire [127:0] i_spatial_vector, // (x, y, z) normals, incoming light vectors
     output wire         o_shader_ready,
     
-    // Dispatch to Tensor Cores (Transformer Engine 2.0)
+    // dispatch to tensor cores (transformer engine 2.0)
     output reg          o_tensor_req,
-    output reg  [31:0]  o_tensor_opcode,   // e.g., NVFP4_MMA
-    output reg  [511:0] o_tensor_payload,  // Packed parameters for inference
+    output reg [31:0] o_tensor_opcode, // e.g., NVFP4_MMA
+    output reg [511:0] o_tensor_payload, // packed parameters for inference
     input  wire         i_tensor_ack,
     
-    // Result from Tensor Cores
+    // result from tensor cores
     input  wire         i_tensor_done,
-    input  wire [63:0]  i_tensor_result,   // Output inferred pixel color (FP16 RGB)
+    input wire [63:0] i_tensor_result, // output inferred pixel color (fp16 rgb)
     
-    // Interface back to Graphics Pipeline (ROP/TMU)
+    // interface back to graphics pipeline (rop/tmu)
     output reg          o_pixel_valid,
-    output reg  [63:0]  o_pixel_color
+    output reg [63:0] o_pixel_color
 );
 
-    // Neural Shading State Machine
+    // neural shading state machine
     localparam IDLE       = 2'd0;
     localparam DISPATCH   = 2'd1;
     localparam WAIT_INFER = 2'd2;
@@ -61,7 +61,7 @@ module titan_x5_neural_shader_dispatch (
         endcase
     end
 
-    // Dispatch Logic
+    // dispatch logic
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             o_tensor_req <= 0;
@@ -71,12 +71,12 @@ module titan_x5_neural_shader_dispatch (
             o_pixel_valid <= (state == WAIT_INFER && i_tensor_done);
             
             if (state == IDLE && i_shader_valid) begin
-                o_tensor_opcode <= 32'h0000_0004; // Request FP4 inference
+                o_tensor_opcode <= 32'h0000_0004; // request fp4 inference
                 o_tensor_payload <= {352'b0, i_material_id, i_spatial_vector};
             end
             
             if (state == WAIT_INFER && i_tensor_done) begin
-                o_pixel_color <= i_tensor_result; // The Neural Net "hallucinated" the lighting
+                o_pixel_color <= i_tensor_result; // the neural net "hallucinated" the lighting
             end
         end
     end

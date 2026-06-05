@@ -10,7 +10,7 @@ module titan_x5_sm #(
     // L1 Cache Interface (Instruction)
     output wire [31:0] l1_icache_addr,
     output wire        l1_icache_req,
-    input  wire [31:0] l1_icache_rdata,
+    input wire [31:0] l1_icache_rdata,
     input  wire        l1_icache_rvalid,
     
     // L1 Cache Interface (Data)
@@ -18,12 +18,12 @@ module titan_x5_sm #(
     output wire [31:0] l1_dcache_wdata,
     output wire        l1_dcache_req,
     output wire        l1_dcache_we,
-    input  wire [31:0] l1_dcache_rdata,
+    input wire [31:0] l1_dcache_rdata,
     input  wire        l1_dcache_rvalid,
     
-    // Thread/Warp control
-    input  wire [NUM_WARPS-1:0] warp_active,
-    input  wire [NUM_WARPS*32-1:0] warp_pc_in
+    // thread/warp control
+    input wire [NUM_WARPS-1:0] warp_active,
+    input wire [NUM_WARPS*32-1:0] warp_pc_in
 );
 
     wire [2:0]  sched_warp_id;
@@ -70,7 +70,7 @@ module titan_x5_sm #(
         .warp_ready()
     );
     
-    // ALUs for the threads
+    // alus for the threads
     genvar i;
     generate
         for (i=0; i<NUM_ALUS; i=i+1) begin : alu_gen
@@ -99,14 +99,14 @@ module titan_x5_sm #(
         end
     endgenerate
 
-    // Pipeline Logic
+    // pipeline logic
     wire [1023:0] pipeline_mem_addr, pipeline_mem_wdata, pipeline_mem_rdata;
     
-    // Since L1 D-cache is 32-bit (scalar interface in titan_x5_gpu_top), we map Thread 0's request
+    // since l1 d-cache is 32-bit (scalar interface in titan_x5_gpu_top), we map thread 0's request
     assign l1_dcache_addr  = pipeline_mem_addr[31:0];
     assign l1_dcache_wdata = pipeline_mem_wdata[31:0];
     
-    // Broadcast loaded 32-bit data to all 32 lanes
+    // broadcast loaded 32-bit data to all 32 lanes
     assign pipeline_mem_rdata = {32{l1_dcache_rdata}};
 
     titan_x5_pipeline pipeline_inst (
@@ -133,7 +133,7 @@ module titan_x5_sm #(
         .alu_src1(alu_src1),
         .alu_src2(alu_src2),
         .alu_src3(alu_src3),
-        .alu_valid_out(alu_valid_out[0]), // Assume uniform execution latency across warp
+        .alu_valid_out(alu_valid_out[0]), // assume uniform execution latency across warp
         .alu_result(alu_result_flat),
         .mem_req(l1_dcache_req),
         .mem_we(l1_dcache_we),
@@ -152,7 +152,7 @@ module titan_x5_sm #(
         .wmma_b()
     );
     
-    // Register file bank mapping and connectivity
+    // register file bank mapping and connectivity
     wire [3:0] bank_wr_en = (rf_wr_en) ? (4'b0001 << rf_wr_addr[1:0]) : 4'd0;
     
     wire [4095:0] rf_rd_data_0_flat;

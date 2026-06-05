@@ -9,29 +9,29 @@ module titan_x5_command_processor (
     input  wire        clk,
     input  wire        rst_n,
     
-    // Ring buffer interface
-    input  wire [31:0] ring_base_addr,
-    input  wire [31:0] ring_write_ptr,
-    output reg  [31:0] ring_read_ptr,
+    // ring buffer interface
+    input wire [31:0] ring_base_addr,
+    input wire [31:0] ring_write_ptr,
+    output reg [31:0] ring_read_ptr,
     
-    // Memory Interface
-    output reg  [31:0] mem_addr,
+    // memory interface
+    output reg [31:0] mem_addr,
     output reg         mem_req,
     input  wire        mem_ack,
-    input  wire [63:0] mem_data, // 64-bit command packets
+    input wire [63:0] mem_data, // 64-bit command packets
     
-    // Dispatch/Execution Interface
+    // dispatch/execution interface
     output reg         cmd_valid,
-    output reg  [7:0]  cmd_opcode,
-    output reg  [55:0] cmd_payload,
+    output reg [7:0] cmd_opcode,
+    output reg [55:0] cmd_payload,
     input  wire        cmd_ready,
     
-    // Unified Shader Architecture: Output coordinates for Rasterizer (from draw command payload)
-    output reg  [15:0] v0_x, v0_y,
-    output reg  [15:0] v1_x, v1_y,
-    output reg  [15:0] v2_x, v2_y,
+    // unified shader architecture: output coordinates for rasterizer (from draw command payload)
+    output reg [15:0] v0_x, v0_y,
+    output reg [15:0] v1_x, v1_y,
+    output reg [15:0] v2_x, v2_y,
     
-    // Interrupt
+    // interrupt
     output reg         intr_req
 );
 
@@ -58,7 +58,7 @@ module titan_x5_command_processor (
             
             state <= S_IDLE;
         end else begin
-            intr_req <= 1'b0; // Pulse interrupt
+            intr_req <= 1'b0; // pulse interrupt
             
             case (state)
                 S_IDLE: begin
@@ -74,10 +74,10 @@ module titan_x5_command_processor (
                         cmd_opcode <= mem_data[63:56];
                         cmd_payload <= mem_data[55:0];
                         
-                        // Placeholder logic: Extract triangle coordinates if it's a DRAW command
+                        // placeholder logic: extract triangle coordinates if it's a draw command
                         // (Assuming payload or subsequent memory reads provide vertex data in a real setup)
                         if (mem_data[63:56] == CMD_DRAW) begin
-                            // Example decoding from a 56-bit payload (not enough for 6x16-bit, so using dummy/derived data as a placeholder)
+                            // example decoding from a 56-bit payload (not enough for 6x16-bit, so using dummy/derived data as a placeholder)
                             v0_x <= mem_data[15:0];
                             v0_y <= mem_data[31:16];
                             v1_x <= mem_data[47:32];
@@ -96,7 +96,7 @@ module titan_x5_command_processor (
                         ring_read_ptr <= ring_read_ptr + 1;
                         
                         if (cmd_opcode == CMD_FENCE) begin
-                            intr_req <= 1'b1; // Generate interrupt on fence completion
+                            intr_req <= 1'b1; // generate interrupt on fence completion
                         end
                         
                         state <= S_IDLE;

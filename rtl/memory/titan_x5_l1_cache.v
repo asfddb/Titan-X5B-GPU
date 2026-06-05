@@ -18,35 +18,35 @@ module titan_x5_l1_cache #(
     input  wire clk,
     input  wire rst_n,
 
-    // Core interface
+    // core interface
     input  wire                    req_valid,
-    input  wire [ADDR_WIDTH-1:0]   req_addr,
-    input  wire [DATA_WIDTH-1:0]   req_wdata,
+    input wire [ADDR_WIDTH-1:0] req_addr,
+    input wire [DATA_WIDTH-1:0] req_wdata,
     input  wire                    req_write,
     output reg                     req_ready,
 
     output reg                     resp_valid,
-    output reg  [DATA_WIDTH-1:0]   resp_rdata,
+    output reg [DATA_WIDTH-1:0] resp_rdata,
 
-    // AXI4 Master Interface
-    output wire [ADDR_WIDTH-1:0]   m_axi_awaddr,
+    // axi4 master interface
+    output wire [ADDR_WIDTH-1:0] m_axi_awaddr,
     output wire                    m_axi_awvalid,
     input  wire                    m_axi_awready,
-    output wire [LINE_SIZE*8-1:0]  m_axi_wdata,
+    output wire [LINE_SIZE*8-1:0] m_axi_wdata,
     output wire                    m_axi_wvalid,
     input  wire                    m_axi_wready,
-    input  wire [1:0]              m_axi_bresp,
+    input wire [1:0] m_axi_bresp,
     input  wire                    m_axi_bvalid,
     output wire                    m_axi_bready,
-    output wire [ADDR_WIDTH-1:0]   m_axi_araddr,
+    output wire [ADDR_WIDTH-1:0] m_axi_araddr,
     output wire                    m_axi_arvalid,
     input  wire                    m_axi_arready,
-    input  wire [LINE_SIZE*8-1:0]  m_axi_rdata,
+    input wire [LINE_SIZE*8-1:0] m_axi_rdata,
     input  wire                    m_axi_rvalid,
     output wire                    m_axi_rready
 );
 
-    // Internal legacy signals mapped to AXI4
+    // internal legacy signals mapped to axi4
     reg                     mem_req_valid;
     reg  [ADDR_WIDTH-1:0]   mem_req_addr;
     reg                     mem_req_write;
@@ -73,14 +73,14 @@ module titan_x5_l1_cache #(
     localparam INDEX_BITS  = $clog2(SETS);
     localparam TAG_BITS    = ADDR_WIDTH - INDEX_BITS - OFFSET_BITS;
 
-    // Cache Arrays
+    // cache arrays
     reg [LINE_SIZE*8-1:0] data_array [0:SETS-1][0:WAYS-1];
     reg [TAG_BITS-1:0]    tag_array  [0:SETS-1][0:WAYS-1];
     reg                   valid_array[0:SETS-1][0:WAYS-1];
     reg                   dirty_array[0:SETS-1][0:WAYS-1];
     reg [$clog2(WAYS)-1:0]lru_array  [0:SETS-1][0:WAYS-1];
 
-    // MSHR Arrays
+    // mshr arrays
     reg                   mshr_valid [0:MSHR_ENTRIES-1];
     reg [ADDR_WIDTH-1:0]  mshr_addr  [0:MSHR_ENTRIES-1];
 
@@ -89,7 +89,7 @@ module titan_x5_l1_cache #(
 
     integer i, j;
 
-    // Synchronous Reset and cache logic (simplified non-blocking state)
+    // synchronous reset and cache logic (simplified non-blocking state)
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             req_ready <= 1'b0;
@@ -106,12 +106,12 @@ module titan_x5_l1_cache #(
                 mshr_valid[i] <= 1'b0;
             end
         end else begin
-            // Default assignments
-            req_ready <= 1'b1; // Accept requests if MSHR isn't full
+            // default assignments
+            req_ready <= 1'b1; // accept requests if mshr isn't full
             resp_valid <= 1'b0;
 
             if (req_valid && req_ready) begin
-                // Basic hit detection (combinational in practice, simplified here)
+                // basic hit detection (combinational in practice, simplified here)
                 reg hit;
                 reg [$clog2(WAYS)-1:0] hit_way;
                 hit = 1'b0;
@@ -126,15 +126,15 @@ module titan_x5_l1_cache #(
                 if (hit) begin
                     if (req_write) begin
                         dirty_array[req_index][hit_way] <= 1'b1;
-                        // Masked write logic simplified
+                        // masked write logic simplified
                     end else begin
                         resp_valid <= 1'b1;
-                        // Select word based on offset
+                        // select word based on offset
                         resp_rdata <= data_array[req_index][hit_way][DATA_WIDTH-1:0]; 
                     end
-                    // LRU update omitted for brevity
+                    // lru update omitted for brevity
                 end else begin
-                    // Miss - Allocate MSHR
+                    // miss - allocate mshr
                     reg mshr_alloc;
                     mshr_alloc = 1'b0;
                     for (i = 0; i < MSHR_ENTRIES; i = i + 1) begin
@@ -149,19 +149,19 @@ module titan_x5_l1_cache #(
                         end
                     end
                     if (!mshr_alloc) begin
-                        req_ready <= 1'b0; // Stall if MSHR full
+                        req_ready <= 1'b0; // stall if mshr full
                     end
                 end
             end
 
-            // Process L2 response
+            // process l2 response
             if (mem_resp_valid) begin
-                mem_req_valid <= 1'b0; // De-assert request
-                // Fill cache, clear MSHR (Simplified single-entry resolve)
+                mem_req_valid <= 1'b0; // de-assert request
+                // fill cache, clear mshr (simplified single-entry resolve)
                 for (i = 0; i < MSHR_ENTRIES; i = i + 1) begin
                     if (mshr_valid[i]) begin
                         mshr_valid[i] <= 1'b0;
-                        // Allocate to way 0 (Simplification)
+                        // allocate to way 0 (simplification)
                         valid_array[mshr_addr[i][OFFSET_BITS+INDEX_BITS-1:OFFSET_BITS]][0] <= 1'b1;
                         tag_array[mshr_addr[i][OFFSET_BITS+INDEX_BITS-1:OFFSET_BITS]][0] <= mshr_addr[i][ADDR_WIDTH-1:OFFSET_BITS+INDEX_BITS];
                         data_array[mshr_addr[i][OFFSET_BITS+INDEX_BITS-1:OFFSET_BITS]][0] <= mem_resp_rdata;

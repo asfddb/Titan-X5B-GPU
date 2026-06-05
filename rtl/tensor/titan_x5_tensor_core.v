@@ -12,23 +12,23 @@ module titan_x5_tensor_core #(
     input  wire                       en,
     input  wire                       clear,
     input  wire                       mode_fp16, // 0 = INT8, 1 = FP16
-    input  wire [4*DATA_W-1:0]        a_in,      // Left input (4 elements)
-    input  wire [4*DATA_W-1:0]        b_in,      // Top input (4 elements)
+    input wire [4*DATA_W-1:0] a_in, // left input (4 elements)
+    input wire [4*DATA_W-1:0] b_in, // top input (4 elements)
     
-    // WMMA Datapath from Pipeline
+    // wmma datapath from pipeline
     input  wire                       wmma_valid,
-    input  wire [31:0]                wmma_a,
-    input  wire [31:0]                wmma_b,
+    input wire [31:0] wmma_a,
+    input wire [31:0] wmma_b,
 
-    output wire [16*ACC_W-1:0]        c_out      // 4x4 Output
+    output wire [16*ACC_W-1:0] c_out // 4x4 Output
 );
 
-    // Internal wires for systolic array connections
+    // internal wires for systolic array connections
     wire [DATA_W-1:0] a_wire [0:4][0:3];
     wire [DATA_W-1:0] b_wire [0:3][0:4];
     reg  [ACC_W-1:0]  acc_reg [0:3][0:3];
 
-    // Assign inputs
+    // assign inputs
     genvar i, j;
     generate
         for (i = 0; i < 4; i = i + 1) begin : assign_inputs
@@ -41,7 +41,7 @@ module titan_x5_tensor_core #(
     generate
         for (i = 0; i < 4; i = i + 1) begin : row
             for (j = 0; j < 4; j = j + 1) begin : col
-                // Pipeline registers for A and B
+                // pipeline registers for a and b
                 reg [DATA_W-1:0] a_reg;
                 reg [DATA_W-1:0] b_reg;
 
@@ -58,12 +58,12 @@ module titan_x5_tensor_core #(
                 assign a_wire[i][j+1] = a_reg;
                 assign b_wire[i+1][j] = b_reg;
 
-                // MAC Operation
+                // mac operation
                 wire signed [15:0] a_int8 = $signed(a_wire[i][j][7:0]);
                 wire signed [15:0] b_int8 = $signed(b_wire[i][j][7:0]);
                 wire signed [31:0] prod_int8 = a_int8 * b_int8;
 
-                // Real FP16 multiplier instantiated for FP16 MAC accuracy
+                // real fp16 multiplier instantiated for fp16 mac accuracy
                 wire [15:0] prod_fp16_real;
                 titan_x5_fp16_mul u_fp16_mul (
                     .a(a_wire[i][j]),
@@ -71,7 +71,7 @@ module titan_x5_tensor_core #(
                     .result(prod_fp16_real)
                 );
 
-                // Throughput optimization: pipeline product calculation
+                // throughput optimization: pipeline product calculation
                 reg [31:0] prod_pipeline_reg;
                 always @(posedge clk or negedge rst_n) begin
                     if (!rst_n) begin
@@ -87,7 +87,7 @@ module titan_x5_tensor_core #(
                     end else if (clear) begin
                         acc_reg[i][j] <= {ACC_W{1'b0}};
                     end else if (en) begin
-                        // Accumulate from pipelined register
+                        // accumulate from pipelined register
                         acc_reg[i][j] <= acc_reg[i][j] + prod_pipeline_reg;
                     end
                 end

@@ -8,7 +8,7 @@ module titan_x5_hash_fnv64 (
     input  wire        clk,
     input  wire        rst_n,
     input  wire        i_valid,
-    input  wire [63:0] i_data,
+    input wire [63:0] i_data,
     output wire        o_valid,
     output wire [63:0] o_hash
 );
@@ -17,14 +17,14 @@ module titan_x5_hash_fnv64 (
     localparam FNV_PRIME        = 64'h00000100000001B3;
 
     function automatic [63:0] fnv_step;
-        input [63:0] hash_in;
-        input [7:0]  data_byte;
+    input [63:0] hash_in;
+    input [7:0] data_byte;
         begin
             fnv_step = (hash_in ^ data_byte) * FNV_PRIME;
         end
     endfunction
 
-    // Stage 1 (Bytes 0, 1, 2)
+    // stage 1 (bytes 0, 1, 2)
     reg [63:0] s1_hash;
     reg [39:0] s1_data_rem; // bytes 7..3
     reg        s1_valid;
@@ -49,7 +49,7 @@ module titan_x5_hash_fnv64 (
         end
     end
 
-    // Stage 2 (Bytes 3, 4, 5)
+    // stage 2 (bytes 3, 4, 5)
     reg [63:0] s2_hash;
     reg [15:0] s2_data_rem; // bytes 7..6
     reg        s2_valid;
@@ -74,7 +74,7 @@ module titan_x5_hash_fnv64 (
         end
     end
 
-    // Stage 3 (Bytes 6, 7)
+    // stage 3 (bytes 6, 7)
     reg [63:0] s3_hash;
     reg        s3_valid;
 

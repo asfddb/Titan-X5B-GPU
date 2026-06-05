@@ -8,35 +8,33 @@
  */
 module titan_x5_fpga_top (
     input  wire        clk_100mhz, // 100MHz onboard clock (W5)
-    input  wire [15:0] sw,         // 16 onboard switches (V17..R2)
-    input  wire        btnC,       // Center button (U18) for RESET
-    input  wire        btnU,       // Up button (T18) for Manual trigger
+    input wire [15:0] sw, // 16 onboard switches (V17..R2)
+    input  wire        btnC,       // center button (u18) for reset
+    input  wire        btnU,       // up button (t18) for manual trigger
     
-    output wire [15:0] led,        // 16 onboard LEDs (U16..L1)
+    output wire [15:0] led, // 16 onboard LEDs (U16..L1)
     
-    // VGA Interface
-    output wire [3:0]  vga_r,      // VGA Red 4-bit DAC
-    output wire [3:0]  vga_g,      // VGA Green 4-bit DAC
-    output wire [3:0]  vga_b,      // VGA Blue 4-bit DAC
-    output wire        vga_hsync,  // VGA HSync
-    output wire        vga_vsync   // VGA VSync
+    // vga interface
+    output wire [3:0] vga_r, // vga red 4-bit dac
+    output wire [3:0] vga_g, // vga green 4-bit dac
+    output wire [3:0] vga_b, // vga blue 4-bit dac
+    output wire        vga_hsync,  // vga hsync
+    output wire        vga_vsync   // vga vsync
 );
 
-    // ==========================================
-    // Clock Generation (MMCM / PLL)
-    // ==========================================
-    // Generate 50MHz core clock and 148.5MHz (or closest) pixel clock for 1080p
-    // For Basys 3 (100MHz in), we will generate a simplified 25MHz pixel clock 
+    // clock generation (mmcm / pll)
+    // generate 50mhz core clock and 148.5mhz (or closest) pixel clock for 1080p
+    // for basys 3 (100mhz in), we will generate a simplified 25mhz pixel clock 
     // for standard 640x480@60Hz VGA output to guarantee timing closure.
     wire clk_core;
     wire clk_pixel;
     wire locked;
     
-    // In a real Vivado project, this would be an IP catalog Clocking Wizard.
-    // Here we simulate it with simple dividers/buffers for the synthesis tool.
-    BUFG bufg_core (.I(clk_100mhz), .O(clk_core)); // Core runs at 100MHz
+    // in a real vivado project, this would be an ip catalog clocking wizard.
+    // here we simulate it with simple dividers/buffers for the synthesis tool.
+    BUFG bufg_core (.I(clk_100mhz), .O(clk_core)); // core runs at 100mhz
     
-    // Simple clock divider for 25MHz pixel clock (100MHz / 4)
+    // simple clock divider for 25mhz pixel clock (100mhz / 4)
     reg [1:0] pclk_div;
     always @(posedge clk_100mhz) begin
         if (btnC) pclk_div <= 0;
@@ -44,18 +42,16 @@ module titan_x5_fpga_top (
     end
     BUFG bufg_pixel (.I(pclk_div[1]), .O(clk_pixel));
 
-    wire sys_rst_n = ~btnC; // Active low reset
+    wire sys_rst_n = ~btnC; // active low reset
 
-    // ==========================================
-    // Host Ring Buffer Emulation
-    // ==========================================
-    // Since we don't have a PCIe host, we emulate host commands via BRAM.
+    // host ring buffer emulation
+    // since we don't have a pcie host, we emulate host commands via bram.
     wire [31:0] host_ring_base = 32'h1000_0000;
     reg  [31:0] host_ring_wptr;
     wire [31:0] host_ring_rptr;
     wire        host_intr;
     
-    // Manual trigger via button to write a DRAW command
+    // manual trigger via button to write a draw command
     reg btnU_prev;
     always @(posedge clk_core or negedge sys_rst_n) begin
         if (!sys_rst_n) begin
@@ -63,33 +59,31 @@ module titan_x5_fpga_top (
             btnU_prev <= 1'b0;
         end else begin
             btnU_prev <= btnU;
-            if (btnU && !btnU_prev) begin // Rising edge
-                host_ring_wptr <= host_ring_wptr + 1'b1; // Enqueue a command
+            if (btnU && !btnU_prev) begin // rising edge
+                host_ring_wptr <= host_ring_wptr + 1'b1; // enqueue a command
             end
         end
     end
     
-    // Status LEDs
+    // status leds
     assign led[3:0]   = host_ring_wptr[3:0];
     assign led[7:4]   = host_ring_rptr[3:0];
     assign led[14:8]  = 7'd0;
     assign led[15]    = host_intr;
 
-    // ==========================================
-    // Titan X5 GPU Core Instantiation
-    // ==========================================
-    // Internal VGA 8-bit color signals
+    // titan x5 gpu core instantiation
+    // internal vga 8-bit color signals
     wire [7:0] core_vga_r;
     wire [7:0] core_vga_g;
     wire [7:0] core_vga_b;
     wire       core_vga_de;
     
-    // Truncate 8-bit color down to Basys 3's 4-bit resistor ladder DAC
+    // truncate 8-bit color down to basys 3's 4-bit resistor ladder dac
     assign vga_r = core_vga_r[7:4];
     assign vga_g = core_vga_g[7:4];
     assign vga_b = core_vga_b[7:4];
 
-    // Dummy VRAM AXI wires (VRAM memory controller handles internal BRAM/DDR)
+    // dummy vram axi wires (vram memory controller handles internal bram/ddr)
     wire [3:0]   vram_arid; wire [31:0]  vram_araddr; wire [7:0]   vram_arlen;
     wire [2:0]   vram_arsize; wire [1:0]   vram_arburst; wire         vram_arvalid;
     wire         vram_arready = 1'b1;

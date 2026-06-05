@@ -12,9 +12,9 @@ module titan_x5_2048_mul (
     input  wire clk,
     input  wire rst_n,
     input  wire valid_in,
-    input  wire [2047:0] src1,
-    input  wire [2047:0] src2,
-    output reg  [4095:0] result_out,
+    input wire [2047:0] src1,
+    input wire [2047:0] src2,
+    output reg [4095:0] result_out,
     output reg  valid_out
 );
 

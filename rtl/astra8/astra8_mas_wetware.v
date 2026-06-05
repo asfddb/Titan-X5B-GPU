@@ -23,27 +23,27 @@
 module astra8_mas_wetware #(
     parameter GRID_X        = 8,
     parameter GRID_Y        = 8,
-    parameter DATA_WIDTH    = 8, // Requires DATA_WIDTH >= 4
-    parameter D_U_SHIFT     = 2, // Base diffusion rate for U (shift right)
-    parameter D_V_SHIFT     = 1, // Base diffusion rate for V (shift right)
+    parameter DATA_WIDTH    = 8, // requires data_width >= 4
+    parameter D_U_SHIFT     = 2, // base diffusion rate for u (shift right)
+    parameter D_V_SHIFT     = 1, // base diffusion rate for v (shift right)
     parameter [DATA_WIDTH-1:0] FEED_RATE  = 10,
     parameter [DATA_WIDTH-1:0] DECAY_RATE = 2,
     parameter BOUNDARY_MODE = 0  // 0: Neumann (zero-flux reflective), 1: Toroidal (wrap-around)
 )(
     input  wire                               clk,
     input  wire                               rst_n,
-    input  wire                               enable_slow_tick, // Pulse for slow-time evolution
+    input  wire                               enable_slow_tick, // pulse for slow-time evolution
     
-    // Perturbation / Stimulus injection (1 bit per cell)
-    input  wire [(GRID_X*GRID_Y)-1:0]         stimulus_inject,
+    // perturbation / stimulus injection (1 bit per cell)
+    input wire [(GRID_X*GRID_Y)-1:0] stimulus_inject,
     
-    // Output chemical modulations to alter routing tables dynamically
+    // output chemical modulations to alter routing tables dynamically
     // (Provides 2 bits per grid cell)
-    output wire [(GRID_X*GRID_Y*2)-1:0]       routing_modulations
+    output wire [(GRID_X*GRID_Y*2)-1:0] routing_modulations
 );
 
     // --- Synthesis-Time Parameter Validation ---
-    // These generate errors during elaboration if constraints are violated.
+    // these generate errors during elaboration if constraints are violated.
     generate
         if (DATA_WIDTH < 4) begin : gen_chk_dw
             // synopsys translate_off
@@ -62,17 +62,15 @@ module astra8_mas_wetware #(
         end
     endgenerate
 
-    // Chemical concentration registers (Activator U, Inhibitor V)
+    // chemical concentration registers (activator u, inhibitor v)
     reg [DATA_WIDTH-1:0] chem_u [0:(GRID_X*GRID_Y)-1];
     reg [DATA_WIDTH-1:0] chem_v [0:(GRID_X*GRID_Y)-1];
 
-    // ===================================================================
-    // INITIALIZATION BLOCK (For simulation startup and FPGA power-up seed)
-    // ===================================================================
+    // initialization block (for simulation startup and fpga power-up seed)
     initial begin : sim_init
         integer i_init;
         for (i_init = 0; i_init < GRID_X*GRID_Y; i_init = i_init + 1) begin
-            // Pseudo-random patterned seed using modular fold for full grid coverage.
+            // pseudo-random patterned seed using modular fold for full grid coverage.
             if (((i_init & 7) == 5) || (((i_init & 7) ^ ((i_init >> 3) & 3)) == 3)) begin
                 chem_u[i_init] = {DATA_WIDTH{1'b1}};
                 chem_v[i_init] = {DATA_WIDTH{1'b0}};
@@ -80,8 +78,8 @@ module astra8_mas_wetware #(
                 chem_u[i_init] = {DATA_WIDTH{1'b0}};
                 chem_v[i_init] = {DATA_WIDTH{1'b1}};
             end else if (i_init == 0) begin
-                // Guarantee cell 0 always has a nonzero seed. Critical for 1×1 grids
-                chem_u[i_init] = {1'b0, {(DATA_WIDTH-1){1'b1}}}; // Half-scale U seed
+                // guarantee cell 0 always has a nonzero seed. critical for 1×1 grids
+                chem_u[i_init] = {1'b0, {(DATA_WIDTH-1){1'b1}}}; // half-scale u seed
                 chem_v[i_init] = {DATA_WIDTH{1'b0}};
             end else begin
                 chem_u[i_init] = {DATA_WIDTH{1'b0}};
@@ -90,18 +88,18 @@ module astra8_mas_wetware #(
         end
     end
 
-    // Combinational next-state arrays
+    // combinational next-state arrays
     wire [DATA_WIDTH-1:0] next_chem_u [0:(GRID_X*GRID_Y)-1];
     wire [DATA_WIDTH-1:0] next_chem_v [0:(GRID_X*GRID_Y)-1];
 
-    // Internal calculation width mathematically guaranteed to prevent ANY intermediate overflow:
+    // internal calculation width mathematically guaranteed to prevent any intermediate overflow:
     localparam CALC_WIDTH = DATA_WIDTH + 5;
 
-    // Globally zero-extended constants
+    // globally zero-extended constants
     wire signed [CALC_WIDTH-1:0] global_decay = {{(CALC_WIDTH-DATA_WIDTH){1'b0}}, DECAY_RATE};
     wire signed [CALC_WIDTH-1:0] global_feed  = {{(CALC_WIDTH-DATA_WIDTH){1'b0}}, FEED_RATE};
 
-    // Signed zero constant to prevent compiler casting issues
+    // signed zero constant to prevent compiler casting issues
     localparam signed [CALC_WIDTH-1:0] SIGNED_ZERO = 0;
 
     // --- Global Pre-computation of Extracted & Shifted Nets ---
@@ -140,7 +138,7 @@ module astra8_mas_wetware #(
             for (x = 0; x < GRID_X; x = x + 1) begin : gen_x
                 localparam i         = y * GRID_X + x;
                 
-                // Boundary conditions: Neumann (self-reflection) or Toroidal (wrap-around)
+                // boundary conditions: neumann (self-reflection) or toroidal (wrap-around)
                 localparam up_idx    = (y > 0)          ? (i - GRID_X) : (BOUNDARY_MODE ? (i + GRID_X*(GRID_Y-1)) : i);
                 localparam down_idx  = (y < GRID_Y - 1) ? (i + GRID_X) : (BOUNDARY_MODE ? (i - GRID_X*(GRID_Y-1)) : i);
                 localparam left_idx  = (x > 0)          ? (i - 1)      : (BOUNDARY_MODE ? (i + (GRID_X-1)) : i);
@@ -167,79 +165,69 @@ module astra8_mas_wetware #(
                 wire signed [CALC_WIDTH-1:0] v_half    = chem_v_half[i];
                 wire signed [CALC_WIDTH-1:0] v_quarter = chem_v_quarter[i];
 
-                // ===================================================================
-                // LAPLACIAN: Discrete 2D Laplacian = sum(neighbors) - 4*center
-                // Balanced depth-2 adder tree: ((up+down) + (left+right)) - 4*center
-                // ===================================================================
+                // laplacian: discrete 2d laplacian = sum(neighbors) - 4*center
+                // balanced depth-2 adder tree: ((up+down) + (left+right)) - 4*center
                 wire signed [CALC_WIDTH-1:0] laplacian_u = ((u_u_ext + u_d_ext) + (u_l_ext + u_r_ext)) - u_c_x4;
                 wire signed [CALC_WIDTH-1:0] laplacian_v = ((v_u_ext + v_d_ext) + (v_l_ext + v_r_ext)) - v_c_x4;
                 
-                // ===================================================================
-                // NON-LINEAR WETWARE PHYSICS
-                // ===================================================================
+                // non-linear wetware physics
                 
-                // Micro-turbulence: XOR of neighbor LSBs breaks static symmetry
+                // micro-turbulence: xor of neighbor lsbs breaks static symmetry
                 wire micro_turbulence = u_u_ext[0] ^ u_d_ext[0]
                                        ^ v_l_ext[0] ^ v_r_ext[0];
                 
-                // Viscous friction: U/V MSB misalignment or micro-turbulence → extra damping
+                // viscous friction: u/v msb misalignment or micro-turbulence → extra damping
                 wire viscous_friction = (u_c_ext[DATA_WIDTH-1] ^ v_c_ext[DATA_WIDTH-1])
                                        | micro_turbulence;
                 wire signed [CALC_WIDTH-1:0] diff_u_base   = laplacian_u >>> D_U_SHIFT;
                 wire signed [CALC_WIDTH-1:0] diff_u        = viscous_friction ? (diff_u_base >>> 2) : diff_u_base;
                 
-                // Chaotic spark: coincidence of neighbor LSBs
+                // chaotic spark: coincidence of neighbor lsbs
                 wire chaotic_spark = u_l_ext[0] & u_r_ext[0];
                 
-                // V surge: U dominance or chaotic spark → doubled V diffusion (catalytic effect)
+                // v surge: u dominance or chaotic spark → doubled v diffusion (catalytic effect)
                 wire v_surge = (u_c_ext[DATA_WIDTH-1] & u_c_ext[DATA_WIDTH-2]) | chaotic_spark;
                 wire signed [CALC_WIDTH-1:0] diff_v_base    = laplacian_v >>> D_V_SHIFT;
                 wire signed [CALC_WIDTH-1:0] diff_v         = v_surge ? (diff_v_base <<< 1) : diff_v_base;
                 
-                // ===================================================================
-                // REACTION TERMS
-                // ===================================================================
+                // reaction terms
                 
-                // Fast bitwise activation: U is "active" when either of its top 2 bits are set (~25% threshold)
+                // fast bitwise activation: u is "active" when either of its top 2 bits are set (~25% threshold)
                 wire u_is_active = u_c_ext[DATA_WIDTH-1] | u_c_ext[DATA_WIDTH-2];
                 
-                // Wetware coupling: resource bridge via bitwise AND of U & V concentrations
+                // wetware coupling: resource bridge via bitwise and of u & v concentrations
                 wire [DATA_WIDTH-1:0] u_and_v = u_c_ext[DATA_WIDTH-1:0] & v_c_ext[DATA_WIDTH-1:0];
                 wire signed [CALC_WIDTH-1:0] wetware_drain_u     = {{(CALC_WIDTH-DATA_WIDTH+2){1'b0}}, u_and_v[DATA_WIDTH-1:2]};
                 wire signed [CALC_WIDTH-1:0] wetware_coupling_uv = {{(CALC_WIDTH-DATA_WIDTH+1){1'b0}}, u_and_v[DATA_WIDTH-1:1]};
                 
-                // Collapse dynamics: V high + U low → V aggressively drains U
+                // collapse dynamics: v high + u low → v aggressively drains u
                 wire u_collapse = v_c_ext[DATA_WIDTH-1] & ~u_c_ext[DATA_WIDTH-1];
                 wire signed [CALC_WIDTH-1:0] collapse_drain = u_collapse ? u_half : SIGNED_ZERO;
                 
-                // Stimulus injection: stimulus active -> global_feed, else SIGNED_ZERO
+                // stimulus injection: stimulus active -> global_feed, else signed_zero
                 wire signed [CALC_WIDTH-1:0] stim_val = stimulus_inject[i] ? global_feed : SIGNED_ZERO;
                 
-                // ===================================================================
-                // BALANCED ACCUMULATION TREES (Depth-3 Balanced Trees with late-arriving diffusion)
-                // ===================================================================
+                // balanced accumulation trees (depth-3 balanced trees with late-arriving diffusion)
                 
-                // U channel: We avoid an explicit negation adder for u_quarter.
-                // If U is active, u_quarter is added to the positive terms.
-                // If U is inactive, u_quarter is added to the negative terms.
+                // u channel: we avoid an explicit negation adder for u_quarter.
+                // if u is active, u_quarter is added to the positive terms.
+                // if u is inactive, u_quarter is added to the negative terms.
                 wire signed [CALC_WIDTH-1:0] u_pos_term = u_is_active ? u_quarter : SIGNED_ZERO;
                 wire signed [CALC_WIDTH-1:0] u_neg_term = u_is_active ? SIGNED_ZERO : u_quarter;
 
-                // Balanced depth-3/4 adder tree:
+                // balanced depth-3/4 adder tree:
                 wire signed [CALC_WIDTH-1:0] u_early_pos_sum = u_c_ext + stim_val + u_pos_term;
                 wire signed [CALC_WIDTH-1:0] u_early_neg_sum = (v_half + wetware_drain_u) + (collapse_drain + u_neg_term);
                 wire signed [CALC_WIDTH-1:0] new_u_calc      = (u_early_pos_sum - u_early_neg_sum) + diff_u;
                     
-                // V channel: coupling_uv is a positive U→V transfer, not a drain.
-                // Balanced adder tree:
+                // v channel: coupling_uv is a positive u→v transfer, not a drain.
+                // balanced adder tree:
                 wire signed [CALC_WIDTH-1:0] v_early_pos_sum = v_c_ext + u_half + wetware_coupling_uv;
                 wire signed [CALC_WIDTH-1:0] v_early_neg_sum = v_quarter + global_decay;
                 wire signed [CALC_WIDTH-1:0] new_v_calc      = (v_early_pos_sum - v_early_neg_sum) + diff_v;
                 
-                // ===================================================================
-                // PURE SATURATION MUXES (Standard compliant and highly optimized)
-                // Underflow (negative) → clamp to 0. Overflow (> 2^DW-1) → clamp to all-1s.
-                // ===================================================================
+                // pure saturation muxes (standard compliant and highly optimized)
+                // underflow (negative) → clamp to 0. overflow (> 2^dw-1) → clamp to all-1s.
                 wire u_underflow = new_u_calc[CALC_WIDTH-1];
                 wire u_overflow  = ~u_underflow & (|new_u_calc[CALC_WIDTH-2 : DATA_WIDTH]);
                 
@@ -257,14 +245,12 @@ module astra8_mas_wetware #(
         end
     endgenerate
 
-    // ===================================================================
-    // SEQUENTIAL STATE UPDATE
-    // ===================================================================
+    // sequential state update
     always @(posedge clk or negedge rst_n) begin : seq_update
         integer i_seq;
         if (!rst_n) begin
             for (i_seq = 0; i_seq < GRID_X*GRID_Y; i_seq = i_seq + 1) begin
-                // Pseudo-random patterned seed using modular fold for full grid coverage.
+                // pseudo-random patterned seed using modular fold for full grid coverage.
                 if (((i_seq & 7) == 5) || (((i_seq & 7) ^ ((i_seq >> 3) & 3)) == 3)) begin
                     chem_u[i_seq] <= {DATA_WIDTH{1'b1}};
                     chem_v[i_seq] <= {DATA_WIDTH{1'b0}};
@@ -272,8 +258,8 @@ module astra8_mas_wetware #(
                     chem_u[i_seq] <= {DATA_WIDTH{1'b0}};
                     chem_v[i_seq] <= {DATA_WIDTH{1'b1}};
                 end else if (i_seq == 0) begin
-                    // Guarantee cell 0 always has a nonzero seed. Critical for 1×1 grids
-                    chem_u[i_seq] <= {1'b0, {(DATA_WIDTH-1){1'b1}}}; // Half-scale U seed
+                    // guarantee cell 0 always has a nonzero seed. critical for 1×1 grids
+                    chem_u[i_seq] <= {1'b0, {(DATA_WIDTH-1){1'b1}}}; // half-scale u seed
                     chem_v[i_seq] <= {DATA_WIDTH{1'b0}};
                 end else begin
                     chem_u[i_seq] <= {DATA_WIDTH{1'b0}};
@@ -288,9 +274,7 @@ module astra8_mas_wetware #(
         end
     end
 
-    // ===================================================================
-    // OUTPUT: Routing modulations derived from MSBs of U and V per cell
-    // ===================================================================
+    // output: routing modulations derived from msbs of u and v per cell
     genvar g;
     generate
         for (g = 0; g < GRID_X*GRID_Y; g = g + 1) begin : gen_modulations

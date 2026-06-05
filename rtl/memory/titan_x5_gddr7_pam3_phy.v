@@ -11,24 +11,24 @@
  */
 
 module titan_x5_gddr7_pam3_phy (
-    input  wire         clk_28g,     // High-speed 28 GHz clock domain
+    input  wire         clk_28g,     // high-speed 28 ghz clock domain
     input  wire         rst_n,
     
-    // Internal AXI Memory Controller Interface (NRZ / standard digital)
-    input  wire [511:0] tx_data_nrz, // 512 bits to transmit
+    // internal axi memory controller interface (nrz / standard digital)
+    input wire [511:0] tx_data_nrz, // 512 bits to transmit
     input  wire         tx_valid,
     output wire         tx_ready,
     
-    output reg  [511:0] rx_data_nrz, // 512 bits received
+    output reg [511:0] rx_data_nrz, // 512 bits received
     output reg          rx_valid,
     
-    // External Physical GDDR7 Pins (Simulated PAM3 States)
+    // external physical gddr7 pins (simulated pam3 states)
     // 2 bits used per pin to represent 3 states: 2'b00 (-1), 2'b01 (0), 2'b10 (+1)
     output wire [511:0] gddr7_dq_tx, // 256 physical pins (2 bits each for simulation)
-    input  wire [511:0] gddr7_dq_rx 
+    input wire [511:0] gddr7_dq_rx
 );
 
-    // PAM3 Encoder: Maps 3 bits of NRZ data to 2 PAM3 symbols (pins)
+    // pam3 encoder: maps 3 bits of nrz data to 2 pam3 symbols (pins)
     // 3 bits = 8 states. 2 PAM3 symbols = 9 states. 
     genvar i;
     generate
@@ -54,14 +54,14 @@ module titan_x5_gddr7_pam3_phy (
         end
     endgenerate
 
-    // PAM3 Decoder: Maps 2 PAM3 symbols back to 3 NRZ bits
+    // pam3 decoder: maps 2 pam3 symbols back to 3 nrz bits
     always @(posedge clk_28g) begin
         if (!rst_n) begin
             rx_data_nrz <= 0;
             rx_valid <= 0;
         end else begin
-            // Simplified decoder for simulation
-            rx_valid <= 1'b1; // Assume continuous read
+            // simplified decoder for simulation
+            rx_valid <= 1'b1; // assume continuous read
         end
     end
 

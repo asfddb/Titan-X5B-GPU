@@ -12,15 +12,15 @@ module titan_x5_2048_regfile (
     input  wire clk,
     input  wire rst_n,
     
-    input  wire [2:0] rd_addr1,
+    input wire [2:0] rd_addr1,
     output wire [2047:0] rd_data1,
     
-    input  wire [2:0] rd_addr2,
+    input wire [2:0] rd_addr2,
     output wire [2047:0] rd_data2,
     
     input  wire wr_en,
-    input  wire [2:0] wr_addr,
-    input  wire [2047:0] wr_data
+    input wire [2:0] wr_addr,
+    input wire [2047:0] wr_data
 );
 
     integer i;

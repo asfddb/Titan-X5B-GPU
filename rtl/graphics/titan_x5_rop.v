@@ -10,48 +10,48 @@ module titan_x5_rop (
     input  wire clk,
     input  wire rst_n,
 
-    // Fragment Input
+    // fragment input
     input  wire i_valid,
     output wire i_ready,
-    input  wire [15:0] i_x,
-    input  wire [15:0] i_y,
-    input  wire [31:0] i_z,
-    input  wire [31:0] i_color, // RGBA
+    input wire [15:0] i_x,
+    input wire [15:0] i_y,
+    input wire [31:0] i_z,
+    input wire [31:0] i_color, // rgba
 
-    // ROP Configuration
-    input  wire [2:0]  cfg_depth_func, 
+    // rop configuration
+    input wire [2:0] cfg_depth_func,
     input  wire        cfg_depth_write,
-    input  wire [2:0]  cfg_stencil_func, 
-    input  wire [7:0]  cfg_stencil_ref,
+    input wire [2:0] cfg_stencil_func,
+    input wire [7:0] cfg_stencil_ref,
     input  wire        cfg_stencil_write,
     input  wire        cfg_blend_en,
     input  wire        cfg_dcc_en,
 
-    // Memory Interface (Framebuffer / Depthbuffer)
+    // memory interface (framebuffer / depthbuffer)
     output wire        mem_req,
     output wire        mem_we,
     output wire [31:0] mem_addr,
     output wire [31:0] mem_wdata,
     input  wire        mem_gnt,
     input  wire        mem_valid,
-    input  wire [31:0] mem_rdata,
+    input wire [31:0] mem_rdata,
 
-    // DCC Metadata Interface
+    // dcc metadata interface
     output reg         dcc_req,
     output reg         dcc_we,
-    output reg  [31:0] dcc_addr,
-    output reg  [7:0]  dcc_wdata,
+    output reg [31:0] dcc_addr,
+    output reg [7:0] dcc_wdata,
     input  wire        dcc_gnt,
     input  wire        dcc_valid,
 
-    // Config Base Addresses
-    input  wire [31:0] base_color,
-    input  wire [31:0] base_depth,
+    // config base addresses
+    input wire [31:0] base_color,
+    input wire [31:0] base_depth,
     
-    output wire [2:0]  dbg_state
+    output wire [2:0] dbg_state
 );
 
-    // Memory Arbiter
+    // memory arbiter
     reg mem_busy;
     reg [1:0] mem_owner;
     
@@ -121,7 +121,7 @@ module titan_x5_rop (
                         if (cfg_depth_func != 3'd7 && cfg_depth_func != 3'd0) begin
                             z_state <= 1;
                         end else begin
-                            if (cfg_depth_func == 3'd7) begin // Always
+                            if (cfg_depth_func == 3'd7) begin // always
                                 zc_x <= i_x; zc_y <= i_y; zc_z <= i_z; zc_c <= i_color;
                                 z_out_valid <= 1;
                             end

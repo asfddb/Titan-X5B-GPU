@@ -5,30 +5,28 @@ module titan_x6_ucie_phy #(
     parameter NUM_LANES  = 16,
     parameter SER_RATIO  = FLIT_WIDTH / NUM_LANES
 )(
-    input  wire                     clk,          // High speed lane clock
-    input  wire                     rst_n,        // Asynchronous reset, active low
+    input  wire                     clk,          // high speed lane clock
+    input  wire                     rst_n,        // asynchronous reset, active low
     
-    // Core Interface (Runs at full FLIT_WIDTH)
+    // core interface (runs at full flit_width)
     input  wire                     core_tx_valid,
-    input  wire [FLIT_WIDTH-1:0]    core_tx_flit,
+    input wire [FLIT_WIDTH-1:0] core_tx_flit,
     output wire                     core_tx_ready,
     
     output wire                     core_rx_valid,
-    output wire [FLIT_WIDTH-1:0]    core_rx_flit,
+    output wire [FLIT_WIDTH-1:0] core_rx_flit,
     
-    // Physical Lanes (Die-to-Die Interconnect)
-    output wire [NUM_LANES-1:0]     phy_tx_lanes,
-    input  wire [NUM_LANES-1:0]     phy_rx_lanes
+    // physical lanes (die-to-die interconnect)
+    output wire [NUM_LANES-1:0] phy_tx_lanes,
+    input wire [NUM_LANES-1:0] phy_rx_lanes
 );
 
-    // ---------------------------------------------------------
-    // TX Path: Flit Packing & Serialization
-    // ---------------------------------------------------------
+    // tx path: flit packing & serialization
     reg [$clog2(SER_RATIO)-1:0] tx_cnt;
     reg [FLIT_WIDTH-1:0]        tx_shift_reg;
     reg                         tx_active;
 
-    // Ready is asserted when the shift register is empty (tx_cnt == 0)
+    // ready is asserted when the shift register is empty (tx_cnt == 0)
     assign core_tx_ready = (tx_cnt == 0);
 
     always @(posedge clk or negedge rst_n) begin
@@ -43,23 +41,21 @@ module titan_x6_ucie_phy #(
                     tx_cnt       <= SER_RATIO - 1;
                     tx_active    <= 1'b1;
                 end else begin
-                    tx_shift_reg <= {FLIT_WIDTH{1'b0}}; // Output 0s on idle
+                    tx_shift_reg <= {FLIT_WIDTH{1'b0}}; // output 0s on idle
                     tx_active    <= 1'b0;
                 end
             end else begin
-                // Shift bits right by NUM_LANES to expose next chunk on LSBs
+                // shift bits right by num_lanes to expose next chunk on lsbs
                 tx_shift_reg <= {{NUM_LANES{1'b0}}, tx_shift_reg[FLIT_WIDTH-1:NUM_LANES]};
                 tx_cnt       <= tx_cnt - 1;
             end
         end
     end
 
-    // Drive physical lanes from the LSBs of the shift register
+    // drive physical lanes from the lsbs of the shift register
     assign phy_tx_lanes = tx_shift_reg[NUM_LANES-1:0];
 
-    // ---------------------------------------------------------
-    // RX Path: Flit Deserialization & Unpacking
-    // ---------------------------------------------------------
+    // rx path: flit deserialization & unpacking
     reg [$clog2(SER_RATIO)-1:0] rx_cnt;
     reg [FLIT_WIDTH-1:0]        rx_shift_reg;
     reg                         rx_valid_reg;
@@ -72,7 +68,7 @@ module titan_x6_ucie_phy #(
             rx_valid_reg <= 1'b0;
             rx_flit_reg  <= {FLIT_WIDTH{1'b0}};
         end else begin
-            // Shift incoming data into MSBs, pushing existing data down
+            // shift incoming data into msbs, pushing existing data down
             rx_shift_reg <= {phy_rx_lanes, rx_shift_reg[FLIT_WIDTH-1 : NUM_LANES]};
             
             if (rx_cnt == SER_RATIO - 1) begin

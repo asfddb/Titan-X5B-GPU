@@ -9,32 +9,32 @@ module titan_x5_tmu (
     input  wire clk,
     input  wire rst_n,
     
-    // Request interface
+    // request interface
     input  wire i_valid,
     output wire i_ready,
-    input  wire [31:0] i_u, // 16.16 fixed point
-    input  wire [31:0] i_v, // 16.16 fixed point
-    input  wire [15:0] i_tex_width,
-    input  wire [15:0] i_tex_height,
+    input wire [31:0] i_u, // 16.16 fixed point
+    input wire [31:0] i_v, // 16.16 fixed point
+    input wire [15:0] i_tex_width,
+    input wire [15:0] i_tex_height,
     input  wire        i_wrap_mode, // 0: wrap, 1: clamp
-    input  wire [1:0]  i_format,    // 00: 8-bit, 01: 16-bit, 10: 32-bit
-    input  wire [31:0] i_tex_base_addr, 
+    input wire [1:0] i_format, // 00: 8-bit, 01: 16-bit, 10: 32-bit
+    input wire [31:0] i_tex_base_addr,
     
-    // Result interface
+    // result interface
     output wire        o_valid,
     input  wire        o_ready,
-    output wire [31:0] o_color, // Output 32-bit RGBA
+    output wire [31:0] o_color, // output 32-bit rgba
     output wire [15:0] o_x,
     output wire [15:0] o_y,
     
-    // Memory Interface (for Cache Miss)
+    // memory interface (for cache miss)
     output wire        mem_req,
     input  wire        mem_gnt,
     output wire [31:0] mem_addr,
     input  wire        mem_valid,
-    input  wire [31:0] mem_rdata,
+    input wire [31:0] mem_rdata,
     
-    output wire [2:0]  dbg_state
+    output wire [2:0] dbg_state
 );
 
     localparam S_IDLE       = 3'd0;
@@ -51,7 +51,7 @@ module titan_x5_tmu (
     reg [15:0] y_reg;
     reg [1:0]  texel_idx;
 
-    // Direct-mapped 4KB Cache (1K words)
+    // direct-mapped 4kb cache (1k words)
     reg [31:0] cache_data [0:1023];
     reg [19:0] cache_tag  [0:1023];
     reg        cache_valid[0:1023];
@@ -82,7 +82,7 @@ module titan_x5_tmu (
     wire [7:0]  uf = i_u[15:8];
     wire [7:0]  vf = i_v[15:8];
 
-    // Wrap/Clamp Logic
+    // wrap/clamp logic
     reg [15:0] u_0, u_1, v_0, v_1;
     always @(*) begin
         if (i_wrap_mode == 1'b1) begin // clamp
@@ -104,9 +104,9 @@ module titan_x5_tmu (
     wire [19:0] cache_tag_req = t_addr[texel_idx][31:12];
 
     function [31:0] extract_color;
-        input [31:0] word;
-        input [1:0]  offset;
-        input [1:0]  fmt;
+    input [31:0] word;
+    input [1:0] offset;
+    input [1:0] fmt;
         begin
             if (fmt == 2'b10) begin
                 extract_color = word;
@@ -124,9 +124,9 @@ module titan_x5_tmu (
     endfunction
 
     function [7:0] lerp;
-        input [7:0] a;
-        input [7:0] b;
-        input [7:0] f;
+    input [7:0] a;
+    input [7:0] b;
+    input [7:0] f;
         reg [15:0] diff;
         begin
             if (a > b) begin
@@ -195,7 +195,7 @@ module titan_x5_tmu (
                         cache_data[cache_idx] <= mem_rdata;
                         cache_tag[cache_idx]  <= cache_tag_req;
                         cache_valid[cache_idx] <= 1'b1;
-                        state <= S_CACHE_READ; // Retry with loaded data
+                        state <= S_CACHE_READ; // retry with loaded data
                     end
                 end
                 

@@ -4,9 +4,9 @@
  * Combines sign, adds exponents, and multiplies mantissas.
  */
 module titan_x5_fp16_mul (
-    input  wire [15:0] a,
-    input  wire [15:0] b,
-    output reg  [15:0] result
+    input wire [15:0] a,
+    input wire [15:0] b,
+    output reg [15:0] result
 );
 
     wire sign_a = a[15];
@@ -26,24 +26,24 @@ module titan_x5_fp16_mul (
     wire is_nan_a  = (exp_a == 5'b11111 && frac_a != 10'b0);
     wire is_nan_b  = (exp_b == 5'b11111 && frac_b != 10'b0);
 
-    // Add hidden bit
+    // add hidden bit
     wire [10:0] mant_a = (exp_a == 5'b00000) ? {1'b0, frac_a} : {1'b1, frac_a};
     wire [10:0] mant_b = (exp_b == 5'b00000) ? {1'b0, frac_b} : {1'b1, frac_b};
 
-    // Multiply mantissas
+    // multiply mantissas
     wire [21:0] mant_res_full = mant_a * mant_b;
     
     always @(*) begin
         if (is_nan_a || is_nan_b) begin
-            result = 16'h7E00; // NaN
+            result = 16'h7E00; // nan
         end else if ((is_inf_a && is_zero_b) || (is_zero_a && is_inf_b)) begin
-            result = 16'h7E00; // NaN
+            result = 16'h7E00; // nan
         end else if (is_inf_a || is_inf_b) begin
-            result = {sign_res, 5'b11111, 10'b0}; // Inf
+            result = {sign_res, 5'b11111, 10'b0}; // inf
         end else if (is_zero_a || is_zero_b) begin
-            result = {sign_res, 15'b0}; // Zero
+            result = {sign_res, 15'b0}; // zero
         end else begin
-            // Normalization
+            // normalization
             reg [5:0] exp_res_temp;
             reg [9:0] frac_res_temp;
             
@@ -56,11 +56,11 @@ module titan_x5_fp16_mul (
                 frac_res_temp = mant_res_full[19:10];
             end
             
-            // Check Overflow/Underflow
+            // check overflow/underflow
             if (exp_res_temp >= 6'd31) begin
-                result = {sign_res, 5'b11111, 10'b0}; // Overflow to Inf
+                result = {sign_res, 5'b11111, 10'b0}; // overflow to inf
             end else if (exp_res_temp <= 6'd0 || exp_res_temp[5]) begin
-                result = {sign_res, 15'b0}; // Underflow to Zero (ignoring denormals for simplicity)
+                result = {sign_res, 15'b0}; // underflow to zero (ignoring denormals for simplicity)
             end else begin
                 result = {sign_res, exp_res_temp[4:0], frac_res_temp};
             end

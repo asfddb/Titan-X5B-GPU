@@ -83,31 +83,29 @@ module astra8_topological_metamaterial #(
     parameter DATA_WIDTH      = 32,
     parameter LATTICE_NODES   = 16,
     parameter WAVE_FREQ_WIDTH = 8,
-    // Parameterized resonance parameters to allow top-level overrides
+    // parameterized resonance parameters to allow top-level overrides
     parameter [WAVE_FREQ_WIDTH-1:0] RESONANCE_FREQ      = 8'hA5,
     parameter [WAVE_FREQ_WIDTH-1:0] RESONANCE_TOLERANCE  = 8'h02
 )(
     input  wire                       clk,
     input  wire                       rst_n,
     
-    // Acoustic Metamaterial Control Interface
-    input  wire [WAVE_FREQ_WIDTH-1:0] acoustic_wave_freq,
-    input  wire [LATTICE_NODES*2-1:0] lattice_config_data,
+    // acoustic metamaterial control interface
+    input wire [WAVE_FREQ_WIDTH-1:0] acoustic_wave_freq,
+    input wire [LATTICE_NODES*2-1:0] lattice_config_data,
     input  wire                       lattice_config_en,
     
-    // Ballistic Interconnect Data Interface
-    input  wire [DATA_WIDTH-1:0]      data_in_a,
-    input  wire [DATA_WIDTH-1:0]      data_in_b,
-    output reg  [DATA_WIDTH-1:0]      data_out,
+    // ballistic interconnect data interface
+    input wire [DATA_WIDTH-1:0] data_in_a,
+    input wire [DATA_WIDTH-1:0] data_in_b,
+    output reg [DATA_WIDTH-1:0] data_out,
     
-    // Status/Telemetry
+    // status/telemetry
     output wire [LATTICE_NODES*2-1:0] lattice_state
 );
 
-    // -------------------------------------------------------------------------
-    // Compile-Time Parameter Validation
-    // -------------------------------------------------------------------------
-    // Guard against degenerate parameterizations that produce zero-width vectors
+    // compile-time parameter validation
+    // guard against degenerate parameterizations that produce zero-width vectors
     // or undefined modulus operations. These fire as elaboration-time errors in
     // all compliant simulators and synthesis tools.
     generate
@@ -140,22 +138,18 @@ module astra8_topological_metamaterial #(
         end
     endgenerate
 
-    // -------------------------------------------------------------------------
-    // Local Parameters & State Definitions
-    // -------------------------------------------------------------------------
+    // local parameters & state definitions
     localparam STATE_WIDTH = LATTICE_NODES * 2;
 
-    // Internal state representing the dynamically reconfigurable lattice.
+    // internal state representing the dynamically reconfigurable lattice.
     // 2 bits per node define the rewritten logic gate type.
-    // DESIGN INTENT: Reset clears to all-zero → all nodes default to AND mode,
+    // design intent: reset clears to all-zero → all nodes default to and mode,
     // the safest passthrough (common-bit preservation) configuration.
     reg [STATE_WIDTH-1:0] current_lattice_state;
 
-    // -------------------------------------------------------------------------
-    // Compile-Time Resonance Boundary Calculation
-    // -------------------------------------------------------------------------
-    // All boundary math is resolved at elaboration time — zero runtime cost.
-    // Saturation arithmetic prevents unsigned underflow/overflow in bounds.
+    // compile-time resonance boundary calculation
+    // all boundary math is resolved at elaboration time — zero runtime cost.
+    // saturation arithmetic prevents unsigned underflow/overflow in bounds.
     localparam [WAVE_FREQ_WIDTH-1:0] MAX_FREQ_VAL = {WAVE_FREQ_WIDTH{1'b1}};
     localparam [WAVE_FREQ_WIDTH:0]   UPPER_SUM    = {1'b0, RESONANCE_FREQ} + {1'b0, RESONANCE_TOLERANCE};
 
@@ -169,16 +163,14 @@ module astra8_topological_metamaterial #(
 
     localparam [WAVE_FREQ_WIDTH-1:0] RESONANCE_RANGE = UPPER_BOUND - LOWER_BOUND;
 
-    // Single-comparator resonance band check: collapses the two-sided range test
+    // single-comparator resonance band check: collapses the two-sided range test
     // (freq >= LOWER && freq <= UPPER) into one subtraction + one unsigned compare
     // by exploiting unsigned arithmetic wrapping. Maps to 1 adder + 1 comparator
     // in synthesis, vs. 2 comparators + 1 AND gate for the naive form.
     wire                       resonance_achieved = ((acoustic_wave_freq - LOWER_BOUND) <= RESONANCE_RANGE);
 
-    // -------------------------------------------------------------------------
-    // Sequential Logic: Lattice State Register
-    // -------------------------------------------------------------------------
-    // Gated update: lattice reconfiguration requires both explicit enable AND
+    // sequential logic: lattice state register
+    // gated update: lattice reconfiguration requires both explicit enable and
     // acoustic resonance lock. This prevents spurious rewrites during frequency
     // transients.
     wire lattice_update_en = lattice_config_en & resonance_achieved;
@@ -187,7 +179,7 @@ module astra8_topological_metamaterial #(
         if (!rst_n) begin
             current_lattice_state <= {STATE_WIDTH{1'b0}};
         end else begin
-            // Simulation optimization: skip non-blocking assignment scheduling
+            // simulation optimization: skip non-blocking assignment scheduling
             // when lattice_update_en is 0, reducing event-queue overhead.
             // X-propagation is preserved during X/Z states on the enable signal.
 `ifndef SYNTHESIS
@@ -202,14 +194,12 @@ module astra8_topological_metamaterial #(
         end
     end
 
-    // -------------------------------------------------------------------------
-    // Combinational Datapath: Topological Logic Matrix & Output Mux
-    // -------------------------------------------------------------------------
-    // Each lattice node contributes a 2-bit selector {sel1, sel0} that chooses
+    // combinational datapath: topological logic matrix & output mux
+    // each lattice node contributes a 2-bit selector {sel1, sel0} that chooses
     // the per-bit logic operation. Modular indexing maps DATA_WIDTH data bits
     // onto LATTICE_NODES control nodes with natural wrap-around.
     //
-    // Topological mapping truth table (per-bit):
+    // topological mapping truth table (per-bit):
     //   sel1 sel0 | Operation             | Expression
     //   ---- ---- | --------------------- | ----------
     //    0    0   | Constructive AND      |  A & B
@@ -217,7 +207,7 @@ module astra8_topological_metamaterial #(
     //    1    0   | Destructive  XOR      |  A ^ B
     //    1    1   | Phase Inversion       |  ~A
     //
-    // Optimized ternary multiplexer structure:
+    // optimized ternary multiplexer structure:
     // - Performs selection per bit to avoid vector-ternary simulation bugs.
     // - Eliminates intermediate sel0/sel1 vector registers, reducing event queue footprint.
     // - Yields clean, standard-compliant X-propagation behavior.
@@ -239,16 +229,12 @@ module astra8_topological_metamaterial #(
         end
     end
 
-    // -------------------------------------------------------------------------
-    // Telemetry Output
-    // -------------------------------------------------------------------------
+    // telemetry output
     assign lattice_state = current_lattice_state;
 
-    // -------------------------------------------------------------------------
-    // Simulation-Only: Exhaustive Self-Test of Output Mux Algebra
-    // -------------------------------------------------------------------------
-    // Catches algebraic regressions in the collapsed output expression above.
-    // Runs once at elaboration with zero-delay; no runtime cost.
+    // simulation-only: exhaustive self-test of output mux algebra
+    // catches algebraic regressions in the collapsed output expression above.
+    // runs once at elaboration with zero-delay; no runtime cost.
 `ifndef SYNTHESIS
     initial begin : self_test_output_mux
         reg a_bit, b_bit;
@@ -260,7 +246,7 @@ module astra8_topological_metamaterial #(
                 a_bit = ab[1];
                 b_bit = ab[0];
                 sel_val = s[1:0];
-                // Compute expected result from specification truth table
+                // compute expected result from specification truth table
                 case (sel_val)
                     2'b00: expected = a_bit & b_bit;
                     2'b01: expected = a_bit | b_bit;
@@ -268,7 +254,7 @@ module astra8_topological_metamaterial #(
                     2'b11: expected = ~a_bit;
                     default: expected = 1'bx;
                 endcase
-                // Compute actual result using the same algebraic expression
+                // compute actual result using the same algebraic expression
                 got = sel_val[1] ? (sel_val[0] ? ~a_bit : a_bit ^ b_bit)
                                  : (sel_val[0] ? a_bit | b_bit : a_bit & b_bit);
                 if (got !== expected) begin

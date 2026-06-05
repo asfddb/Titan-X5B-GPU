@@ -8,21 +8,21 @@ module titan_x5_register_file #(
     input  wire clk,
     input  wire rst_n,
     
-    // Read ports (3 per bank for FMA support)
-    input  wire [NUM_BANKS-1:0]                  rd_en_0,
-    input  wire [NUM_BANKS-1:0]                  rd_en_1,
-    input  wire [NUM_BANKS-1:0]                  rd_en_2,
-    input  wire [NUM_BANKS*4-1:0]                rd_addr_0, 
-    input  wire [NUM_BANKS*4-1:0]                rd_addr_1,
-    input  wire [NUM_BANKS*4-1:0]                rd_addr_2,
-    output wire [NUM_BANKS*DATA_WIDTH-1:0]       rd_data_0,
-    output wire [NUM_BANKS*DATA_WIDTH-1:0]       rd_data_1,
-    output wire [NUM_BANKS*DATA_WIDTH-1:0]       rd_data_2,
+    // read ports (3 per bank for fma support)
+    input wire [NUM_BANKS-1:0] rd_en_0,
+    input wire [NUM_BANKS-1:0] rd_en_1,
+    input wire [NUM_BANKS-1:0] rd_en_2,
+    input wire [NUM_BANKS*4-1:0] rd_addr_0,
+    input wire [NUM_BANKS*4-1:0] rd_addr_1,
+    input wire [NUM_BANKS*4-1:0] rd_addr_2,
+    output wire [NUM_BANKS*DATA_WIDTH-1:0] rd_data_0,
+    output wire [NUM_BANKS*DATA_WIDTH-1:0] rd_data_1,
+    output wire [NUM_BANKS*DATA_WIDTH-1:0] rd_data_2,
     
-    // Write ports (1 per bank)
-    input  wire [NUM_BANKS-1:0]                  wr_en,
-    input  wire [NUM_BANKS*4-1:0]                wr_addr,
-    input  wire [NUM_BANKS*DATA_WIDTH-1:0]       wr_data
+    // write ports (1 per bank)
+    input wire [NUM_BANKS-1:0] wr_en,
+    input wire [NUM_BANKS*4-1:0] wr_addr,
+    input wire [NUM_BANKS*DATA_WIDTH-1:0] wr_data
 );
 
     localparam REGS_PER_BANK = NUM_REGS / NUM_BANKS;

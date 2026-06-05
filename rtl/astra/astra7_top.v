@@ -14,30 +14,28 @@ module astra7_top #(
     parameter HV_DIM = 100000,
     parameter WDM_CHANNELS = 256
 )(
-    // Input Laser Source (Continuous-Time Analog Power)
-    input  wire [(GRID_DIM * INTENSITY_WIDTH)-1:0] laser_power_in,
+    // input laser source (continuous-time analog power)
+    input wire [(GRID_DIM * INTENSITY_WIDTH)-1:0] laser_power_in,
     
-    // Weight Programming (PCM states set via thermal heaters)
-    input  wire [(GRID_DIM * GRID_DIM * INTENSITY_WIDTH)-1:0] pcm_weights,
+    // weight programming (pcm states set via thermal heaters)
+    input wire [(GRID_DIM * GRID_DIM * INTENSITY_WIDTH)-1:0] pcm_weights,
     
     // 3D TSV Interconnect (Vertical Photonic Uplink/Downlink)
-    input  wire [(WDM_CHANNELS * INTENSITY_WIDTH)-1:0] tsv_photons_rx,
+    input wire [(WDM_CHANNELS * INTENSITY_WIDTH)-1:0] tsv_photons_rx,
     output wire [(WDM_CHANNELS * INTENSITY_WIDTH)-1:0] tsv_photons_tx,
     
-    // Holographic Engine Pump Pulse
+    // holographic engine pump pulse
     input  wire                  hologram_pump,
-    input  wire [31:0]           electronic_seed,
+    input wire [31:0] electronic_seed,
     
-    // Output Sensor array
+    // output sensor array
     output wire [(GRID_DIM * INTENSITY_WIDTH)-1:0] optical_mac_out,
-    output wire [31:0]           hologram_bragg_intensity,
+    output wire [31:0] hologram_bragg_intensity,
     output wire                  hologram_match
 );
 
-    // -------------------------------------------------------------
-    // Optical Systolic Array (Mach-Zehnder Interferometers)
-    // -------------------------------------------------------------
-    // Laser power flows into the array, interferes passively, and emerges instantly.
+    // optical systolic array (mach-zehnder interferometers)
+    // laser power flows into the array, interferes passively, and emerges instantly.
     wire [(GRID_DIM * INTENSITY_WIDTH)-1:0] mac_photodetector_out;
     
     astra7_optical_mac_grid #(
@@ -51,16 +49,12 @@ module astra7_top #(
     
     assign optical_mac_out = mac_photodetector_out;
 
-    // -------------------------------------------------------------
     // 3D Free-Space Photonic TSV Interconnect
-    // -------------------------------------------------------------
-    // We shoot the output of the Optical MAC directly up through the silicon 
+    // we shoot the output of the optical mac directly up through the silicon 
     // to the next die using WDM.
     assign tsv_photons_tx = { {(WDM_CHANNELS - GRID_DIM){16'b0}}, mac_photodetector_out };
 
-    // -------------------------------------------------------------
-    // Holographic Hyper-Dimensional Computing Engine
-    // -------------------------------------------------------------
+    // holographic hyper-dimensional computing engine
     astra7_holographic_hdc #(
         .HV_DIM(HV_DIM),
         .DATA_WIDTH(32)
