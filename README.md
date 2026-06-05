@@ -23,30 +23,31 @@
 
 Titan X5-B is an experimental, synthesizable GPU architecture written in SystemVerilog. It is designed as an educational project to explore modern graphics, tensor math, and compute pipelines at the RTL level.
 
----
+## 🐍 Official Hardware Verification (Cocotb)
 
-## 📸 Titan Command Center (Silicon Validation Dashboard)
+This repository strictly uses **Cocotb**, the industry-standard Python verification framework for hardware testing. Unlike software wrappers or scripts, Cocotb interfaces natively with the Icarus Verilog simulator using VPI (Verilog Procedural Interface), directly manipulating and observing silicon signals at the RTL level.
 
-This project includes a fully-functional React+Vite dashboard that hooks directly into the **Icarus Verilog RTL Simulator**. It allows you to run testbenches, view logic analyzer waveforms, monitor active silicon yields, and verify rendering output in real-time.
+### Running the Test Suite
+The testbench drives the system clock, applies AXI transactions, and parses the Rasterizer and SR Engine output.
 
-<p align="center">
-  <img src="docs/assets/titan_command_center.png" alt="Titan Command Center Dashboard" width="900"/>
-</p>
-
-To launch the dashboard locally:
+To run the official test suite natively:
 ```bash
-python telemetry_server.py
-cd titan-cloud && npm install && npm run dev
+# Install cocotb testing dependencies
+pip install cocotb cocotb-test pytest
+
+# Run the simulation tests
+cd tb
+pytest test_runner.py -s
 ```
 
-What it actually has inside:
-- **Tensor Cores**: 16x16 systolic array (trying to mimic FP16/FP4 inference)
+**What it actually has inside:**
+- **Tensor Cores**: 16x16 systolic array (mimicking FP16/FP4 inference)
 - **Ray Tracing**: A multi-cycle state machine for ray-triangle intersection
 - **Compute**: 4 SMs with a 32-thread SIMT vector datapath
 - **Memory**: 512-bit bus (simulating GDDR7)
 - **Interconnect**: AXI4 Crossbar
 
-It's not perfect, but it synthesizes to **3,030,603 gates** on Yosys and passes the testbench I wrote in Icarus Verilog.
+It's not perfect, but it synthesizes to **3,030,603 gates** on Yosys and passes the Cocotb verification testbenches I wrote natively via VPI.
 
 ---
 
