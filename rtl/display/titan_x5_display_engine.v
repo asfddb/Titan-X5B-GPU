@@ -42,13 +42,22 @@ module titan_x5_display_engine (
     
     wire [11:0] h_total = h_visible + h_front_porch + h_sync_pulse + h_back_porch;
     wire [11:0] v_total = v_visible + v_front_porch + v_sync_pulse + v_back_porch;
-    
+
+    // hsync and vsync generation
+    wire next_hsync = (h_counter >= h_visible + h_front_porch) && (h_counter < h_visible + h_front_porch + h_sync_pulse);
+    wire next_vsync = (v_counter >= v_visible + v_front_porch) && (v_counter < v_visible + v_front_porch + v_sync_pulse);
+    wire next_de    = (h_counter < h_visible) && (v_counter < v_visible);
+
+    // sync counters
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
             h_counter <= 12'd0;
             v_counter <= 12'd0;
         end else begin
-            if (h_counter == h_total - 1) begin
+            // Stall pixel consumption and timings if FIFO starves during active display area
+            if (next_de && fifo_empty) begin
+                // Do nothing, stall h_counter and v_counter
+            end else if (h_counter == h_total - 1) begin
                 h_counter <= 12'd0;
                 if (v_counter == v_total - 1)
                     v_counter <= 12'd0;
@@ -60,11 +69,7 @@ module titan_x5_display_engine (
         end
     end
     
-    // hsync and vsync generation
-    wire next_hsync = (h_counter >= h_visible + h_front_porch) && (h_counter < h_visible + h_front_porch + h_sync_pulse);
-    wire next_vsync = (v_counter >= v_visible + v_front_porch) && (v_counter < v_visible + v_front_porch + v_sync_pulse);
-    wire next_de    = (h_counter < h_visible) && (v_counter < v_visible);
-    
+
     // clock domain crossing (cdc) asynchronous fifo
     wire        fifo_full;
     wire        fifo_empty;
@@ -131,7 +136,7 @@ module titan_x5_display_engine (
         end else begin
             vga_hsync <= next_hsync;
             vga_vsync <= next_vsync;
-            vga_de    <= next_de;
+            vga_de    <= next_de && !fifo_empty;
             if (next_de && !fifo_empty) begin
                 vga_r <= fifo_rdata[31:24]; // R
                 vga_g <= fifo_rdata[23:16]; // G
