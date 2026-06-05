@@ -35,10 +35,13 @@ To run the official test suite natively:
 # Install cocotb testing dependencies
 pip install cocotb cocotb-test pytest
 
-# Run the simulation tests
-cd tb
-pytest test_runner.py -s
-```
+### Output Visualization
+Because we are using native Python/Cocotb, we can read the exact rasterizer pixel coordinates from the VPI output and reconstruct the visual result without relying on fake UI wrappers. 
+
+Here is the exact rasterized triangle output as verified by the simulator:
+<p align="center">
+  <img src="docs/assets/cocotb_rasterized_triangle.png" alt="Cocotb Rasterizer Output" width="300"/>
+</p>
 
 **What it actually has inside:**
 - **Tensor Cores**: 16x16 systolic array (mimicking FP16/FP4 inference)

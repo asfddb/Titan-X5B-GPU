@@ -52,6 +52,7 @@ async def test_rasterizer_and_sr(dut):
     
     pixel_count = 0
     cache_hits = 0
+    rendered_pixels = []
     
     # Monitor outputs until completion
     # We expect roughly 50 pixels for a 10x10 triangle
@@ -73,7 +74,7 @@ async def test_rasterizer_and_sr(dut):
             conf = dut.sr_confidence.value.integer
             
             dut._log.info(f"Rendered Pixel: ({px}, {py}) | Tag: 0x{tag:08X} | Hit: {hit} | Conf: {conf}")
-            
+            rendered_pixels.append((px, py))
             pixel_count += 1
             if hit == 1:
                 cache_hits += 1
@@ -85,6 +86,23 @@ async def test_rasterizer_and_sr(dut):
     dut._log.info(f"Pipeline Completed! Total Pixels: {pixel_count}")
     dut._log.info(f"SR Engine Cache Hits: {cache_hits}")
     
+    from PIL import Image
+    import os
+    
+    # Create a 32x32 black image
+    img = Image.new("RGB", (32, 32), "black")
+    pixels = img.load()
+    
     # Verify the test output
     assert pixel_count > 10, f"Expected >10 pixels, but got {pixel_count}!"
+    
+    # Save the output image to prove functionality
+    img_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "docs", "assets", "cocotb_rasterized_triangle.png"))
+    
+    for (px, py) in rendered_pixels:
+        if 0 <= px < 32 and 0 <= py < 32:
+            pixels[px, py] = (0, 255, 0)  # Green triangle
+            
+    img.save(img_path)
+    dut._log.info(f"Saved authentic verification image to {img_path}")
     dut._log.info("TEST PASSED: RTL Silicon Verified via Cocotb VPI")
