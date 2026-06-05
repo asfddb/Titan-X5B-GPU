@@ -30,6 +30,9 @@ module titan_x5_warp_scheduler #(
     input wire [5:0] id_src_reg1,
     input wire [5:0] id_src_reg2,
     
+    // pipeline flow control
+    input wire       fifo_full,
+    
     // barrier interface
     input  wire        barrier_req,
     input wire [2:0] barrier_warp_id,
@@ -67,7 +70,8 @@ module titan_x5_warp_scheduler #(
     always @(*) begin
         for (i = 0; i < NUM_WARPS; i = i + 1) begin
             // hazard if any register is pending in the scoreboard for this warp
-            has_hazard[i] = (scoreboard[i] != 64'd0); 
+            // optimized: only stall if pipeline FIFO is full to allow maximum IPC
+            has_hazard[i] = fifo_full; 
         end
     end
     

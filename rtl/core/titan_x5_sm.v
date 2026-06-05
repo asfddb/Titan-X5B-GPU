@@ -45,6 +45,7 @@ module titan_x5_sm #(
     wire [1023:0] alu_src1, alu_src2, alu_src3;
     wire        alu_valid_out [0:NUM_ALUS-1];
     wire [31:0] alu_result    [0:NUM_ALUS-1];
+    wire        fifo_full;
     
     titan_x5_warp_scheduler #(
         .NUM_WARPS(NUM_WARPS)
@@ -61,6 +62,7 @@ module titan_x5_sm #(
         .id_dest_reg(id_dest_reg),
         .id_src_reg1(rf_rd_addr1),
         .id_src_reg2(rf_rd_addr2),
+        .fifo_full(fifo_full),
         .barrier_req(1'b0),
         .barrier_warp_id(3'd0),
         .sched_warp_id(sched_warp_id),
@@ -147,6 +149,7 @@ module titan_x5_sm #(
         .wb_valid_out(wb_valid),
         .wb_warp_out(wb_warp_id),
         .wb_dest_reg_out(wb_dest_reg),
+        .fifo_full(fifo_full),
         .wmma_valid(),
         .wmma_a(),
         .wmma_b()

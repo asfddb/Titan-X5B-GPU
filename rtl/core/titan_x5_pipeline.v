@@ -52,6 +52,7 @@ module titan_x5_pipeline (
     output wire        wb_valid_out,
     output wire [2:0] wb_warp_out,
     output wire [5:0] wb_dest_reg_out,
+    output wire        fifo_full,
 
     // tensor core datapath
     output wire        wmma_valid,
@@ -84,9 +85,10 @@ module titan_x5_pipeline (
     reg [3:0]  fifo_count;
     
     wire id_ready;
+    assign fifo_full = (fifo_count == 8);
     wire fifo_empty = (fifo_count == 0);
     wire fifo_pop = !fifo_empty && id_ready;
-    wire fifo_push = if_inst_valid;
+    wire fifo_push = if_inst_valid && !fifo_full;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

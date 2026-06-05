@@ -71,15 +71,25 @@ module titan_x5_tensor_core #(
                     .result(prod_fp16_real)
                 );
 
+                wire [31:0] fp32_prod_converted = (prod_fp16_real == 16'b0) ? 32'b0 : 
+                                                  {prod_fp16_real[15], prod_fp16_real[14:10] + 8'd127 - 8'd15, prod_fp16_real[9:0], 13'b0};
+
                 // throughput optimization: pipeline product calculation
                 reg [31:0] prod_pipeline_reg;
                 always @(posedge clk or negedge rst_n) begin
                     if (!rst_n) begin
                         prod_pipeline_reg <= 32'd0;
                     end else if (en) begin
-                        prod_pipeline_reg <= mode_fp16 ? {16'b0, prod_fp16_real} : prod_int8;
+                        prod_pipeline_reg <= mode_fp16 ? fp32_prod_converted : prod_int8;
                     end
                 end
+
+                wire [31:0] next_acc_fp32;
+                fp32_add u_fp32_add (
+                    .a(acc_reg[i][j]),
+                    .b(prod_pipeline_reg),
+                    .result(next_acc_fp32)
+                );
 
                 always @(posedge clk or negedge rst_n) begin
                     if (!rst_n) begin
@@ -88,7 +98,7 @@ module titan_x5_tensor_core #(
                         acc_reg[i][j] <= {ACC_W{1'b0}};
                     end else if (en) begin
                         // accumulate from pipelined register
-                        acc_reg[i][j] <= acc_reg[i][j] + prod_pipeline_reg;
+                        acc_reg[i][j] <= mode_fp16 ? next_acc_fp32 : (acc_reg[i][j] + prod_pipeline_reg);
                     end
                 end
                 
