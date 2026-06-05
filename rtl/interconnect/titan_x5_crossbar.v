@@ -92,7 +92,8 @@ module titan_x5_crossbar #(
             grant_valid[s] = 1'b0;
             
             for (m = 0; m < NUM_MASTERS; m = m + 1) begin
-                check_idx = (rr_ptr[s] + m) % NUM_MASTERS;
+                check_idx = rr_ptr[s] + m;
+                if (check_idx >= NUM_MASTERS) check_idx = check_idx - NUM_MASTERS;
                 if (!grant_valid[s] && m_req_valid[check_idx] && req_dest[check_idx] == s) begin
                     grant[s] = check_idx;
                     grant_valid[s] = 1'b1;
@@ -112,6 +113,15 @@ module titan_x5_crossbar #(
 
     wire [MASTER_BITS-1:0] current_resp_master [0:NUM_SLAVES-1];
 
+    wire [NUM_SLAVES-1:0] fifo_has_space;
+    wire [NUM_SLAVES-1:0] req_accepted;
+    generate
+        for (gi = 0; gi < NUM_SLAVES; gi = gi + 1) begin : accept_gen
+            assign fifo_has_space[gi] = (fifo_count[gi] < FIFO_DEPTH) || s_resp_valid[gi];
+            assign req_accepted[gi] = grant_valid[gi] && s_req_ready[gi] && fifo_has_space[gi];
+        end
+    endgenerate
+
     integer s_idx, f_idx;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -125,14 +135,14 @@ module titan_x5_crossbar #(
             end
         end else begin
             for (s_idx = 0; s_idx < NUM_SLAVES; s_idx = s_idx + 1) begin
-                if ((grant_valid[s_idx] && s_req_ready[s_idx] && fifo_count[s_idx] < FIFO_DEPTH) && !s_resp_valid[s_idx]) begin
+                if (req_accepted[s_idx] && !s_resp_valid[s_idx]) begin
                     req_fifo[s_idx][fifo_wr_ptr[s_idx]] <= grant[s_idx];
                     fifo_wr_ptr[s_idx] <= fifo_wr_ptr[s_idx] + 1;
                     fifo_count[s_idx] <= fifo_count[s_idx] + 1;
-                end else if (!(grant_valid[s_idx] && s_req_ready[s_idx] && fifo_count[s_idx] < FIFO_DEPTH) && s_resp_valid[s_idx]) begin
+                end else if (!req_accepted[s_idx] && s_resp_valid[s_idx]) begin
                     fifo_rd_ptr[s_idx] <= fifo_rd_ptr[s_idx] + 1;
                     fifo_count[s_idx] <= fifo_count[s_idx] - 1;
-                end else if ((grant_valid[s_idx] && s_req_ready[s_idx] && fifo_count[s_idx] < FIFO_DEPTH) && s_resp_valid[s_idx]) begin
+                end else if (req_accepted[s_idx] && s_resp_valid[s_idx]) begin
                     req_fifo[s_idx][fifo_wr_ptr[s_idx]] <= grant[s_idx];
                     fifo_wr_ptr[s_idx] <= fifo_wr_ptr[s_idx] + 1;
                     fifo_rd_ptr[s_idx] <= fifo_rd_ptr[s_idx] + 1;
@@ -150,7 +160,7 @@ module titan_x5_crossbar #(
     // multiplexing
     generate
         for (gi = 0; gi < NUM_SLAVES; gi = gi + 1) begin : slave_mux
-            assign s_req_valid[gi] = grant_valid[gi] && (fifo_count[gi] < FIFO_DEPTH);
+            assign s_req_valid[gi] = grant_valid[gi] && fifo_has_space[gi];
             assign s_req_addr[gi*ADDR_WIDTH +: ADDR_WIDTH] = m_req_addr[grant[gi]*ADDR_WIDTH +: ADDR_WIDTH];
             assign s_req_wdata[gi*DATA_WIDTH +: DATA_WIDTH] = m_req_wdata[grant[gi]*DATA_WIDTH +: DATA_WIDTH];
             assign s_req_write[gi] = m_req_write[grant[gi]];
@@ -160,7 +170,7 @@ module titan_x5_crossbar #(
     generate
         for (gi = 0; gi < NUM_MASTERS; gi = gi + 1) begin : master_mux
             // m_req_ready is tricky: is this master granted by its requested slave AND does the FIFO have space?
-            assign m_req_ready[gi] = (grant_valid[req_dest[gi]] && grant[req_dest[gi]] == gi) ? (s_req_ready[req_dest[gi]] && (fifo_count[req_dest[gi]] < FIFO_DEPTH)) : 1'b0;
+            assign m_req_ready[gi] = (grant_valid[req_dest[gi]] && grant[req_dest[gi]] == gi) ? (s_req_ready[req_dest[gi]] && fifo_has_space[req_dest[gi]]) : 1'b0;
         end
     endgenerate
 

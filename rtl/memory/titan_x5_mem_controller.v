@@ -104,20 +104,27 @@ module titan_x5_mem_controller #(
                         if (req_write) begin
                             m_axi_awvalid <= 1'b1;
                             m_axi_awaddr <= req_addr;
-                            m_axi_awlen <= req_len;
+                            m_axi_awlen <= 0; // optimized: strictly single beat write supported by request interface
                             m_axi_awid <= 0;
+                            
+                            m_axi_wvalid <= 1'b1;
+                            m_axi_wdata <= {(AXI_DATA_WIDTH/32){req_wdata}}; 
+                            m_axi_wstrb <= ( {((AXI_DATA_WIDTH/8)+1){1'b0}} + 4'hF ) << ((req_addr % (AXI_DATA_WIDTH/8)) / 4 * 4);
+                            m_axi_wlast <= 1'b1;
+                            
+                            m_axi_bready <= 1'b1;
                         end else begin
                             m_axi_arvalid <= 1'b1;
                             m_axi_araddr <= req_addr;
                             m_axi_arlen <= req_len;
                             m_axi_arid <= 0;
+                            m_axi_rready <= 1'b1; // assert rready early
                         end
                     end
                 end
                 AR_WAIT: begin
                     if (m_axi_arready && m_axi_arvalid) begin
                         m_axi_arvalid <= 1'b0;
-                        m_axi_rready <= 1'b1;
                     end
                 end
                 R_WAIT: begin
@@ -133,22 +140,12 @@ module titan_x5_mem_controller #(
                         resp_valid <= 1'b0;
                     end
                 end
-                AW_WAIT: begin
-                    if (m_axi_awready && m_axi_awvalid) begin
-                        m_axi_awvalid <= 1'b0;
-                        m_axi_wvalid <= 1'b1;
-                        // duplicate the 32-bit data across the entire bus
-                        m_axi_wdata <= {(AXI_DATA_WIDTH/32){req_wdata}}; 
-                        m_axi_wstrb <= ( {((AXI_DATA_WIDTH/8)+1){1'b0}} + 4'hF ) << ((saved_req_addr % (AXI_DATA_WIDTH/8)) / 4 * 4);
-                        m_axi_wlast <= 1'b1;
-                    end
+                AW_WAIT: begin // optimized to handle AW and W in parallel
+                    if (m_axi_awready && m_axi_awvalid) m_axi_awvalid <= 1'b0;
+                    if (m_axi_wready && m_axi_wvalid) m_axi_wvalid <= 1'b0;
                 end
                 W_WAIT: begin
-                    if (m_axi_wready && m_axi_wvalid) begin
-                        m_axi_wvalid <= 1'b0;
-                        m_axi_wlast <= 1'b0;
-                        m_axi_bready <= 1'b1;
-                    end
+                    // unused, kept for parameter compatibility
                 end
                 B_WAIT: begin
                     if (m_axi_bvalid && m_axi_bready) begin
@@ -162,12 +159,27 @@ module titan_x5_mem_controller #(
     always @(*) begin
         next_state = state;
         case (state)
-            IDLE: if (req_valid && req_ready) next_state = req_write ? AW_WAIT : AR_WAIT;
-            AR_WAIT: if (m_axi_arready && m_axi_arvalid) next_state = R_WAIT;
-            R_WAIT: if (m_axi_rvalid && m_axi_rready && m_axi_rlast) next_state = IDLE;
-            AW_WAIT: if (m_axi_awready && m_axi_awvalid) next_state = W_WAIT;
-            W_WAIT: if (m_axi_wready && m_axi_wvalid) next_state = B_WAIT;
-            B_WAIT: if (m_axi_bvalid && m_axi_bready) next_state = IDLE;
+            IDLE: begin
+                if (req_valid && req_ready) begin
+                    next_state = req_write ? AW_WAIT : AR_WAIT;
+                end
+            end
+            AR_WAIT: begin
+                if (m_axi_arready && m_axi_arvalid) next_state = R_WAIT;
+            end
+            R_WAIT: begin
+                if (m_axi_rvalid && m_axi_rready && m_axi_rlast) next_state = IDLE;
+            end
+            AW_WAIT: begin
+                if ((!m_axi_awvalid || m_axi_awready) && (!m_axi_wvalid || m_axi_wready)) next_state = B_WAIT;
+            end
+            W_WAIT: begin
+                // unused state now
+            end
+            B_WAIT: begin
+                if (m_axi_bvalid && m_axi_bready) next_state = IDLE;
+            end
+            default: next_state = IDLE;
         endcase
     end
 
