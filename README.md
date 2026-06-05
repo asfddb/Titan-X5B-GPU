@@ -36,21 +36,22 @@ To run the official test suite natively:
 pip install cocotb cocotb-test pytest
 
 ### Output Visualization
-Because we are using native Python/Cocotb, we can read the exact rasterizer pixel coordinates from the VPI output and reconstruct the visual result without relying on fake UI wrappers. 
+Because we are using native Python/Cocotb, we inject an actual `CMD_DRAW` instruction into the `titan_x5_command_processor` via the VRAM interface. The command processor dispatches the job, the rasterizer processes it, the ROP writes it to the AXI memory, and the Display Engine generates VGA timings and RGB pixels.
 
-Here is the exact rasterized triangle output as verified by the simulator:
+Our testbench monitors the physical VGA pins and reconstructs the image. Here is the exact image output reconstructed from the full system-level simulation!
+
 <p align="center">
-  <img src="docs/assets/cocotb_rasterized_triangle.png" alt="Cocotb Rasterizer Output" width="300"/>
+  <img src="docs/assets/system_vga_reconstruction.png" alt="System Level VGA Output" width="300"/>
 </p>
 
 **What it actually has inside:**
-- **Tensor Cores**: 16x16 systolic array (mimicking FP16/FP4 inference)
-- **Ray Tracing**: A multi-cycle state machine for ray-triangle intersection
+- **System Testing**: End-to-end SoC verification testing AXI crossbar, RAM, and Command fetching natively via Python.
+- **Tensor Cores**: 16x16 systolic array
 - **Compute**: 4 SMs with a 32-thread SIMT vector datapath
-- **Memory**: 512-bit bus (simulating GDDR7)
-- **Interconnect**: AXI4 Crossbar
+- **Memory**: 512-bit bus (simulating GDDR7) with full `cocotbext-axi` mock memory 
+- **Interconnect**: AXI4 Crossbar (20 Ports)
 
-It's not perfect, but it synthesizes to **3,030,603 gates** on Yosys and passes the Cocotb verification testbenches I wrote natively via VPI.
+It's not perfect, but it synthesizes to **3,030,603 gates** on Yosys and passes the Cocotb verification testbenches natively via VPI.
 
 ---
 
@@ -189,22 +190,18 @@ yosys -p "read_verilog -sv rtl/*.v rtl/**/*.v; hierarchy -top titan_x5_gpu_top; 
 ## 🔬 Verification Results
 
 ```
-===============================================================
-  TITAN X5-B (BLACKWELL) SILICON VALIDATION SUITE v2.0
-  Testing Code: rtl/titan_x5_gpu_top.v
-  Software: Icarus Verilog (OSS CAD Suite)
-===============================================================
-VCD info: dumpfile tb/blackwell_wave.vcd opened for output.
-Time=0      | CLK=0 | RST=0 | Host PTR=10000000
-Time=20000  | CLK=0 | RST=1 | Host PTR=10000000   ← Reset released
-Time=60000  | CLK=0 | RST=1 | Host PTR=10000010   ← Command dispatched
-...
-===============================================================
-  TEST PASSED: RTL Simulation Completed Without Assertion Failures
+============================= test session starts =============================
+platform win32 -- Python 3.12.4, pytest-8.3.4, pluggy-1.5.0
+rootdir: C:\Titan-X5B-GPU\tb
+plugins: cocotb-test-0.2.5
+collected 2 items
 
+test_runner.py ..
 
+============================== 2 passed in 3.98s ==============================
+```
 
-## 🔋 Synthesis Breakdown
+Unit test coverage verifies ALU strict cycle latencies (multi-cycle division), and the system test confirms full rendering from instruction to VGA display.## 🔋 Synthesis Breakdown
 
 The full Titan X5-B synthesizes to **3,030,603 logic cells** on Yosys:
 

@@ -25,7 +25,8 @@ module titan_x5_display_engine (
     output wire [31:0] fb_read_addr,
     input wire [31:0] fb_rgba_data,
     output wire        fb_read_req,
-    input  wire        fb_read_ack,
+    input  wire        fb_read_ack, // indicates request was accepted
+    input  wire        fb_resp_valid, // indicates read data is valid
     
     // vga output
     output reg         vga_hsync,
@@ -88,7 +89,7 @@ module titan_x5_display_engine (
     ) pixel_fifo (
         .wclk(clk),
         .wrst_n(rst_n),
-        .winc(fb_read_ack && !fifo_full),
+        .winc(fb_resp_valid && !fifo_full),
         .wdata(fb_rgba_data),
         .wfull(fifo_full),
         
@@ -101,19 +102,31 @@ module titan_x5_display_engine (
 
     // framebuffer read address mapping (now in core clk domain, simplified fetching)
     reg [31:0] fetch_addr;
+    reg pending_read;
+    
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             fetch_addr <= 0;
-        end else if (!fifo_full) begin
-            if (fetch_addr >= (h_visible * v_visible) - 1)
-                fetch_addr <= 0;
-            else
-                fetch_addr <= fetch_addr + 1;
+            pending_read <= 0;
+        end else begin
+            // send request
+            if (fb_read_req && fb_read_ack) begin // assuming fb_read_ack acts as req_ready
+                if (fetch_addr >= (h_visible * v_visible) - 1)
+                    fetch_addr <= 0;
+                else
+                    fetch_addr <= fetch_addr + 1;
+                pending_read <= 1;
+            end
+            
+            // receive response
+            if (fb_resp_valid) begin
+                pending_read <= 0;
+            end
         end
     end
     
     assign fb_read_addr = fetch_addr;
-    assign fb_read_req  = !fifo_full;
+    assign fb_read_req  = !fifo_full && !pending_read;
     
     // pixel stream from fifo
     assign fifo_rinc = vga_de && !fifo_empty;

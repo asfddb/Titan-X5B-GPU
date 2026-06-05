@@ -138,9 +138,12 @@ module titan_x5_alu #(
                     div_val_out <= 1'b1;
                     div_res_out <= div_dividend[31:0]; // quotient
                 end else begin
-                    // simplified iterative shift-subtract division step
                     div_count <= div_count - 1;
-                    // actual radix-4 division goes here...
+                    if (div_dividend[63:31] >= {1'b0, div_divisor}) begin
+                        div_dividend <= {div_dividend[62:31] - div_divisor, div_dividend[30:0], 1'b1};
+                    end else begin
+                        div_dividend <= {div_dividend[62:0], 1'b0};
+                    end
                 end
             end
         end

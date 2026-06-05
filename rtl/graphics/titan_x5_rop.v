@@ -6,7 +6,9 @@
  * Stencil test, Alpha Blending, Delta Color Compression (DCC) support.
  * Now using a fully pipelined decoupled approach.
  */
-module titan_x5_rop (
+module titan_x5_rop #(
+    parameter FB_STRIDE = 1024
+)(
     input  wire clk,
     input  wire rst_n,
 
@@ -95,7 +97,7 @@ module titan_x5_rop (
     reg [1:0] z_state;
     reg [15:0] z_x, z_y;
     reg [31:0] z_z, z_color;
-    wire [31:0] z_offset = (z_y * 1024 + z_x) * 4;
+    wire [31:0] z_offset = (z_y * FB_STRIDE + z_x) * 4;
     
     reg z_out_valid;
     wire c_in_ready;
@@ -153,7 +155,7 @@ module titan_x5_rop (
     reg [1:0] c_state;
     reg [15:0] c_x, c_y;
     reg [31:0] c_z, c_color;
-    wire [31:0] c_offset = (c_y * 1024 + c_x) * 4;
+    wire [31:0] c_offset = (c_y * FB_STRIDE + c_x) * 4;
 
     reg c_out_valid;
     wire w_in_ready;
@@ -210,7 +212,7 @@ module titan_x5_rop (
     reg [2:0] w_state;
     reg [15:0] w_x, w_y;
     reg [31:0] w_z, w_color;
-    wire [31:0] w_offset = (w_y * 1024 + w_x) * 4;
+    wire [31:0] w_offset = (w_y * FB_STRIDE + w_x) * 4;
 
     assign w_in_ready = (w_state == 0);
     assign w_req = (w_state == 1) || (w_state == 3);

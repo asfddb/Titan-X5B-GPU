@@ -15,3 +15,32 @@ def test_graphics():
         module="test_graphics_pipeline",
         simulator="icarus"
     )
+
+def test_alu():
+    run(
+        verilog_sources=[
+            "../rtl/core/titan_x5_alu.v"
+        ],
+        toplevel="titan_x5_alu",
+        module="test_alu",
+        simulator="icarus"
+    )
+
+import glob
+
+def test_system():
+    # Gather all rtl sources for the system test
+    rtl_files = glob.glob("../rtl/**/*.v", recursive=True) + glob.glob("../rtl/*.v")
+    # exclude duplicate files if any
+    rtl_files = list(set(rtl_files))
+    
+    run(
+        verilog_sources=rtl_files,
+        toplevel="titan_x5_gpu_top",
+        module="test_system",
+        simulator="icarus",
+        parameters={
+            "VGA_H_VISIBLE": "32",
+            "VGA_V_VISIBLE": "32"
+        }
+    )

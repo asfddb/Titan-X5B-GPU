@@ -4,7 +4,10 @@
 // description: full system integration of titan x5 gpu.
 // modified to wire the graphics pipeline:
 // cmdproc -> rasterizer -> tmu -> rop -> memcontroller -> vram
-module titan_x5_gpu_top (
+module titan_x5_gpu_top #(
+    parameter VGA_H_VISIBLE = 12'd1920,
+    parameter VGA_V_VISIBLE = 12'd1080
+) (
     input  wire        clk,
     input  wire        rst_n,
 
@@ -65,13 +68,13 @@ module titan_x5_gpu_top (
     wire        rop_mem_req;
     
     // crossbar interface
-    wire [18:0] xbar_m_req_valid;
-    wire [19*32-1:0] xbar_m_req_addr;
-    wire [19*32-1:0] xbar_m_req_wdata;
-    wire [18:0] xbar_m_req_write;
-    wire [18:0] xbar_m_req_ready;
-    wire [18:0] xbar_m_resp_valid;
-    wire [19*32-1:0] xbar_m_resp_rdata;
+    wire [19:0] xbar_m_req_valid;
+    wire [20*32-1:0] xbar_m_req_addr;
+    wire [20*32-1:0] xbar_m_req_wdata;
+    wire [19:0] xbar_m_req_write;
+    wire [19:0] xbar_m_req_ready;
+    wire [19:0] xbar_m_resp_valid;
+    wire [20*32-1:0] xbar_m_resp_rdata;
 
     wire [1:0] xbar_s_req_valid;
     wire [2*32-1:0]  xbar_s_req_addr;
@@ -167,9 +170,22 @@ module titan_x5_gpu_top (
     assign xbar_m_req_wdata[18*32 +: 32] = 32'h0;
     assign xbar_m_req_write[18] = 1'b0;
 
+    // display engine -> port 19
+    wire disp_mem_req, disp_mem_ack, disp_mem_resp_valid;
+    wire [31:0] disp_mem_addr;
+    wire [31:0] disp_mem_rdata;
+    
+    assign xbar_m_req_valid[19] = disp_mem_req;
+    assign xbar_m_req_addr[19*32 +: 32] = disp_mem_addr;
+    assign xbar_m_req_wdata[19*32 +: 32] = 32'h0;
+    assign xbar_m_req_write[19] = 1'b0;
+    assign disp_mem_ack = xbar_m_req_ready[19];
+    assign disp_mem_resp_valid = xbar_m_resp_valid[19];
+    assign disp_mem_rdata = xbar_m_resp_rdata[19*32 +: 32];
+
     // crossbar instantiation
     titan_x5_crossbar #(
-        .NUM_MASTERS(19),
+        .NUM_MASTERS(20),
         .NUM_SLAVES(2),
         .DATA_WIDTH(32),
         .ADDR_WIDTH(32)
@@ -312,7 +328,7 @@ module titan_x5_gpu_top (
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : rop_gen
             if (gi == 0) begin
-                titan_x5_rop u_rop (
+                titan_x5_rop #(.FB_STRIDE(VGA_H_VISIBLE)) u_rop (
                     .clk             (clk), .rst_n(rst_n),
                     .i_valid         (sr_o_valid), .i_ready(rop_o_ready),
                     .i_x             (tmu_o_x), .i_y(tmu_o_y), // sr engine latency causes desync here, accepted as proper structural wiring
@@ -331,7 +347,7 @@ module titan_x5_gpu_top (
                     .dbg_state(dbg_rop_state)
                 );
             end else begin
-                titan_x5_rop u_rop (
+                titan_x5_rop #(.FB_STRIDE(VGA_H_VISIBLE)) u_rop (
                     .clk             (clk), .rst_n(rst_n),
                     .i_valid         (1'b0), .i_ready(),
                     .i_x             (16'h0), .i_y(16'h0),
@@ -463,10 +479,10 @@ module titan_x5_gpu_top (
     // 12. Display Engine
     titan_x5_display_engine u_disp_engine (
         .clk(clk), .pclk(clk), .rst_n(rst_n),
-        .h_visible(12'd1920), .h_front_porch(12'd88), .h_sync_pulse(12'd44), .h_back_porch(12'd148),
-        .v_visible(12'd1080), .v_front_porch(12'd4), .v_sync_pulse(12'd5), .v_back_porch(12'd36),
-        .swap_buffers(), .fb_read_addr(), .fb_rgba_data(32'hFF_88_00_FF),
-        .fb_read_req(), .fb_read_ack(1'b1),
+        .h_visible(VGA_H_VISIBLE), .h_front_porch(12'd1), .h_sync_pulse(12'd1), .h_back_porch(12'd1),
+        .v_visible(VGA_V_VISIBLE), .v_front_porch(12'd1), .v_sync_pulse(12'd1), .v_back_porch(12'd1),
+        .swap_buffers(), .fb_read_addr(disp_mem_addr), .fb_rgba_data(disp_mem_rdata),
+        .fb_read_req(disp_mem_req), .fb_read_ack(disp_mem_ack), .fb_resp_valid(disp_mem_resp_valid),
         .vga_hsync(vga_hsync), .vga_vsync(vga_vsync), .vga_r(vga_r), .vga_g(vga_g), .vga_b(vga_b), .vga_de(vga_de)
     );
     // project blackwell: gddr7 pam3 phy integration
