@@ -1,5 +1,39 @@
 `timescale 1ns/1ps
 
+// FP4 (E2M1) Multiplier that outputs FP32
+module fp4_mul_to_fp32 (
+    input  wire [3:0] a,
+    input  wire [3:0] b,
+    output wire [31:0] result
+);
+    wire a_zero = (a[2:0] == 3'b000);
+    wire b_zero = (b[2:0] == 3'b000);
+    wire sign = a[3] ^ b[3];
+
+    wire [1:0] ma = a_zero ? 2'b00 : {1'b1, a[0]};
+    wire [1:0] mb = b_zero ? 2'b00 : {1'b1, b[0]};
+    wire [3:0] m_prod = ma * mb; 
+
+    reg [7:0] res_exp;
+    reg [22:0] res_mant;
+
+    always @(*) begin
+        if (a_zero || b_zero) begin
+            res_exp = 0;
+            res_mant = 0;
+        end else begin
+            res_exp = ({6'b0, a[2:1]} + {6'b0, b[2:1]}) + 8'd127 - 8'd2;
+            if (m_prod[3]) begin
+                res_exp = res_exp + 1;
+                res_mant = {m_prod[2:0], 20'b0};
+            end else begin
+                res_mant = {m_prod[1:0], 21'b0};
+            end
+        end
+    end
+    assign result = {sign, res_exp, res_mant};
+endmodule
+
 // Processing Element (PE) for Matrix Multiply-Accumulate
 module mac_pe #(
     parameter DATA_WIDTH = 16,
@@ -23,14 +57,9 @@ module mac_pe #(
     wire [15:0] fp8_act_fp16 = {act_in[7], act_in[6:3] + 5'd15 - 5'd7, act_in[2:0], 7'b0};
     wire [15:0] fp8_weight_fp16 = {weight_in[7], weight_in[6:3] + 5'd15 - 5'd7, weight_in[2:0], 7'b0};
 
-    // NVFP4 (E2M1) to FP16 conversion
-    // E2M1: Sign=1, Exp=2, Mantissa=1
-    wire [15:0] fp4_act_fp16 = {act_in[3], act_in[2:1] + 5'd15 - 5'd1, act_in[0], 10'b0};
-    wire [15:0] fp4_weight_fp16 = {weight_in[3], weight_in[2:1] + 5'd15 - 5'd1, weight_in[0], 10'b0};
-
-    // Mux input precision
-    wire [15:0] act_fp16 = (mode == 2) ? fp4_act_fp16 : ((mode == 1) ? fp8_act_fp16 : act_in);
-    wire [15:0] weight_fp16 = (mode == 2) ? fp4_weight_fp16 : ((mode == 1) ? fp8_weight_fp16 : weight_in);
+    // Standard FP16/FP8 Path
+    wire [15:0] act_fp16 = (mode == 1) ? fp8_act_fp16 : act_in;
+    wire [15:0] weight_fp16 = (mode == 1) ? fp8_weight_fp16 : weight_in;
 
     wire [15:0] fp16_prod;
     titan_x5_fp16_mul mul_inst (
@@ -39,16 +68,28 @@ module mac_pe #(
         .result(fp16_prod)
     );
 
-    // Convert FP16 to FP32
-    wire [31:0] fp32_prod = (fp16_prod == 16'b0) ? 32'b0 : 
+    wire [31:0] fp32_prod_standard = (fp16_prod == 16'b0) ? 32'b0 : 
                             {fp16_prod[15], fp16_prod[14:10] + 8'd127 - 8'd15, fp16_prod[9:0], 13'b0};
 
+    // Dynamic SIMD FP4 Path (4x Throughput)
+    wire [31:0] fp4_prod0, fp4_prod1, fp4_prod2, fp4_prod3;
+    
+    fp4_mul_to_fp32 fp4_m0(.a(act_in[3:0]),   .b(weight_in[3:0]),   .result(fp4_prod0));
+    fp4_mul_to_fp32 fp4_m1(.a(act_in[7:4]),   .b(weight_in[7:4]),   .result(fp4_prod1));
+    fp4_mul_to_fp32 fp4_m2(.a(act_in[11:8]),  .b(weight_in[11:8]),  .result(fp4_prod2));
+    fp4_mul_to_fp32 fp4_m3(.a(act_in[15:12]), .b(weight_in[15:12]), .result(fp4_prod3));
+
+    // Adder Tree for FP4
+    wire [31:0] fp4_sum01, fp4_sum23, fp4_sum_all;
+    fp32_add add_01(.a(fp4_prod0), .b(fp4_prod1), .result(fp4_sum01));
+    fp32_add add_23(.a(fp4_prod2), .b(fp4_prod3), .result(fp4_sum23));
+    fp32_add add_all(.a(fp4_sum01), .b(fp4_sum23), .result(fp4_sum_all));
+
+    // Final Mux and Accumulation
+    wire [31:0] active_prod = (mode == 2) ? fp4_sum_all : fp32_prod_standard;
+    
     wire [31:0] next_acc;
-    fp32_add add_inst (
-        .a(acc_in),
-        .b(fp32_prod),
-        .result(next_acc)
-    );
+    fp32_add add_acc(.a(acc_in), .b(active_prod), .result(next_acc));
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
