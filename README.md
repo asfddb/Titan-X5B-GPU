@@ -182,6 +182,14 @@ Time=60000  | CLK=0 | RST=1 | Host PTR=10000010   ← Command dispatched
 ===============================================================
   TEST PASSED: RTL Simulation Completed Without Assertion Failures
 
+### Authentic Simulation Waveforms
+
+Below is the logic analyzer output generated directly from the Icarus Verilog `.vcd` dump of the testbench. It shows the real internal AXI and pipeline signals during the simulation:
+
+<p align="center">
+  <img src="docs/assets/simulation_waveforms.png" alt="Real Simulation Waveforms" width="800"/>
+</p>
+
 ---
 
 ## 🔋 Synthesis Breakdown
