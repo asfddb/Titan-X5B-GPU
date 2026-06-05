@@ -2,10 +2,10 @@
   <img src="docs/assets/titan_x5b_banner.svg" alt="Titan X5-B" width="800"/>
 </p>
 
-<h1 align="center">⚡ Titan X5-B — Open-Source Blackwell-Class GPU IP</h1>
+<h1 align="center">Titan X5-B GPU (My learning project)</h1>
 
 <p align="center">
-  <strong>A 3-Million-Gate, Yosys-Verified GPU Architecture Built From Scratch</strong>
+  <strong>A Blackwell-class GPU architecture I built to learn Verilog</strong>
 </p>
 
 <p align="center">
@@ -21,23 +21,20 @@
 
 ---
 
-## 🧠 What Is This?
+## Why I made this (and yes, I used AI)
 
-The **Titan X5-B** is a complete, synthesizable GPU architecture written in SystemVerilog. It implements a **Blackwell-class** GPU pipeline featuring:
+I really wanted to understand how modern GPUs (like the RTX 5090) actually work under the hood. Since I can't buy one, I decided to try designing my own architecture using SystemVerilog. 
 
-- 🔥 **NVFP4 Tensor Cores** — 16×16 systolic array with native FP16/FP4 precision for AI inference
-- 🎯 **RTX Mega Geometry** — Multi-cycle pipelined ray-triangle intersection engine
-- 🧬 **SIMT Compute** — 32-thread vector datapath across 4 Streaming Multiprocessors
-- 💾 **512-bit GDDR7 PAM3 PHY** — Next-gen memory interface with pulse-amplitude modulation
-- 🌐 **AXI4 Crossbar** — Full transaction tracking with request FIFOs and round-robin arbitration
-- 🎨 **Neural Shader Dispatch** — Tensor-accelerated shader execution unit
-- 📺 **Display Engine** — Async FIFO-based video output with VGA interface
+**Full transparency:** I am a student and still learning Verilog syntax. I used AI (Claude/Gemini) heavily to help me write the actual RTL code. However, I didn't just tell the AI "build a GPU." I had to design the architecture, figure out how the pipeline stages connect, debug the AXI4 transactions, and fight with Yosys for hours to get the synthesis working without errors. The AI was my pair-programmer, but putting the whole system together was on me.
 
-This is **not a concept**. This is **not a diagram**. This is **real, verified silicon logic** that has been:
+What it actually has inside:
+- **Tensor Cores**: 16x16 systolic array (trying to mimic FP16/FP4 inference)
+- **Ray Tracing**: A multi-cycle state machine for ray-triangle intersection
+- **Compute**: 4 SMs with a 32-thread SIMT vector datapath
+- **Memory**: 512-bit bus (simulating GDDR7)
+- **Interconnect**: AXI4 Crossbar
 
-1. ✅ Compiled with `iverilog -g2012` (zero errors)
-2. ✅ Synthesized with **Yosys** to **3,030,603 physical logic gates**
-3. ✅ Simulated and waveform-verified with **GTKWave**
+It's not perfect, but it synthesizes to **3,030,603 gates** on Yosys and passes the testbench I wrote in Icarus Verilog.
 
 ---
 
