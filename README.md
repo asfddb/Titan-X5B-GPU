@@ -15,17 +15,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-CERN--OHL--S--2.0-red?style=for-the-badge" alt="License"/></a>
 </p>
 
-<p align="center">
-  <em>Designed by <strong>Adhiraj</strong> · India 🇮🇳</em>
-</p>
+
 
 ---
 
-## Why I made this (and yes, I used AI)
+## Overview
 
-I really wanted to understand how modern GPUs (like the RTX 5090) actually work under the hood. Since I can't buy one, I decided to try designing my own architecture using SystemVerilog. 
-
-**Full transparency:** I am a student and still learning Verilog syntax. I used AI (Claude/Gemini) heavily to help me write the actual RTL code. However, I didn't just tell the AI "build a GPU." I had to design the architecture, figure out how the pipeline stages connect, debug the AXI4 transactions, and fight with Yosys for hours to get the synthesis working without errors. The AI was my pair-programmer, but putting the whole system together was on me.
+Titan X5-B is an experimental, synthesizable GPU architecture written in SystemVerilog. It is designed as an educational project to explore modern graphics, tensor math, and compute pipelines at the RTL level.
 
 What it actually has inside:
 - **Tensor Cores**: 16x16 systolic array (trying to mimic FP16/FP4 inference)
@@ -208,13 +204,7 @@ The full Titan X5-B synthesizes to **3,030,603 logic cells** on Yosys:
 
 ---
 
-## 👤 About the Creator
 
-**Adhiraj** — a hardware architect from India 🇮🇳 who decided that GPUs shouldn't be a monopoly.
-
-> *"I don't have the money to buy an RTX 5090. So I designed one."*
-
----
 
 ## 📜 License
 
