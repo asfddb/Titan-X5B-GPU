@@ -1,0 +1,70 @@
+/*
+ * Module: titan_x5_fp16_mul
+ * Description: IEEE 754 Half-Precision Floating Point Multiplier.
+ * Combines sign, adds exponents, and multiplies mantissas.
+ */
+module titan_x5_fp16_mul (
+    input  wire [15:0] a,
+    input  wire [15:0] b,
+    output reg  [15:0] result
+);
+
+    wire sign_a = a[15];
+    wire [4:0] exp_a = a[14:10];
+    wire [9:0] frac_a = a[9:0];
+
+    wire sign_b = b[15];
+    wire [4:0] exp_b = b[14:10];
+    wire [9:0] frac_b = b[9:0];
+
+    wire sign_res = sign_a ^ sign_b;
+
+    wire is_zero_a = (exp_a == 5'b00000 && frac_a == 10'b0);
+    wire is_zero_b = (exp_b == 5'b00000 && frac_b == 10'b0);
+    wire is_inf_a  = (exp_a == 5'b11111 && frac_a == 10'b0);
+    wire is_inf_b  = (exp_b == 5'b11111 && frac_b == 10'b0);
+    wire is_nan_a  = (exp_a == 5'b11111 && frac_a != 10'b0);
+    wire is_nan_b  = (exp_b == 5'b11111 && frac_b != 10'b0);
+
+    // Add hidden bit
+    wire [10:0] mant_a = (exp_a == 5'b00000) ? {1'b0, frac_a} : {1'b1, frac_a};
+    wire [10:0] mant_b = (exp_b == 5'b00000) ? {1'b0, frac_b} : {1'b1, frac_b};
+
+    // Multiply mantissas
+    wire [21:0] mant_res_full = mant_a * mant_b;
+    
+    always @(*) begin
+        if (is_nan_a || is_nan_b) begin
+            result = 16'h7E00; // NaN
+        end else if ((is_inf_a && is_zero_b) || (is_zero_a && is_inf_b)) begin
+            result = 16'h7E00; // NaN
+        end else if (is_inf_a || is_inf_b) begin
+            result = {sign_res, 5'b11111, 10'b0}; // Inf
+        end else if (is_zero_a || is_zero_b) begin
+            result = {sign_res, 15'b0}; // Zero
+        end else begin
+            // Normalization
+            reg [5:0] exp_res_temp;
+            reg [9:0] frac_res_temp;
+            
+            exp_res_temp = exp_a + exp_b - 5'd15;
+            
+            if (mant_res_full[21]) begin
+                frac_res_temp = mant_res_full[20:11]; // simplified rounding
+                exp_res_temp = exp_res_temp + 1;
+            end else begin
+                frac_res_temp = mant_res_full[19:10];
+            end
+            
+            // Check Overflow/Underflow
+            if (exp_res_temp >= 6'd31) begin
+                result = {sign_res, 5'b11111, 10'b0}; // Overflow to Inf
+            end else if (exp_res_temp <= 6'd0 || exp_res_temp[5]) begin
+                result = {sign_res, 15'b0}; // Underflow to Zero (ignoring denormals for simplicity)
+            end else begin
+                result = {sign_res, exp_res_temp[4:0], frac_res_temp};
+            end
+        end
+    end
+
+endmodule

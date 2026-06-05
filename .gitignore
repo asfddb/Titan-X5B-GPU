@@ -1,0 +1,55 @@
+# Compiled simulation files
+*.vvp
+*.out
+a.out
+
+# VCD waveform dumps (large files)
+*.vcd
+
+# Synthesis output
+synthesis_*.txt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.bak
+
+# Large binary archives
+*.zip
+
+# Test output
+test_output.txt
+fb_dump.txt
+rtl_files.txt
+ppa_results.json
+sim_output.txt
+
+# GTKWave extracted
+gtkwave_ext/
+
+# Scratch
+scratch/
+
+# Rendered images (keep rendered_triangle.png)
+triangle.png
+waveform_display.png
+
+# Python scripts (utility, not core)
+*.py
+
+# Cloud deployment
+titan-cloud/
+
+# Artifacts
+artifacts/

@@ -1,0 +1,243 @@
+`timescale 1ns/1ps
+
+// Processing Element (PE) for Matrix Multiply-Accumulate
+module mac_pe #(
+    parameter DATA_WIDTH = 16,
+    parameter ACC_WIDTH  = 32
+)(
+    input  wire                   clk,
+    input  wire                   rst_n,
+    input  wire                   en,
+    input  wire [1:0]             mode, // 0: FP16, 1: FP8, 2: NVFP4 (E2M1)
+    
+    input  wire [DATA_WIDTH-1:0]  act_in,
+    input  wire [DATA_WIDTH-1:0]  weight_in,
+    input  wire [ACC_WIDTH-1:0]   acc_in,
+    
+    output reg  [DATA_WIDTH-1:0]  act_out,
+    output reg  [DATA_WIDTH-1:0]  weight_out,
+    output reg  [ACC_WIDTH-1:0]   acc_out
+);
+
+    // FP8 to FP16 conversion (E4M3)
+    wire [15:0] fp8_act_fp16 = {act_in[7], act_in[6:3] + 5'd15 - 5'd7, act_in[2:0], 7'b0};
+    wire [15:0] fp8_weight_fp16 = {weight_in[7], weight_in[6:3] + 5'd15 - 5'd7, weight_in[2:0], 7'b0};
+
+    // NVFP4 (E2M1) to FP16 conversion
+    // E2M1: Sign=1, Exp=2, Mantissa=1
+    wire [15:0] fp4_act_fp16 = {act_in[3], act_in[2:1] + 5'd15 - 5'd1, act_in[0], 10'b0};
+    wire [15:0] fp4_weight_fp16 = {weight_in[3], weight_in[2:1] + 5'd15 - 5'd1, weight_in[0], 10'b0};
+
+    // Mux input precision
+    wire [15:0] act_fp16 = (mode == 2) ? fp4_act_fp16 : ((mode == 1) ? fp8_act_fp16 : act_in);
+    wire [15:0] weight_fp16 = (mode == 2) ? fp4_weight_fp16 : ((mode == 1) ? fp8_weight_fp16 : weight_in);
+
+    wire [15:0] fp16_prod;
+    titan_x5_fp16_mul mul_inst (
+        .a(act_fp16),
+        .b(weight_fp16),
+        .result(fp16_prod)
+    );
+
+    // Convert FP16 to FP32
+    wire [31:0] fp32_prod = (fp16_prod == 16'b0) ? 32'b0 : 
+                            {fp16_prod[15], fp16_prod[14:10] + 8'd127 - 8'd15, fp16_prod[9:0], 13'b0};
+
+    wire [31:0] next_acc;
+    fp32_add add_inst (
+        .a(acc_in),
+        .b(fp32_prod),
+        .result(next_acc)
+    );
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            act_out    <= {DATA_WIDTH{1'b0}};
+            weight_out <= {DATA_WIDTH{1'b0}};
+            acc_out    <= {ACC_WIDTH{1'b0}};
+        end else if (en) begin
+            act_out    <= act_in;
+            weight_out <= weight_in;
+            acc_out    <= next_acc;
+        end
+    end
+
+endmodule
+
+module fp32_add (
+    input  wire [31:0] a,
+    input  wire [31:0] b,
+    output reg  [31:0] result
+);
+    wire sign_a = a[31];
+    wire [7:0] exp_a = a[30:23];
+    wire [23:0] mant_a = (exp_a == 0) ? 24'b0 : {1'b1, a[22:0]};
+    
+    wire sign_b = b[31];
+    wire [7:0] exp_b = b[30:23];
+    wire [23:0] mant_b = (exp_b == 0) ? 24'b0 : {1'b1, b[22:0]};
+    
+    reg [7:0] exp_diff;
+    reg [23:0] mant_a_aligned;
+    reg [23:0] mant_b_aligned;
+    reg [7:0] exp_res;
+    reg sign_res;
+    reg [24:0] mant_sum;
+    reg [4:0] shift;
+    
+    always @(*) begin
+        if (a == 0) result = b;
+        else if (b == 0) result = a;
+        else begin
+            if (exp_a > exp_b) begin
+                exp_diff = exp_a - exp_b;
+                mant_a_aligned = mant_a;
+                mant_b_aligned = mant_b >> exp_diff;
+                exp_res = exp_a;
+                sign_res = sign_a;
+            end else begin
+                exp_diff = exp_b - exp_a;
+                mant_a_aligned = mant_a >> exp_diff;
+                mant_b_aligned = mant_b;
+                exp_res = exp_b;
+                sign_res = sign_b;
+            end
+            
+            if (sign_a == sign_b) begin
+                mant_sum = mant_a_aligned + mant_b_aligned;
+                if (mant_sum[24]) begin
+                    mant_sum = mant_sum >> 1;
+                    exp_res = exp_res + 1;
+                end
+                result = {sign_res, exp_res, mant_sum[22:0]};
+            end else begin
+                if (mant_a_aligned > mant_b_aligned) begin
+                    mant_sum = mant_a_aligned - mant_b_aligned;
+                    sign_res = sign_a;
+                end else if (mant_b_aligned > mant_a_aligned) begin
+                    mant_sum = mant_b_aligned - mant_a_aligned;
+                    sign_res = sign_b;
+                end else begin
+                    mant_sum = 0;
+                    sign_res = 0;
+                end
+                
+                if (mant_sum == 0) begin
+                    result = 32'b0;
+                end else begin
+                    if (mant_sum[23]) shift = 0;
+                    else if (mant_sum[22]) shift = 1;
+                    else if (mant_sum[21]) shift = 2;
+                    else if (mant_sum[20]) shift = 3;
+                    else if (mant_sum[19]) shift = 4;
+                    else if (mant_sum[18]) shift = 5;
+                    else if (mant_sum[17]) shift = 6;
+                    else if (mant_sum[16]) shift = 7;
+                    else if (mant_sum[15]) shift = 8;
+                    else if (mant_sum[14]) shift = 9;
+                    else if (mant_sum[13]) shift = 10;
+                    else if (mant_sum[12]) shift = 11;
+                    else if (mant_sum[11]) shift = 12;
+                    else if (mant_sum[10]) shift = 13;
+                    else if (mant_sum[9]) shift = 14;
+                    else if (mant_sum[8]) shift = 15;
+                    else if (mant_sum[7]) shift = 16;
+                    else if (mant_sum[6]) shift = 17;
+                    else if (mant_sum[5]) shift = 18;
+                    else if (mant_sum[4]) shift = 19;
+                    else if (mant_sum[3]) shift = 20;
+                    else if (mant_sum[2]) shift = 21;
+                    else if (mant_sum[1]) shift = 22;
+                    else shift = 23;
+
+                    mant_sum = mant_sum << shift;
+                    exp_res = exp_res - shift;
+                    result = {sign_res, exp_res, mant_sum[22:0]};
+                end
+            end
+        end
+    end
+endmodule
+
+// Massive Systolic Array
+module titan_x6_tensor_core_array #(
+    parameter ARRAY_SIZE_X = 16,
+    parameter ARRAY_SIZE_Y = 16,
+    parameter DATA_WIDTH   = 16,
+    parameter ACC_WIDTH    = 32
+)(
+    input  wire                                     clk,
+    input  wire                                     rst_n,
+    input  wire                                     en,
+    input  wire [1:0]                               mode, // 0: FP16, 1: FP8, 2: NVFP4
+    
+    // Activation inputs (fed from left side of array, per row)
+    input  wire [(ARRAY_SIZE_Y * DATA_WIDTH)-1:0]   act_in,
+    
+    // Weight inputs (fed from top side of array, per column)
+    input  wire [(ARRAY_SIZE_X * DATA_WIDTH)-1:0]   weight_in,
+    
+    // Output accumulation (emerging from bottom side of array, per column)
+    output wire [(ARRAY_SIZE_X * ACC_WIDTH)-1:0]    acc_out,
+    output wire                                     out_valid
+);
+
+    // Flattened wire arrays for PE interconnections
+    wire [DATA_WIDTH-1:0] act_wire   [0 : ARRAY_SIZE_Y * (ARRAY_SIZE_X + 1) - 1];
+    wire [DATA_WIDTH-1:0] weight_wire[0 : (ARRAY_SIZE_Y + 1) * ARRAY_SIZE_X - 1];
+    wire [ACC_WIDTH-1:0]  acc_wire   [0 : (ARRAY_SIZE_Y + 1) * ARRAY_SIZE_X - 1];
+
+    genvar i, j;
+    generate
+        // Initialize Row Inputs (Activations)
+        for (i = 0; i < ARRAY_SIZE_Y; i = i + 1) begin : g_act_init
+            assign act_wire[i * (ARRAY_SIZE_X + 1) + 0] = act_in[i * DATA_WIDTH +: DATA_WIDTH];
+        end
+
+        // Initialize Column Inputs (Weights and Initial Accumulator values)
+        for (j = 0; j < ARRAY_SIZE_X; j = j + 1) begin : g_weight_init
+            assign weight_wire[0 * ARRAY_SIZE_X + j] = weight_in[j * DATA_WIDTH +: DATA_WIDTH];
+            assign acc_wire[0 * ARRAY_SIZE_X + j]    = {ACC_WIDTH{1'b0}};
+        end
+
+        // Instantiate the 2D grid of PEs
+        for (i = 0; i < ARRAY_SIZE_Y; i = i + 1) begin : g_row
+            for (j = 0; j < ARRAY_SIZE_X; j = j + 1) begin : g_col
+                mac_pe #(
+                    .DATA_WIDTH(DATA_WIDTH),
+                    .ACC_WIDTH(ACC_WIDTH)
+                ) u_pe (
+                    .clk       (clk),
+                    .rst_n     (rst_n),
+                    .en        (en),
+                    .mode      (mode),
+                    // Inputs from top/left
+                    .act_in    (act_wire   [i * (ARRAY_SIZE_X + 1) + j]),
+                    .weight_in (weight_wire[i * ARRAY_SIZE_X + j]),
+                    .acc_in    (acc_wire   [i * ARRAY_SIZE_X + j]),
+                    // Outputs to bottom/right
+                    .act_out   (act_wire   [i * (ARRAY_SIZE_X + 1) + j + 1]),
+                    .weight_out(weight_wire[(i + 1) * ARRAY_SIZE_X + j]),
+                    .acc_out   (acc_wire   [(i + 1) * ARRAY_SIZE_X + j])
+                );
+            end
+        end
+
+        // Assign Output Accumulators (Bottom of the array)
+        for (j = 0; j < ARRAY_SIZE_X; j = j + 1) begin : g_acc_out
+            assign acc_out[j * ACC_WIDTH +: ACC_WIDTH] = acc_wire[ARRAY_SIZE_Y * ARRAY_SIZE_X + j];
+        end
+    endgenerate
+
+    reg [ARRAY_SIZE_Y-1:0] valid_pipe;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            valid_pipe <= {ARRAY_SIZE_Y{1'b0}};
+        end else if (en) begin
+            valid_pipe <= {valid_pipe[ARRAY_SIZE_Y-2:0], 1'b1};
+        end
+    end
+    
+    assign out_valid = valid_pipe[ARRAY_SIZE_Y-1];
+
+endmodule

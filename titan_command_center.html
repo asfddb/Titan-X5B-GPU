@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Titan X5 GPU — Command Center</title>
+<meta name="description" content="Real-time Titan X5 GPU Architecture Command Center — live telemetry, simulation results, waveform viewer, and chip explorer.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --titan-orange: #FF8800;
+    --titan-orange-dim: rgba(255,136,0,0.15);
+    --titan-orange-glow: rgba(255,136,0,0.6);
+    --cyan: #00E5FF;
+    --cyan-dim: rgba(0,229,255,0.12);
+    --purple: #B44FFF;
+    --purple-dim: rgba(180,79,255,0.15);
+    --green: #00FF88;
+    --green-dim: rgba(0,255,136,0.12);
+    --red: #FF3860;
+    --bg-deep: #050810;
+    --bg-panel: rgba(8,12,28,0.95);
+    --bg-card: rgba(12,18,40,0.9);
+    --border: rgba(255,136,0,0.2);
+    --border-dim: rgba(255,255,255,0.06);
+    --text: #E8EEF8;
+    --text-dim: #7A8AAA;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: var(--bg-deep);
+    color: var(--text);
+    font-family: 'Outfit', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+    background-image:
+      radial-gradient(ellipse 80% 40% at 20% 10%, rgba(255,136,0,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 40% at 80% 90%, rgba(0,229,255,0.06) 0%, transparent 60%),
+      repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(255,255,255,0.018) 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(255,255,255,0.018) 40px);
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 28px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(5,8,16,0.98);
+    backdrop-filter: blur(20px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .logo-icon {
+    width: 42px; height: 42px;
+    background: linear-gradient(135deg, var(--titan-orange), #FF5500);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    box-shadow: 0 0 24px var(--titan-orange-glow);
+    animation: logoGlow 3s ease-in-out infinite alternate;
+  }
+  @keyframes logoGlow {
+    from { box-shadow: 0 0 20px rgba(255,136,0,0.5); }
+    to   { box-shadow: 0 0 40px rgba(255,136,0,0.9); }
+  }
+  .logo-text h1 { font-size: 1.35rem; font-weight: 700; letter-spacing: -0.5px; }
+  .logo-text span { font-size: 0.72rem; color: var(--text-dim); font-weight: 400; letter-spacing: 1.5px; text-transform: uppercase; }
+
+  .header-status { display: flex; align-items: center; gap: 24px; }
+  .status-pill {
+    display: flex; align-items: center; gap: 7px;
+    background: rgba(0,255,136,0.08);
+    border: 1px solid rgba(0,255,136,0.25);
+    border-radius: 20px; padding: 5px 14px;
+    font-size: 0.78rem; font-weight: 600; color: var(--green);
+  }
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 8px var(--green);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(0.8)} }
+
+  .clock { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; color: var(--text-dim); }
+
+  /* ── Grid layout ── */
+  .dashboard {
+    display: grid;
+    grid-template-columns: 280px 1fr 300px;
+    grid-template-rows: auto;
+    gap: 16px;
+    padding: 16px 20px;
+    max-width: 1800px;
+    margin: 0 auto;
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-dim);
+    border-radius: 16px;
+    padding: 18px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--titan-orange), transparent);
+    opacity: 0.5;
+  }
+  .card-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .card-title {
+    font-size: 0.72rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--text-dim);
+  }
+  .card-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    background: var(--titan-orange-dim);
+    border: 1px solid var(--border);
+    color: var(--titan-orange);
+    border-radius: 6px; padding: 2px 8px;
+  }
+
+  /* ── Chip Architecture Diagram ── */
+  .chip-canvas {
+    width: 100%;
+    aspect-ratio: 1;
+    position: relative;
+  }
+  .chip-svg { width: 100%; height: 100%; }
+
+  /* ── Metric cards ── */
+  .metric-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  }
+  .metric-item {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid var(--border-dim);
+    border-radius: 10px;
+    padding: 12px;
+    transition: border-color 0.3s, background 0.3s;
+  }
+  .metric-item:hover {
+    border-color: var(--border);
+    background: rgba(255,136,0,0.05);
+  }
+  .metric-label { font-size: 0.68rem; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 1px; }
+  .metric-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 1.3rem; font-weight: 700;
+    background: linear-gradient(135deg, #fff, var(--titan-orange));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .metric-unit { font-size: 0.65rem; color: var(--text-dim); margin-top: 2px; }
+
+  /* ── Progress bars ── */
+  .progress-bar {
+    height: 6px; border-radius: 3px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden; margin-top: 6px;
+  }
+  .progress-fill {
+    height: 100%; border-radius: 3px;
+    transition: width 0.6s cubic-bezier(0.25,0.46,0.45,0.94);
+  }
+
+  /* ── Waveform display ── */
+  .waveform-container {
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--border-dim);
+    border-radius: 10px;
+    padding: 10px;
+    overflow: hidden;
+  }
+  .wave-track { margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .wave-label { font-family: 'JetBrains Mono', monospace; font-size: 0.65rem; color: var(--text-dim); width: 60px; flex-shrink: 0; }
+  .wave-canvas { flex: 1; height: 22px; position: relative; overflow: hidden; }
+
+  /* ── Sim log ── */
+  .sim-log {
+    background: rgba(0,0,0,0.5);
+    border-radius: 10px;
+    padding: 12px;
+    height: 200px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    line-height: 1.8;
+  }
+  .sim-log::-webkit-scrollbar { width: 4px; }
+  .sim-log::-webkit-scrollbar-track { background: transparent; }
+  .sim-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .log-line { display: flex; gap: 8px; }
+  .log-time { color: var(--text-dim); min-width: 70px; }
+  .log-pass { color: var(--green); }
+  .log-warn { color: var(--titan-orange); }
+  .log-info { color: var(--cyan); }
+  .log-error { color: var(--red); }
+
+  /* ── Core grid (WSE view) ── */
+  .core-grid {
+    display: grid;
+    grid-template-columns: repeat(16,1fr);
+    gap: 2px;
+  }
+  .core-cell {
+    aspect-ratio: 1;
+    border-radius: 2px;
+    background: rgba(255,136,0,0.1);
+    border: 1px solid rgba(255,136,0,0.15);
+    transition: background 0.3s, border-color 0.3s;
+    cursor: pointer;
+    position: relative;
+  }
+  .core-cell.active {
+    background: rgba(255,136,0,0.6);
+    border-color: var(--titan-orange);
+    box-shadow: 0 0 4px rgba(255,136,0,0.4);
+  }
+  .core-cell.hot {
+    background: rgba(255,56,96,0.7);
+    border-color: var(--red);
+    box-shadow: 0 0 6px rgba(255,56,96,0.5);
+  }
+  .core-cell.idle {
+    background: rgba(0,229,255,0.08);
+    border-color: rgba(0,229,255,0.15);
+  }
+  .core-cell:hover { transform: scale(1.6); z-index: 10; }
+
+  /* ── Sidebar stats ── */
+  .stat-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border-dim);
+  }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-name { font-size: 0.8rem; color: var(--text-dim); }
+  .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 0.85rem; font-weight: 700; }
+  .stat-pass { color: var(--green); }
+  .stat-warn { color: var(--titan-orange); }
+
+  /* ── Test results panel ── */
+  .test-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 8px;
+    margin-bottom: 6px;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid var(--border-dim);
+    font-size: 0.78rem;
+    cursor: default;
+    transition: background 0.2s;
+  }
+  .test-item:hover { background: rgba(255,255,255,0.04); }
+  .test-icon { font-size: 1rem; flex-shrink: 0; }
+  .test-name { flex: 1; }
+  .test-result { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; padding: 2px 8px; border-radius: 5px; }
+  .pass { background: rgba(0,255,136,0.12); color: var(--green); border: 1px solid rgba(0,255,136,0.25); }
+  .running { background: rgba(255,136,0,0.12); color: var(--titan-orange); border: 1px solid var(--border); }
+
+  /* ── Animated number counter ── */
+  @keyframes countUp { from { opacity:0; transform: translateY(4px); } to { opacity:1; transform: translateY(0); } }
+  .animate-in { animation: countUp 0.4s ease forwards; }
+
+  /* ── FPS chart ── */
+  .fps-chart { width: 100%; height: 70px; position: relative; }
+
+  /* ── Responsive ── */
+  @media (max-width: 1200px) {
+    .dashboard { grid-template-columns: 1fr 1fr; }
+    .col-left { grid-column: 1; }
+    .col-mid  { grid-column: 2; }
+    .col-right { grid-column: 1 / -1; }
+  }
+  @media (max-width: 700px) {
+    .dashboard { grid-template-columns: 1fr; }
+  }
+
+  /* span helpers */
+  .span-2 { grid-column: span 2; }
+  .col-left { grid-column: 1; }
+  .col-mid  { grid-column: 2; }
+  .col-right { grid-column: 3; }
+
+  .section-gap { margin-top: 12px; }
+
+  .gradient-orange { color: var(--titan-orange); }
+  .gradient-cyan { color: var(--cyan); }
+  .gradient-green { color: var(--green); }
+  .gradient-purple { color: var(--purple); }
+
+  /* tab bar */
+  .tab-bar { display: flex; gap: 4px; margin-bottom: 14px; }
+  .tab-btn {
+    flex: 1; padding: 7px 10px; border: 1px solid var(--border-dim);
+    background: transparent; border-radius: 8px; color: var(--text-dim);
+    font-family: 'Outfit',sans-serif; font-size: 0.72rem; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tab-btn.active {
+    background: var(--titan-orange-dim);
+    border-color: var(--titan-orange);
+    color: var(--titan-orange);
+  }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* tooltip */
+  .tooltip { position: relative; }
+  .tooltip:hover::after {
+    content: attr(data-tip);
+    position: absolute; bottom: 110%; left: 50%; transform: translateX(-50%);
+    background: rgba(5,8,16,0.97); border: 1px solid var(--border);
+    color: var(--text); font-size: 0.68rem; padding: 4px 9px; border-radius: 6px;
+    white-space: nowrap; z-index: 200; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══ -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">⚡</div>
+    <div class="logo-text">
+      <h1>Titan X5 GPU <span style="color:var(--titan-orange)">∞</span></h1>
+      <span>Simulation Command Center · RTL Verified</span>
+    </div>
+  </div>
+  <div class="header-status">
+    <div class="status-pill"><div class="status-dot"></div>All Systems Nominal</div>
+    <div class="clock" id="clockEl">--:--:--</div>
+  </div>
+</header>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div class="dashboard">
+
+  <!-- ═══ LEFT COLUMN ═══ -->
+  <!-- Chip Architecture -->
+  <div class="card col-left">
+    <div class="card-header">
+      <span class="card-title">Chip Architecture</span>
+      <span class="card-badge">TSMC 3nm</span>
+    </div>
+    <div class="chip-canvas">
+      <svg class="chip-svg" viewBox="0 0 240 240" id="chipSvg">
+        <!-- Die boundary -->
+        <rect x="5" y="5" width="230" height="230" rx="8" fill="rgba(8,12,28,0.9)" stroke="rgba(255,136,0,0.5)" stroke-width="1.5"/>
+
+        <!-- SM blocks (4) -->
+        <g id="sm0" class="chip-block" style="cursor:pointer" onclick="highlightBlock('sm0','Streaming Multiprocessor 0 — 8 Warps, 4 ALUs, L1 32KB')">
+          <rect x="14" y="14" width="100" height="70" rx="5" fill="rgba(255,136,0,0.08)" stroke="rgba(255,136,0,0.5)" stroke-width="1"/>
+          <text x="64" y="44" text-anchor="middle" fill="#FF8800" font-size="8" font-family="JetBrains Mono">SM #0</text>
+          <text x="64" y="55" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="6">8 Warps · 4 ALU</text>
+          <!-- mini ALU squares -->
+          <rect x="24" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="42" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="60" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="78" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <text x="31" y="72" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="5">ALU</text>
+          <text x="49" y="72" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="5">ALU</text>
+          <text x="67" y="72" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="5">ALU</text>
+          <text x="85" y="72" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="5">ALU</text>
+        </g>
+
+        <g id="sm1" class="chip-block" style="cursor:pointer" onclick="highlightBlock('sm1','Streaming Multiprocessor 1 — 8 Warps, 4 ALUs, L1 32KB')">
+          <rect x="126" y="14" width="100" height="70" rx="5" fill="rgba(255,136,0,0.08)" stroke="rgba(255,136,0,0.5)" stroke-width="1"/>
+          <text x="176" y="44" text-anchor="middle" fill="#FF8800" font-size="8" font-family="JetBrains Mono">SM #1</text>
+          <text x="176" y="55" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="6">8 Warps · 4 ALU</text>
+          <rect x="136" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="154" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="172" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="190" y="62" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+        </g>
+
+        <g id="sm2" class="chip-block" style="cursor:pointer" onclick="highlightBlock('sm2','Streaming Multiprocessor 2 — 8 Warps, 4 ALUs, L1 32KB')">
+          <rect x="14" y="96" width="100" height="70" rx="5" fill="rgba(255,136,0,0.08)" stroke="rgba(255,136,0,0.5)" stroke-width="1"/>
+          <text x="64" y="126" text-anchor="middle" fill="#FF8800" font-size="8" font-family="JetBrains Mono">SM #2</text>
+          <text x="64" y="137" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="6">8 Warps · 4 ALU</text>
+          <rect x="24" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="42" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="60" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="78" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+        </g>
+
+        <g id="sm3" class="chip-block" style="cursor:pointer" onclick="highlightBlock('sm3','Streaming Multiprocessor 3 — 8 Warps, 4 ALUs, L1 32KB')">
+          <rect x="126" y="96" width="100" height="70" rx="5" fill="rgba(255,136,0,0.08)" stroke="rgba(255,136,0,0.5)" stroke-width="1"/>
+          <text x="176" y="126" text-anchor="middle" fill="#FF8800" font-size="8" font-family="JetBrains Mono">SM #3</text>
+          <text x="176" y="137" text-anchor="middle" fill="rgba(255,255,255,0.5)" font-size="6">8 Warps · 4 ALU</text>
+          <rect x="136" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="154" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="172" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+          <rect x="190" y="144" width="14" height="14" rx="2" fill="rgba(255,136,0,0.3)" stroke="rgba(255,136,0,0.6)" stroke-width="0.5"/>
+        </g>
+
+        <!-- RT Core -->
+        <g id="rtCore" class="chip-block" style="cursor:pointer" onclick="highlightBlock('rtCore','RT Core — BVH Traversal, Ray-AABB Intersection, 32-entry Stack')">
+          <rect x="14" y="178" width="46" height="46" rx="5" fill="rgba(180,79,255,0.1)" stroke="rgba(180,79,255,0.5)" stroke-width="1"/>
+          <text x="37" y="199" text-anchor="middle" fill="#B44FFF" font-size="7.5" font-family="JetBrains Mono">RT</text>
+          <text x="37" y="210" text-anchor="middle" fill="#B44FFF" font-size="7.5" font-family="JetBrains Mono">Core</text>
+        </g>
+
+        <!-- Rasterizer -->
+        <g id="rast" class="chip-block" style="cursor:pointer" onclick="highlightBlock('rast','Rasterizer — Triangle Setup, Edge Walking, Barycentric Weights')">
+          <rect x="66" y="178" width="46" height="46" rx="5" fill="rgba(0,229,255,0.1)" stroke="rgba(0,229,255,0.5)" stroke-width="1"/>
+          <text x="89" y="199" text-anchor="middle" fill="#00E5FF" font-size="7" font-family="JetBrains Mono">Rast</text>
+          <text x="89" y="210" text-anchor="middle" fill="#00E5FF" font-size="7" font-family="JetBrains Mono">izer</text>
+        </g>
+
+        <!-- SR Engine -->
+        <g id="srEng" class="chip-block" style="cursor:pointer" onclick="highlightBlock('srEng','Apex SR Engine — FNV-1a Hash, 256-entry Temporal Cache, Motion Vectors')">
+          <rect x="118" y="178" width="46" height="46" rx="5" fill="rgba(0,255,136,0.1)" stroke="rgba(0,255,136,0.5)" stroke-width="1"/>
+          <text x="141" y="199" text-anchor="middle" fill="#00FF88" font-size="7" font-family="JetBrains Mono">Apex</text>
+          <text x="141" y="210" text-anchor="middle" fill="#00FF88" font-size="7" font-family="JetBrains Mono">SR</text>
+        </g>
+
+        <!-- Mem Ctrl -->
+        <g id="memCtrl" class="chip-block" style="cursor:pointer" onclick="highlightBlock('memCtrl','Memory Controller — AXI4 Master, 16-beat Bursts → VRAM')">
+          <rect x="170" y="178" width="60" height="46" rx="5" fill="rgba(255,56,96,0.08)" stroke="rgba(255,56,96,0.5)" stroke-width="1"/>
+          <text x="200" y="196" text-anchor="middle" fill="#FF3860" font-size="7" font-family="JetBrains Mono">Mem</text>
+          <text x="200" y="207" text-anchor="middle" fill="#FF3860" font-size="7" font-family="JetBrains Mono">Ctrl</text>
+          <text x="200" y="218" text-anchor="middle" fill="rgba(255,255,255,0.3)" font-size="5">AXI4</text>
+        </g>
+
+        <!-- L2 Bus line -->
+        <line x1="64" y1="84" x2="64" y2="96" stroke="rgba(255,136,0,0.3)" stroke-width="1" stroke-dasharray="3,2"/>
+        <line x1="176" y1="84" x2="176" y2="96" stroke="rgba(255,136,0,0.3)" stroke-width="1" stroke-dasharray="3,2"/>
+        <line x1="14" y1="90" x2="226" y2="90" stroke="rgba(255,136,0,0.15)" stroke-width="1" stroke-dasharray="4,3"/>
+
+        <!-- Animated packet on bus -->
+        <circle id="busPacket" r="3" fill="var(--titan-orange)" opacity="0.9">
+          <animateMotion dur="2.4s" repeatCount="indefinite">
+            <mpath href="#busPath"/>
+          </animateMotion>
+        </circle>
+        <path id="busPath" d="M 14,90 L 226,90" fill="none"/>
+
+        <!-- NoC label -->
+        <text x="120" y="88" text-anchor="middle" fill="rgba(255,136,0,0.4)" font-size="5.5" font-family="JetBrains Mono">L2 CROSSBAR BUS</text>
+      </svg>
+    </div>
+    <div id="blockInfo" style="font-size:0.7rem; color:var(--text-dim); text-align:center; margin-top:8px; min-height:28px; transition:all 0.3s;">
+      Click any block to inspect
+    </div>
+  </div>
+
+  <!-- ═══ MIDDLE COLUMN ═══ -->
+  <div style="display:flex; flex-direction:column; gap:16px; grid-column:2;">
+
+    <!-- KPI Row -->
+    <div class="card" style="padding:14px 18px;">
+      <div class="metric-grid">
+        <div class="metric-item tooltip" data-tip="Wafer Scan: 256 cores verified">
+          <div class="metric-label">Core Yield</div>
+          <div class="metric-value" id="kpiYield">100%</div>
+          <div class="metric-unit">256 / 256 Cores Responsive</div>
+          <div class="progress-bar"><div class="progress-fill" style="width:100%;background:linear-gradient(90deg,var(--green),#00FFAA);"></div></div>
+        </div>
+        <div class="metric-item tooltip" data-tip="Chaos Monkey: 5,000 randomized packets">
+          <div class="metric-label">NoC Stability</div>
+          <div class="metric-value" id="kpiNoc">PASS</div>
+          <div class="metric-unit">5,000 packets · 0 dropped</div>
+          <div class="progress-bar"><div class="progress-fill" style="width:100%;background:linear-gradient(90deg,var(--green),#00FFAA);"></div></div>
+        </div>
+        <div class="metric-item tooltip" data-tip="SR Engine: FNV-1a cache performance">
+          <div class="metric-label">SR Hit Rate</div>
+          <div class="metric-value" id="kpiSR">99.5%</div>
+          <div class="metric-unit">Still camera · motion comp</div>
+          <div class="progress-bar"><div class="progress-fill" id="srBar" style="width:99.5%;background:linear-gradient(90deg,var(--cyan),#0095FF);"></div></div>
+        </div>
+        <div class="metric-item tooltip" data-tip="Display Engine: 1920×1080 VGA timing">
+          <div class="metric-label">Display FPS</div>
+          <div class="metric-value" id="kpiFPS">120</div>
+          <div class="metric-unit">1920×1080 · DE=1 · Orange Pattern</div>
+          <div class="progress-bar"><div class="progress-fill" id="fpsBar" style="width:100%;background:linear-gradient(90deg,var(--purple),#FF55CC);"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Simulation Results Tabs -->
+    <div class="card" style="flex:1;">
+      <div class="card-header">
+        <span class="card-title">Simulation Results</span>
+        <span class="card-badge" id="testCount">8 Tests Run</span>
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" onclick="switchTab('results',this)">Results</button>
+        <button class="tab-btn" onclick="switchTab('log',this)">Sim Log</button>
+        <button class="tab-btn" onclick="switchTab('waveform',this)">Waveform</button>
+      </div>
+
+      <!-- Results tab -->
+      <div class="tab-content active" id="tab-results">
+        <div class="test-item">
+          <span class="test-icon">⚡</span>
+          <span class="test-name">ALU Unit Test (ADD · FMA · MUL)</span>
+          <span class="test-result pass">PASS</span>
+        </div>
+        <div class="test-item">
+          <span class="test-icon">🎯</span>
+          <span class="test-name">Apex SR Engine (Cache Hit/Miss/Confidence)</span>
+          <span class="test-result pass">PASS 4/4</span>
+        </div>
+        <div class="test-item">
+          <span class="test-icon">🔺</span>
+          <span class="test-name">Graphics Pipeline (Rasterizer → SR Engine)</span>
+          <span class="test-result pass">66 pixels</span>
+        </div>
+        <div class="test-item">
+          <span class="test-icon">🌌</span>
+          <span class="test-name">Astra-8 Multiverse Simulation (Bell-State Teleport)</span>
+          <span class="test-result pass">PASS 16/16</span>
+        </div>
+        <div class="test-item">
+          <span class="test-icon">🧠</span>
+          <span class="test-name">Nexus HDC (Holographic Train + Query)</span>
+          <span class="test-result pass" id="hdcResult">PASS</span>
+        </div>
+        <div class="test-item">
+          <span class="test-icon">📡</span>
+          <span class="test-name">Wafer Scan (256 Cores @ 16×16 WSE)</span>
+          <span class="test-result pass">100% yield</span>
+        </div>
+        <div class="test-item">
+          <span class="test-icon">🦁</span>
+          <span class="test-name">Chaos Monkey (5,000 random packets w/ defects)</span>
+          <span class="test-result pass">0 dropped</span>
+        </div>
+        <div class="test-item">
+          <span class="test-icon">🖥️</span>
+          <span class="test-name">GPU Top-Level Integration (All Submodules)</span>
+          <span class="test-result pass">0 errors</span>
+        </div>
+      </div>
+
+      <!-- Log tab -->
+      <div class="tab-content" id="tab-log">
+        <div class="sim-log" id="simLog"></div>
+      </div>
+
+      <!-- Waveform tab -->
+      <div class="tab-content" id="tab-waveform">
+        <div class="waveform-container" id="waveformContainer">
+          <div class="wave-track"><span class="wave-label">clk</span><canvas class="wave-canvas" id="wclk" width="500" height="22"></canvas></div>
+          <div class="wave-track"><span class="wave-label">rst_n</span><canvas class="wave-canvas" id="wrst" width="500" height="22"></canvas></div>
+          <div class="wave-track"><span class="wave-label">in_valid</span><canvas class="wave-canvas" id="wvalid" width="500" height="22"></canvas></div>
+          <div class="wave-track"><span class="wave-label">cache_hit</span><canvas class="wave-canvas" id="whit" width="500" height="22"></canvas></div>
+          <div class="wave-track"><span class="wave-label">confidence</span><canvas class="wave-canvas" id="wconf" width="500" height="22"></canvas></div>
+          <div class="wave-track"><span class="wave-label">reproj_tag</span><canvas class="wave-canvas" id="wtag" width="500" height="22"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ RIGHT COLUMN ═══ -->
+  <div style="display:flex; flex-direction:column; gap:16px; grid-column:3;">
+
+    <!-- WSE Core Map -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">WSE Core Heatmap</span>
+        <span class="card-badge">16×16</span>
+      </div>
+      <div class="core-grid" id="coreGrid"></div>
+      <div style="display:flex; gap:12px; margin-top:10px; font-size:0.65rem; color:var(--text-dim);">
+        <span>🟠 Active</span>
+        <span>🔴 Hot</span>
+        <span>🔵 Idle</span>
+      </div>
+    </div>
+
+    <!-- System Stats -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">System Stats</span>
+        <span class="card-badge">Live</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-name">Process Node</span>
+        <span class="stat-val gradient-orange">TSMC 3nm</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-name">Core Count</span>
+        <span class="stat-val">10B</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-name">Target Freq</span>
+        <span class="stat-val gradient-cyan">5.5 GHz</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-name">Transistors</span>
+        <span class="stat-val">250T</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-name">Performance</span>
+        <span class="stat-val gradient-green">7,040 PFlops</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-name">Sim Files</span>
+        <span class="stat-val gradient-purple">12 VCD</span>
+      </div>
+      <div class="stat-row">
+        <span class="stat-name">Build Status</span>
+        <span class="stat-val stat-pass">✓ CLEAN</span>
+      </div>
+    </div>
+
+    <!-- SR Telemetry live -->
+    <div class="card">
+      <div class="card-header">
+        <span class="card-title">SR Telemetry</span>
+        <span class="card-badge" style="color:var(--green);border-color:rgba(0,255,136,0.3);background:rgba(0,255,136,0.08)">Live Sim</span>
+      </div>
+      <div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:4px;">
+          <span style="color:var(--text-dim)">Hit Rate</span>
+          <span style="font-family:JetBrains Mono;color:var(--cyan)" id="liveHR">99.5%</span>
+        </div>
+        <div class="progress-bar" style="height:8px;"><div class="progress-fill" id="liveHRBar" style="width:99.5%;background:linear-gradient(90deg,#00AAFF,#00E5FF);border-radius:4px;"></div></div>
+      </div>
+      <div style="margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:4px;">
+          <span style="color:var(--text-dim)">Confidence</span>
+          <span style="font-family:JetBrains Mono;color:var(--green)" id="liveConf">0xFFF7</span>
+        </div>
+        <div class="progress-bar" style="height:8px;"><div class="progress-fill" id="liveConfBar" style="width:99%;background:linear-gradient(90deg,#00FF66,#00FF88);border-radius:4px;"></div></div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:4px;">
+          <span style="color:var(--text-dim)">Camera Velocity</span>
+          <span style="font-family:JetBrains Mono;color:var(--titan-orange)" id="liveCam">0.0 px/f</span>
+        </div>
+        <div class="progress-bar" style="height:8px;"><div class="progress-fill" id="liveCamBar" style="width:0%;background:linear-gradient(90deg,#FF8800,#FF4400);border-radius:4px;"></div></div>
+      </div>
+      <!-- mini FPS chart -->
+      <div style="margin-top:10px;">
+        <div style="font-size:0.68rem;color:var(--text-dim);margin-bottom:4px;">FPS History</div>
+        <canvas id="fpsChart" class="fps-chart"></canvas>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Tooltip overlay for chip blocks -->
+<div id="blockToast" style="
+  position:fixed; bottom:28px; left:50%; transform:translateX(-50%);
+  background:rgba(5,8,16,0.98); border:1px solid var(--titan-orange);
+  border-radius:10px; padding:10px 20px;
+  font-size:0.78rem; color:var(--text); display:none;
+  z-index:999; box-shadow:0 0 30px rgba(255,136,0,0.3);
+  max-width:500px; text-align:center;
+"></div>
+
+<script>
+// ────────────────────────────────────────
+// Clock
+// ────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clockEl').textContent =
+    now.toLocaleTimeString('en-US', { hour12: false });
+}
+setInterval(updateClock, 1000); updateClock();
+
+// ────────────────────────────────────────
+// Tab switching
+// ────────────────────────────────────────
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ────────────────────────────────────────
+// Chip block highlight
+// ────────────────────────────────────────
+function highlightBlock(id, desc) {
+  document.querySelectorAll('.chip-block rect').forEach(r => {
+    r.setAttribute('filter', '');
+  });
+  const group = document.getElementById(id);
+  if (group) {
+    const rect = group.querySelector('rect');
+    if (rect) { rect.setAttribute('filter', 'url(#glow)'); }
+  }
+  const toast = document.getElementById('blockToast');
+  toast.textContent = desc;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 3500);
+  document.getElementById('blockInfo').textContent = '🔍 ' + desc;
+}
+
+// Add glow filter to SVG
+const svgNS = "http://www.w3.org/2000/svg";
+const defs = document.createElementNS(svgNS, 'defs');
+defs.innerHTML = `
+<filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+  <feGaussianBlur stdDeviation="3" result="blur"/>
+  <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+</filter>`;
+document.getElementById('chipSvg').prepend(defs);
+
+// ────────────────────────────────────────
+// WSE Core Heatmap
+// ────────────────────────────────────────
+const coreGrid = document.getElementById('coreGrid');
+const coreEls = [];
+for (let i = 0; i < 256; i++) {
+  const cell = document.createElement('div');
+  cell.className = 'core-cell idle';
+  cell.title = `Core (${i % 16}, ${Math.floor(i / 16)})`;
+  coreGrid.appendChild(cell);
+  coreEls.push(cell);
+}
+
+// Animate scan
+let scanIdx = 0;
+function runWaferScan() {
+  if (scanIdx < 256) {
+    coreEls[scanIdx].classList.remove('idle');
+    coreEls[scanIdx].classList.add('active');
+    scanIdx++;
+    setTimeout(runWaferScan, 18);
+  }
+}
+setTimeout(runWaferScan, 800);
+
+// Random hot-spot flicker
+setInterval(() => {
+  const idx = Math.floor(Math.random() * 256);
+  if (coreEls[idx].classList.contains('active')) {
+    coreEls[idx].classList.add('hot');
+    setTimeout(() => coreEls[idx].classList.remove('hot'), 600);
+  }
+}, 300);
+
+// ────────────────────────────────────────
+// Sim Log
+// ────────────────────────────────────────
+const logs = [
+  { t: '0', cls: 'log-info', msg: 'VCD info: dumpfile waves_sr.vcd opened for output.' },
+  { t: '25000', cls: 'log-pass', msg: 'Reset deasserted. SR Engine ready.' },
+  { t: '45000', cls: 'log-warn', msg: 'Test 1: HIT:0 MISS:1 TAG:9d42e9f9 CONF:fff7' },
+  { t: '75000', cls: 'log-pass', msg: 'Test 2: HIT:1 MISS:0 TAG:9d42e9f9 CONF:fff7 — CACHE HIT!' },
+  { t: '105000', cls: 'log-warn', msg: 'Test 3: HIT:0 MISS:1 TAG:b0e0c9f9 CONF:fff7 — New coords' },
+  { t: '135000', cls: 'log-warn', msg: 'Test 4: HIT:0 MISS:1 TAG:32c82a9d CONF:f05f — Low confidence (extreme motion)' },
+  { t: '190000', cls: 'log-pass', msg: '--- APEX SR ENGINE VERIFICATION COMPLETE ---' },
+  { t: '20000', cls: 'log-info', msg: 'ASTRA-8: PTM-BISL output mux self-test PASSED (16/16)' },
+  { t: '30000', cls: 'log-info', msg: 'ASTRA-8: Hitting PTM with 4096 GHz Acoustic Resonance' },
+  { t: '130000', cls: 'log-info', msg: 'ASTRA-8: Inducing Quantum Thermal Noise into MAS Fabric' },
+  { t: '185000', cls: 'log-pass', msg: 'ASTRA-8 PESR: Teleport #1 | src=0 → dst=3 | data=0xfafafafa ✓' },
+  { t: '0', cls: 'log-info', msg: 'CHAOS: Generating testbench with 5,000 randomized vectors...' },
+  { t: '+1s', cls: 'log-pass', msg: 'CHAOS: Packets Survived: 5,000 / 5,000 — NoC 100% stable ✓' },
+  { t: '0', cls: 'log-info', msg: 'WSE SCAN: Generating 16×16 (256 Cores) diagnostic testbench...' },
+  { t: '+2s', cls: 'log-pass', msg: 'WSE SCAN: Responsive 256/256 — 100% Core Yield ✓' },
+  { t: '40000', cls: 'log-pass', msg: 'GPU TOP: Reset deasserted. All 13 submodules operational.' },
+  { t: '295000', cls: 'log-pass', msg: 'GPU TOP: VGA DE=1, R=0xFF G=0x88 B=0x00 (Titan Orange) ✓' },
+  { t: '295000', cls: 'log-pass', msg: 'GPU TOP: INTEGRATION TEST PASSED — 0 errors, 0 warnings ✓' },
+];
+
+const logEl = document.getElementById('simLog');
+let logI = 0;
+function appendLog() {
+  if (logI < logs.length) {
+    const l = logs[logI++];
+    const div = document.createElement('div');
+    div.className = 'log-line';
+    div.innerHTML = `<span class="log-time">[${l.t}]</span><span class="${l.cls}">${l.msg}</span>`;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+    setTimeout(appendLog, 350 + Math.random() * 200);
+  }
+}
+setTimeout(appendLog, 1200);
+
+// ────────────────────────────────────────
+// Waveform drawing
+// ────────────────────────────────────────
+function drawWave(canvasId, pattern, color) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.parentElement.offsetWidth - 8;
+  if (W > 0) canvas.width = W;
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  // Draw grid
+  ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+  ctx.lineWidth = 0.5;
+  for (let x = 0; x < w; x += 20) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+  }
+
+  // Draw waveform
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 4;
+  ctx.beginPath();
+  const step = w / pattern.length;
+  let prev = pattern[0];
+  ctx.moveTo(0, prev ? 4 : h - 4);
+
+  for (let i = 0; i < pattern.length; i++) {
+    const x = i * step;
+    const y = pattern[i] ? 4 : h - 4;
+    if (pattern[i] !== prev) {
+      ctx.lineTo(x, prev ? 4 : h - 4);
+      ctx.lineTo(x, y);
+    } else {
+      ctx.lineTo(x + step, y);
+    }
+    prev = pattern[i];
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+function renderWaveforms() {
+  const N = 60;
+  // clk: 50% duty
+  const clk = Array.from({length:N}, (_,i) => i%2);
+  // rst_n: low for first 5
+  const rst = Array.from({length:N}, (_,i) => i < 5 ? 0 : 1);
+  // valid: pulses
+  const valid = Array.from({length:N}, (_,i) => (i>7 && i<11)||(i>13 && i<17)||(i>19 && i<23)||(i>25 && i<29) ? 1 : 0);
+  // cache_hit: first push miss, second hit
+  const hit = Array.from({length:N}, (_,i) => (i>=17&&i<20)||(i>=29&&i<32) ? 1 : 0);
+  // confidence: analog-ish shown as level
+  const conf = Array.from({length:N}, (_,i) => i>7 ? 1 : 0);
+  // reproj_tag: toggle
+  const tag = Array.from({length:N}, (_,i) => i%8 < 4 && i > 5 ? 1 : 0);
+
+  drawWave('wclk', clk, '#FF8800');
+  drawWave('wrst', rst, '#FF3860');
+  drawWave('wvalid', valid, '#00E5FF');
+  drawWave('whit', hit, '#00FF88');
+  drawWave('wconf', conf, '#B44FFF');
+  drawWave('wtag', tag, '#FFDD00');
+}
+setTimeout(renderWaveforms, 500);
+window.addEventListener('resize', renderWaveforms);
+
+// ────────────────────────────────────────
+// FPS chart + SR live telemetry
+// ────────────────────────────────────────
+const fpsHistory = Array(40).fill(120);
+let frame = 0;
+const fpsCanvas = document.getElementById('fpsChart');
+const fpsCtx = fpsCanvas.getContext('2d');
+
+function updateTelemetry() {
+  frame++;
+  const pan = frame % 300;
+  let camVel = 0;
+  if (pan > 100 && pan < 200) {
+    camVel = 15 * Math.sin((pan - 100) / 100 * Math.PI);
+  }
+  const hitRate = Math.max(10, 99.5 - Math.abs(camVel) * 3.5 + (Math.random() * 2 - 1));
+  const fps = hitRate < 50 ? 60 : Math.min(165, 60 + Math.floor((hitRate - 50) * 1.5));
+  const confidence = Math.max(0, 65535 - Math.abs(camVel) * 1000);
+  const confPct = confidence / 65535 * 100;
+
+  document.getElementById('liveHR').textContent = hitRate.toFixed(1) + '%';
+  document.getElementById('liveHRBar').style.width = hitRate + '%';
+  document.getElementById('liveConf').textContent = '0x' + Math.round(confidence).toString(16).toUpperCase().padStart(4,'0');
+  document.getElementById('liveConfBar').style.width = confPct + '%';
+  document.getElementById('liveCam').textContent = camVel.toFixed(1) + ' px/f';
+  document.getElementById('liveCamBar').style.width = (Math.abs(camVel) / 15 * 100) + '%';
+  document.getElementById('kpiSR').textContent = hitRate.toFixed(1) + '%';
+  document.getElementById('srBar').style.width = hitRate + '%';
+  document.getElementById('kpiFPS').textContent = fps;
+
+  fpsHistory.push(fps);
+  fpsHistory.shift();
+
+  // Draw FPS chart
+  const cw = fpsCanvas.parentElement.offsetWidth - 4;
+  if (cw > 0) fpsCanvas.width = cw;
+  fpsCanvas.height = 70;
+  const W = fpsCanvas.width, H = fpsCanvas.height;
+  fpsCtx.clearRect(0, 0, W, H);
+
+  // Grid lines
+  fpsCtx.strokeStyle = 'rgba(255,255,255,0.05)';
+  fpsCtx.lineWidth = 0.5;
+  [0.25, 0.5, 0.75].forEach(f => {
+    fpsCtx.beginPath(); fpsCtx.moveTo(0, H * f); fpsCtx.lineTo(W, H * f); fpsCtx.stroke();
+  });
+
+  // Fill gradient
+  const grad = fpsCtx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(180,79,255,0.4)');
+  grad.addColorStop(1, 'rgba(180,79,255,0.02)');
+  fpsCtx.fillStyle = grad;
+  fpsCtx.beginPath();
+  fpsHistory.forEach((v, i) => {
+    const x = (i / (fpsHistory.length - 1)) * W;
+    const y = H - (v / 165) * (H - 4) - 2;
+    i === 0 ? fpsCtx.moveTo(x, y) : fpsCtx.lineTo(x, y);
+  });
+  fpsCtx.lineTo(W, H); fpsCtx.lineTo(0, H); fpsCtx.closePath();
+  fpsCtx.fill();
+
+  // Line
+  fpsCtx.strokeStyle = '#B44FFF';
+  fpsCtx.lineWidth = 1.5;
+  fpsCtx.shadowColor = '#B44FFF'; fpsCtx.shadowBlur = 6;
+  fpsCtx.beginPath();
+  fpsHistory.forEach((v, i) => {
+    const x = (i / (fpsHistory.length - 1)) * W;
+    const y = H - (v / 165) * (H - 4) - 2;
+    i === 0 ? fpsCtx.moveTo(x, y) : fpsCtx.lineTo(x, y);
+  });
+  fpsCtx.stroke();
+  fpsCtx.shadowBlur = 0;
+
+  // FPS label
+  fpsCtx.fillStyle = 'rgba(255,255,255,0.5)';
+  fpsCtx.font = '9px JetBrains Mono';
+  fpsCtx.fillText(fps + ' fps', W - 52, 12);
+}
+
+setInterval(updateTelemetry, 33); // 30 fps sim
+
+// ────────────────────────────────────────
+// Animated counter for yield
+// ────────────────────────────────────────
+function animateCounter(el, start, end, suffix, duration) {
+  const startT = performance.now();
+  function step(now) {
+    const t = Math.min(1, (now - startT) / duration);
+    const v = Math.floor(start + (end - start) * (1 - Math.pow(1 - t, 3)));
+    el.textContent = v + suffix;
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+setTimeout(() => {
+  animateCounter(document.getElementById('kpiYield'), 0, 100, '%', 1800);
+}, 400);
+
+</script>
+</body>
+</html>
