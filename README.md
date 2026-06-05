@@ -190,6 +190,14 @@ Below is the logic analyzer output generated directly from the Icarus Verilog `.
   <img src="docs/assets/simulation_waveforms.png" alt="Real Simulation Waveforms" width="800"/>
 </p>
 
+### Authentic Hardware Rendered Output
+
+The `tb_graphics_pipeline.v` testbench inputs a geometric triangle at coordinates `(10,10)`, `(20,10)`, `(10,20)`. The image below is a 1-to-1 visual plot of the exact pixel coordinates that the RTL rasterizer hardware generated during the simulation:
+
+<p align="center">
+  <img src="docs/assets/rendered_triangle.png" alt="Rendered Triangle from Testbench" width="600"/>
+</p>
+
 ---
 
 ## 🔋 Synthesis Breakdown
