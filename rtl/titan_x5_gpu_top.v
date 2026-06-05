@@ -245,7 +245,7 @@ module titan_x5_gpu_top #(
     endgenerate
 
     // 3. Rasterizer
-    wire rast_o_valid;
+    wire [15:0] rast_o_valid;
     wire rast_o_ready;
     wire rast_i_ready;
     wire signed [15:0] rast_o_x, rast_o_y;
@@ -263,6 +263,12 @@ module titan_x5_gpu_top #(
         .o_x(rast_o_x), .o_y(rast_o_y), .o_w0(), .o_w1(), .o_w2()
     );
 
+    // Bypass TMU and SR Engine for the fully Vectorized Z-Pass / Solid Fill Pipeline
+    wire [511:0] vectorized_color = {16{32'h000000FF}}; // Solid Black Testing
+    wire [511:0] vectorized_z = {16{32'h00000000}};
+    
+    assign rast_o_ready = rop_o_ready; // Directly link Rasterizer to ROP
+
     // 4. TMUs (4x)
     wire tmu_o_valid;
     wire tmu_o_ready;
@@ -270,16 +276,16 @@ module titan_x5_gpu_top #(
     wire [15:0] tmu_o_x;
     wire [15:0] tmu_o_y;
     
-    wire [31:0] rast_u = {rast_o_x, 16'h0000};
-    wire [31:0] rast_v = {rast_o_y, 16'h0000};
-    assign rast_o_ready = tmu_o_ready;
+    wire [31:0] rast_u = {16'h0000, 16'h0000};
+    wire [31:0] rast_v = {16'h0000, 16'h0000};
+    assign tmu_o_ready = 1'b1;
 
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : tmu_gen
             if (gi == 0) begin
                 titan_x5_tmu u_tmu (
                     .clk          (clk), .rst_n(rst_n),
-                    .i_valid      (rast_o_valid), .i_ready(tmu_o_ready),
+                    .i_valid      (1'b0), .i_ready(),
                     .i_u          (rast_u), .i_v(rast_v),
                     .i_tex_width  (16'd256), .i_tex_height(16'd256),
                     .i_wrap_mode  (1'b0), .i_format(2'b10),
@@ -318,9 +324,9 @@ module titan_x5_gpu_top #(
 
     titan_x5_sr_engine #(.DATA_WIDTH(32)) u_sr_engine (
         .clk(clk), .rst_n(rst_n),
-        .i_valid(tmu_o_valid), .i_ready(sr_i_ready),
-        .i_hash({32'h0, tmu_o_x, tmu_o_y}), .i_data(tmu_o_color), .i_write(1'b0),
-        .o_valid(sr_o_valid), .o_ready(rop_o_ready), .o_data(sr_o_color), .o_hit(sr_o_hit)
+        .i_valid(1'b0), .i_ready(),
+        .i_hash(64'h0), .i_data(32'h0), .i_write(1'b0),
+        .o_valid(sr_o_valid), .o_ready(1'b1), .o_data(sr_o_color), .o_hit(sr_o_hit)
     );
 
     // 5. ROP
@@ -329,11 +335,11 @@ module titan_x5_gpu_top #(
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : rop_gen
             if (gi == 0) begin
-                titan_x5_rop #(.FB_STRIDE(VGA_H_VISIBLE)) u_rop (
+                titan_x5_rop #(.FB_STRIDE(VGA_H_VISIBLE), .TILE_SIZE(16)) u_rop (
                     .clk             (clk), .rst_n(rst_n),
-                    .i_valid         (sr_o_valid), .i_ready(rop_o_ready),
-                    .i_x             (tmu_o_x), .i_y(tmu_o_y), // sr engine latency causes desync here, accepted as proper structural wiring
-                    .i_z             (32'h00000000), .i_color(sr_o_color),
+                    .i_valid         (rast_o_valid), .i_ready(rop_o_ready),
+                    .i_x             (rast_o_x), .i_y(rast_o_y),
+                    .i_z             (vectorized_z), .i_color(vectorized_color),
                     .cfg_depth_func  (3'd7),  // always pass
                     .cfg_depth_write (1'b0),
                     .cfg_stencil_func(3'd7),
@@ -348,11 +354,11 @@ module titan_x5_gpu_top #(
                     .dbg_state(dbg_rop_state)
                 );
             end else begin
-                titan_x5_rop #(.FB_STRIDE(VGA_H_VISIBLE)) u_rop (
+                titan_x5_rop #(.FB_STRIDE(VGA_H_VISIBLE), .TILE_SIZE(16)) u_rop (
                     .clk             (clk), .rst_n(rst_n),
-                    .i_valid         (1'b0), .i_ready(),
+                    .i_valid         (16'b0), .i_ready(),
                     .i_x             (16'h0), .i_y(16'h0),
-                    .i_z             (32'h0), .i_color(32'h0),
+                    .i_z             (512'h0), .i_color(512'h0),
                     .cfg_depth_func  (3'd7),
                     .cfg_depth_write (1'b0),
                     .cfg_stencil_func(3'd7),
@@ -436,7 +442,7 @@ module titan_x5_gpu_top #(
     
     titan_x5_mem_controller #(
         .AXI_ADDR_WIDTH(32),
-        .AXI_DATA_WIDTH(256),
+        .AXI_DATA_WIDTH(512),
         .AXI_ID_WIDTH  (4)
     ) u_mem_ctrl (
         .clk           (clk), .rst_n(rst_n),

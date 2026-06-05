@@ -113,7 +113,7 @@ module titan_x5_display_engine (
         end
     end
     
-    assign fb_read_addr = fetch_addr;
+    assign fb_read_addr = fetch_addr << 2; // Byte alignment
     assign fb_read_req  = !fifo_full && !pending_read;
     
     // pixel stream from fifo

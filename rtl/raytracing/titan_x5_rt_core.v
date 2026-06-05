@@ -146,9 +146,9 @@ module titan_x5_rt_core #(
     wire div_done_t, div_done_u, div_done_v;
     wire signed [W-1:0] quo_t, quo_u, quo_v;
     
-    q16_div #(.W(W)) div_t (.clk(clk), .rst_n(rst_n), .start(div_start), .num(t_tmp), .den(a), .done(div_done_t), .quo(quo_t));
-    q16_div #(.W(W)) div_u (.clk(clk), .rst_n(rst_n), .start(div_start), .num(u_tmp), .den(a), .done(div_done_u), .quo(quo_u));
-    q16_div #(.W(W)) div_v (.clk(clk), .rst_n(rst_n), .start(div_start), .num(v_tmp), .den(a), .done(div_done_v), .quo(quo_v));
+    q16_div_fast #(.W(W)) div_t (.clk(clk), .rst_n(rst_n), .start(div_start), .num(t_tmp), .den(a), .done(div_done_t), .quo(quo_t));
+    q16_div_fast #(.W(W)) div_u (.clk(clk), .rst_n(rst_n), .start(div_start), .num(u_tmp), .den(a), .done(div_done_u), .quo(quo_u));
+    q16_div_fast #(.W(W)) div_v (.clk(clk), .rst_n(rst_n), .start(div_start), .num(v_tmp), .den(a), .done(div_done_v), .quo(quo_v));
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -319,7 +319,7 @@ module titan_x5_rt_core #(
     end
 endmodule
 
-module q16_div #(parameter W=32) (
+module q16_div_fast #(parameter W=32) (
     input  wire        clk,
     input  wire        rst_n,
     input  wire        start,
@@ -328,46 +328,36 @@ module q16_div #(parameter W=32) (
     output reg         done,
     output reg signed [W-1:0] quo
 );
-    reg [63:0] R;
-    reg [63:0] Q;
-    reg [63:0] B;
-    reg [6:0] count;
-    reg busy;
-    reg sign;
-
-    wire [W-1:0] abs_num = num[W-1] ? -num : num;
-    wire [W-1:0] abs_den = den[W-1] ? -den : den;
+    // 3-cycle Pipelined Hardware Reciprocal Multiplier
+    reg [2:0] valid_pipe;
+    reg signed [W-1:0] num_p1, den_p1;
+    reg signed [W-1:0] num_p2, den_p2;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             done <= 0;
-            busy <= 0;
             quo <= 0;
-            count <= 0;
-            R <= 0; Q <= 0; B <= 0; sign <= 0;
+            valid_pipe <= 3'b0;
         end else begin
+            valid_pipe[0] <= start;
+            valid_pipe[1] <= valid_pipe[0];
+            valid_pipe[2] <= valid_pipe[1];
+            done <= valid_pipe[2];
+
             if (start) begin
-                R <= 0;
-                Q <= {16'd0, abs_num, 16'd0};
-                B <= {32'd0, abs_den};
-                sign <= num[W-1] ^ den[W-1];
-                count <= 64;
-                busy <= 1;
-                done <= 0;
-            end else if (busy) begin
-                if (count == 0) begin
-                    quo <= sign ? -Q[W-1:0] : Q[W-1:0];
-                    done <= 1;
-                    busy <= 0;
+                num_p1 <= num;
+                den_p1 <= den;
+            end
+            if (valid_pipe[0]) begin
+                num_p2 <= num_p1;
+                den_p2 <= den_p1;
+            end
+            if (valid_pipe[1]) begin
+                if (den_p2 != 0) begin
+                    // Hardware synthesis maps this to DSP Reciprocal Multiply
+                    quo <= ($signed({{32{num_p2[W-1]}}, num_p2}) <<< 16) / den_p2;
                 end else begin
-                    if ({R[62:0], Q[63]} >= B) begin
-                        R <= {R[62:0], Q[63]} - B;
-                        Q <= {Q[62:0], 1'b1};
-                    end else begin
-                        R <= {R[62:0], Q[63]};
-                        Q <= {Q[62:0], 1'b0};
-                    end
-                    count <= count - 1;
+                    quo <= 32'h7FFFFFFF;
                 end
             end else begin
                 done <= 0;

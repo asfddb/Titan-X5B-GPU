@@ -150,6 +150,9 @@ module titan_x5_mem_controller #(
                 B_WAIT: begin
                     if (m_axi_bvalid && m_axi_bready) begin
                         m_axi_bready <= 1'b0;
+                        resp_valid <= 1'b1;
+                    end else begin
+                        resp_valid <= 1'b0;
                     end
                 end
             endcase
