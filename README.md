@@ -16,7 +16,7 @@
 </p>
 
 <p align="center">
-  <em>Designed by <strong>Adhiraj</strong> · 12 years old · India 🇮🇳</em>
+  <em>Designed by <strong>Adhiraj</strong> · India 🇮🇳</em>
 </p>
 
 ---
@@ -213,7 +213,7 @@ The full Titan X5-B synthesizes to **3,030,603 logic cells** on Yosys:
 
 ## 👤 About the Creator
 
-**Adhiraj** — a 12-year-old hardware architect from India 🇮🇳 who decided that GPUs shouldn't be a monopoly.
+**Adhiraj** — a hardware architect from India 🇮🇳 who decided that GPUs shouldn't be a monopoly.
 
 > *"I don't have the money to buy an RTX 5090. So I designed one."*
 
@@ -248,7 +248,7 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 ## ⭐ Star This Repo
 
-If a 12-year-old from India designing a 3-million-gate GPU doesn't deserve a GitHub star, what does?
+If an independent student from India designing a 3-million-gate GPU doesn't deserve a GitHub star, what does?
 
 <p align="center">
   <strong>The future of silicon is open.</strong>
