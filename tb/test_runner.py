@@ -30,9 +30,11 @@ import glob
 
 def test_system():
     # Gather all rtl sources for the system test
-    rtl_files = glob.glob("../rtl/**/*.v", recursive=True) + glob.glob("../rtl/*.v")
+    base_dir = os.path.dirname(__file__)
+    rtl_dir = os.path.join(base_dir, "..", "rtl")
+    rtl_files = glob.glob(os.path.join(rtl_dir, "**", "*.v"), recursive=True) + glob.glob(os.path.join(rtl_dir, "*.v"))
     # exclude duplicate files if any
-    rtl_files = list(set(rtl_files))
+    rtl_files = list(set([os.path.abspath(f) for f in rtl_files]))
     
     run(
         verilog_sources=rtl_files,

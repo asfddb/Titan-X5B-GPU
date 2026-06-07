@@ -208,7 +208,7 @@ module titan_x5_gpu_top #(
         .s_resp_rdata(xbar_s_resp_rdata)
     );
 
-    wire [15:0] cmd_v0_x, cmd_v0_y, cmd_v1_x, cmd_v1_y, cmd_v2_x, cmd_v2_y;
+    wire [511:0] vt_payload;
 
     titan_x5_command_processor u_cmd_proc (
         .clk            (clk),
@@ -219,15 +219,34 @@ module titan_x5_gpu_top #(
         .mem_addr       (cmd_mem_addr),
         .mem_req        (cmd_mem_req),
         .mem_ack        (xbar_m_req_ready[0]),
-        .mem_data       (cmd_mem_data),
+        .mem_data       ({32'h0, xbar_m_resp_rdata[31:0]}),
         .cmd_valid      (cmd_valid),
         .cmd_opcode     (cmd_opcode),
-        .cmd_payload    (cmd_payload),
+        .vt_payload     (vt_payload),
         .cmd_ready      (cmd_ready),
-        .v0_x           (cmd_v0_x), .v0_y(cmd_v0_y),
-        .v1_x           (cmd_v1_x), .v1_y(cmd_v1_y),
-        .v2_x           (cmd_v2_x), .v2_y(cmd_v2_y),
         .intr_req       (host_intr)
+    );
+
+    // Vertex Transformer instance
+    wire        vt_valid;
+    wire [15:0] vt_v0_x, vt_v0_y;
+    wire [15:0] vt_v1_x, vt_v1_y;
+    wire [15:0] vt_v2_x, vt_v2_y;
+    wire        vt_ready;
+    
+    titan_x5_vertex_transformer u_vertex_transformer (
+        .clk(clk),
+        .rst_n(rst_n),
+        .i_valid(cmd_valid && (cmd_opcode == 8'h01)), // CMD_DRAW
+        .i_weights(vt_payload[255:0]),
+        .i_vertices(vt_payload[511:256]),
+        .i_ready(cmd_ready),
+        
+        .o_valid(vt_valid),
+        .o_v0_x(vt_v0_x), .o_v0_y(vt_v0_y),
+        .o_v1_x(vt_v1_x), .o_v1_y(vt_v1_y),
+        .o_v2_x(vt_v2_x), .o_v2_y(vt_v2_y),
+        .o_ready(vt_ready)
     );
 
     // 2. Streaming Multiprocessors (4x)
@@ -250,15 +269,16 @@ module titan_x5_gpu_top #(
     wire rast_i_ready;
     wire signed [15:0] rast_o_x, rast_o_y;
     
-    wire rast_i_valid = cmd_valid && (cmd_opcode == 8'h01); // cmd_draw
-    assign cmd_ready = rast_i_ready;
+    // Connect Vertex Transformer to Rasterizer
+    wire rast_i_valid = vt_valid;
+    assign vt_ready = rast_i_ready;
     wire [31:0] rast_i_color = 32'h000000FF; // Solid Black Triangle
     titan_x5_rasterizer #(.COORD_W(16), .WEIGHT_W(32)) u_rasterizer (
         .clk    (clk), .rst_n(rst_n),
         .i_valid(rast_i_valid), .i_ready(rast_i_ready),
-        .v0_x   (cmd_v0_x), .v0_y(cmd_v0_y),
-        .v1_x   (cmd_v1_x), .v1_y(cmd_v1_y),
-        .v2_x   (cmd_v2_x), .v2_y(cmd_v2_y),
+        .v0_x   (vt_v0_x), .v0_y(vt_v0_y),
+        .v1_x   (vt_v1_x), .v1_y(vt_v1_y),
+        .v2_x   (vt_v2_x), .v2_y(vt_v2_y),
         .o_valid(rast_o_valid), .o_ready(rast_o_ready),
         .o_x(rast_o_x), .o_y(rast_o_y), .o_w0(), .o_w1(), .o_w2()
     );
@@ -422,23 +442,7 @@ module titan_x5_gpu_top #(
         .clk(clk), .rst_n(rst_n), .event_pulses(32'h0), .read_en(1'b0), .read_addr(5'h0), .read_data()
     );
 
-    // 11. Memory Controller & Command ROM
-    
-    // command rom for ring buffer fetches
-    // command rom for ring buffer fetches
-    assign cmd_mem_data = (cmd_mem_addr == host_ring_base) ? 64'h01_00_00_00_00_05_00_05 :
-                          (cmd_mem_addr == host_ring_base + 8) ? 64'h04_00_00_00_00_00_00_00 : 
-                          64'h0;
-                          
-    reg cmd_mem_ack_r;
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) cmd_mem_ack_r <= 1'b0;
-        else cmd_mem_ack_r <= cmd_mem_req;
-    end
-    assign cmd_mem_ack = cmd_mem_ack_r;
-
-    // connect rop to mem controller
-    
+    // 11. Memory Controller
     
     titan_x5_mem_controller #(
         .AXI_ADDR_WIDTH(32),

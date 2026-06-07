@@ -26,10 +26,8 @@ module titan_x5_command_processor (
     output reg [55:0] cmd_payload,
     input  wire        cmd_ready,
     
-    // unified shader architecture: output coordinates for rasterizer (from draw command payload)
-    output reg [15:0] v0_x, v0_y,
-    output reg [15:0] v1_x, v1_y,
-    output reg [15:0] v2_x, v2_y,
+    // unified shader architecture: output full payload to vertex transformer
+    output reg [511:0] vt_payload,
     
     // interrupt
     output reg         intr_req
@@ -40,10 +38,14 @@ module titan_x5_command_processor (
     localparam CMD_DMA      = 8'h03;
     localparam CMD_FENCE    = 8'h04;
 
-    reg [1:0] state;
-    localparam S_IDLE  = 2'd0;
-    localparam S_FETCH = 2'd1;
-    localparam S_EXEC  = 2'd2;
+    reg [2:0] state;
+    localparam S_IDLE       = 3'd0;
+    localparam S_FETCH_CMD  = 3'd1;
+    localparam S_FETCH_PAY  = 3'd2;
+    localparam S_EXEC       = 3'd3;
+    
+    reg [3:0] payload_word_cnt;
+    reg [511:0] full_payload;
     
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -51,11 +53,7 @@ module titan_x5_command_processor (
             mem_req <= 1'b0;
             cmd_valid <= 1'b0;
             intr_req <= 1'b0;
-            
-            v0_x <= 16'd0; v0_y <= 16'd0;
-            v1_x <= 16'd0; v1_y <= 16'd0;
-            v2_x <= 16'd0; v2_y <= 16'd0;
-            
+            vt_payload <= 512'd0;
             state <= S_IDLE;
         end else begin
             intr_req <= 1'b0; // pulse interrupt
@@ -63,47 +61,56 @@ module titan_x5_command_processor (
             case (state)
                 S_IDLE: begin
                     if (ring_read_ptr != ring_write_ptr) begin
-                        mem_addr <= ring_base_addr + (ring_read_ptr * 8); // 8 bytes per command
+                        mem_addr <= ring_base_addr + (ring_read_ptr * 4); // 4 bytes per command word
                         mem_req <= 1'b1;
-                        state <= S_FETCH;
+                        state <= S_FETCH_CMD;
                     end
                 end
-                S_FETCH: begin
+                S_FETCH_CMD: begin
                     if (mem_ack) begin
                         mem_req <= 1'b0;
-                        // Ignore mem_data[63:32] because crossbar is 32-bit!
-                        // Unconditionally execute CMD_DRAW for any fetched command in this test
-                        cmd_opcode <= CMD_DRAW;
-                        cmd_payload <= mem_data[55:0]; // mostly 0
-                        
-                        // Extract v0 from the 32-bit data
-                        v0_x <= mem_data[15:0];
-                        v0_y <= mem_data[31:16];
-                        
-                        // Hardcode v1 and v2 to form a CCW triangle
-                        v1_x <= 16'd0;
-                        v1_y <= 16'd0; 
-                        v2_x <= 16'd20; 
-                        v2_y <= 16'd0; 
-                        
-                        cmd_valid <= 1'b1;
-                        state <= S_EXEC;
+                        cmd_opcode <= mem_data[7:0]; // Lower 8 bits of first word is opcode
+                        payload_word_cnt <= 0;
+                        ring_read_ptr <= ring_read_ptr + 1;
+                        state <= S_FETCH_PAY;
+                    end
+                end
+                S_FETCH_PAY: begin
+                    if (payload_word_cnt < 15) begin
+                        // Fetch next words of the payload (the transform matrix and vertices)
+                        mem_addr <= ring_base_addr + (ring_read_ptr * 4);
+                        mem_req <= 1'b1;
+                        if (mem_ack) begin
+                            mem_req <= 1'b0;
+                            full_payload[payload_word_cnt * 32 +: 32] <= mem_data[31:0];
+                            ring_read_ptr <= ring_read_ptr + 1;
+                            payload_word_cnt <= payload_word_cnt + 1;
+                        end
+                    end else begin
+                        // Final word
+                        mem_addr <= ring_base_addr + (ring_read_ptr * 4);
+                        mem_req <= 1'b1;
+                        if (mem_ack) begin
+                            mem_req <= 1'b0;
+                            full_payload[payload_word_cnt * 32 +: 32] <= mem_data[31:0];
+                            ring_read_ptr <= ring_read_ptr + 1;
+                            
+                            vt_payload <= {mem_data[31:0], full_payload[479:0]};
+                            cmd_valid <= 1'b1;
+                            state <= S_EXEC;
+                        end
                     end
                 end
                 S_EXEC: begin
                     if (cmd_ready) begin
                         cmd_valid <= 1'b0;
-                        ring_read_ptr <= ring_read_ptr + 1;
-                        
                         if (cmd_opcode == CMD_FENCE) begin
                             intr_req <= 1'b1; // generate interrupt on fence completion
                         end
-                        
                         state <= S_IDLE;
                     end
                 end
             endcase
         end
     end
-
 endmodule
