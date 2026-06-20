@@ -24,8 +24,8 @@ module titan_x5_gddr7_pam3_phy (
     
     // external physical gddr7 pins (simulated pam3 states)
     // 2 bits used per pin to represent 3 states: 2'b00 (-1), 2'b01 (0), 2'b10 (+1)
-    output wire [511:0] gddr7_dq_tx, // 256 physical pins (2 bits each for simulation)
-    input wire [511:0] gddr7_dq_rx
+    output wire [679:0] gddr7_dq_tx, // 340 physical pins (2 bits each for simulation)
+    input wire [679:0] gddr7_dq_rx
 );
 
     // pam3 encoder: maps 3 bits of nrz data to 2 pam3 symbols (pins)

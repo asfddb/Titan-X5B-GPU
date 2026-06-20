@@ -219,6 +219,7 @@ module titan_x5_gpu_top #(
         .mem_addr       (cmd_mem_addr),
         .mem_req        (cmd_mem_req),
         .mem_ack        (xbar_m_req_ready[0]),
+        .mem_valid      (xbar_m_resp_valid[0]),
         .mem_data       ({32'h0, xbar_m_resp_rdata[31:0]}),
         .cmd_valid      (cmd_valid),
         .cmd_opcode     (cmd_opcode),
@@ -451,12 +452,12 @@ module titan_x5_gpu_top #(
     ) u_mem_ctrl (
         .clk           (clk), .rst_n(rst_n),
         .req_valid     (xbar_s_req_valid[0]), 
-        .req_addr      (xbar_s_req_addr),
+        .req_addr      (xbar_s_req_addr[0*32 +: 32]),
         .req_write     (xbar_s_req_write[0]), 
-        .req_wdata     ({8{xbar_s_req_wdata}}),
+        .req_wdata     (xbar_s_req_wdata[0*32 +: 32]),
         .req_len       (4'h0), // 1 beat
         .req_ready     (xbar_s_req_ready[0]), 
-        .resp_valid    (xbar_s_resp_valid[0]), .resp_rdata(xbar_s_resp_rdata),
+        .resp_valid    (xbar_s_resp_valid[0]), .resp_rdata(xbar_s_resp_rdata[0*32 +: 32]),
         .m_axi_arid    (vram_arid),
         .m_axi_araddr  (vram_araddr),
         .m_axi_arlen   (vram_arlen),
@@ -498,8 +499,8 @@ module titan_x5_gpu_top #(
         .vga_hsync(vga_hsync), .vga_vsync(vga_vsync), .vga_r(vga_r), .vga_g(vga_g), .vga_b(vga_b), .vga_de(vga_de)
     );
     // project blackwell: gddr7 pam3 phy integration
-    wire [511:0] gddr7_tx_pins;
-    wire [511:0] gddr7_rx_pins;
+    wire [679:0] gddr7_tx_pins;
+    wire [679:0] gddr7_rx_pins;
     
     titan_x5_gddr7_pam3_phy gddr7_phy (
         .clk_28g(clk),

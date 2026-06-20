@@ -18,6 +18,7 @@ module titan_x5_command_processor (
     output reg [31:0] mem_addr,
     output reg         mem_req,
     input  wire        mem_ack,
+    input  wire        mem_valid,
     input wire [63:0] mem_data, // 64-bit command packets
     
     // dispatch/execution interface
@@ -44,8 +45,9 @@ module titan_x5_command_processor (
     localparam S_FETCH_PAY  = 3'd2;
     localparam S_EXEC       = 3'd3;
     
-    reg [3:0] payload_word_cnt;
+    reg [4:0] payload_word_cnt;
     reg [511:0] full_payload;
+    reg         waiting_for_data;
     
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -54,6 +56,7 @@ module titan_x5_command_processor (
             cmd_valid <= 1'b0;
             intr_req <= 1'b0;
             vt_payload <= 512'd0;
+            waiting_for_data <= 1'b0;
             state <= S_IDLE;
         end else begin
             intr_req <= 1'b0; // pulse interrupt
@@ -69,6 +72,8 @@ module titan_x5_command_processor (
                 S_FETCH_CMD: begin
                     if (mem_ack) begin
                         mem_req <= 1'b0;
+                    end
+                    if (mem_valid) begin
                         cmd_opcode <= mem_data[7:0]; // Lower 8 bits of first word is opcode
                         payload_word_cnt <= 0;
                         ring_read_ptr <= ring_read_ptr + 1;
@@ -76,29 +81,25 @@ module titan_x5_command_processor (
                     end
                 end
                 S_FETCH_PAY: begin
-                    if (payload_word_cnt < 15) begin
-                        // Fetch next words of the payload (the transform matrix and vertices)
-                        mem_addr <= ring_base_addr + (ring_read_ptr * 4);
-                        mem_req <= 1'b1;
+                    if (payload_word_cnt < 16) begin
+                        if (!mem_req && !waiting_for_data) begin
+                            mem_addr <= ring_base_addr + (ring_read_ptr * 4);
+                            mem_req <= 1'b1;
+                            waiting_for_data <= 1'b1;
+                        end
                         if (mem_ack) begin
                             mem_req <= 1'b0;
+                        end
+                        if (mem_valid && waiting_for_data) begin
                             full_payload[payload_word_cnt * 32 +: 32] <= mem_data[31:0];
                             ring_read_ptr <= ring_read_ptr + 1;
                             payload_word_cnt <= payload_word_cnt + 1;
+                            waiting_for_data <= 1'b0;
                         end
                     end else begin
-                        // Final word
-                        mem_addr <= ring_base_addr + (ring_read_ptr * 4);
-                        mem_req <= 1'b1;
-                        if (mem_ack) begin
-                            mem_req <= 1'b0;
-                            full_payload[payload_word_cnt * 32 +: 32] <= mem_data[31:0];
-                            ring_read_ptr <= ring_read_ptr + 1;
-                            
-                            vt_payload <= {mem_data[31:0], full_payload[479:0]};
-                            cmd_valid <= 1'b1;
-                            state <= S_EXEC;
-                        end
+                        vt_payload <= full_payload;
+                        cmd_valid <= 1'b1;
+                        state <= S_EXEC;
                     end
                 end
                 S_EXEC: begin

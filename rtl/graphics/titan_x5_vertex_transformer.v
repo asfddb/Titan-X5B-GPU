@@ -60,11 +60,22 @@ module titan_x5_vertex_transformer (
     reg signed [33:0] pe_acc_out [0:3][0:3];
 
     // Systolic Array Logic
-    integer r, c;
+    integer r, c, vr;
     always @(*) begin
         for (r = 0; r < 4; r = r + 1) begin
             for (c = 0; c < 4; c = c + 1) begin
                 pe_acc_out[r][c] = pe_acc_in[r][c] + (pe_v_in[r][c] * weight[r][c]);
+            end
+        end
+    end
+
+    // Combinational assignment for v_in
+    always @(*) begin
+        for (vr = 0; vr < 4; vr = vr + 1) begin
+            if (state == S_SYSTOLIC && cycle_cnt >= vr && cycle_cnt < vr + 4) begin
+                v_in[vr] = v_matrix[vr][cycle_cnt - vr];
+            end else begin
+                v_in[vr] = 0;
             end
         end
     end
@@ -165,15 +176,7 @@ module titan_x5_vertex_transformer (
                 end
                 
                 S_SYSTOLIC: begin
-                    // Feed skewed input
-                    // Row r is delayed by r cycles
-                    for (r = 0; r < 4; r = r + 1) begin
-                        if (cycle_cnt >= r && cycle_cnt < r + 4) begin
-                            v_in[r] <= v_matrix[r][cycle_cnt - r];
-                        end else begin
-                            v_in[r] <= 0;
-                        end
-                    end
+                    // Feed skewed input (handled combinationally)
                     
                     if (cycle_cnt == 9) begin // 4x4 takes 3 (pipe) + 4 (data) + 3 (flush) = 10 cycles
                         state <= S_DIVIDE;

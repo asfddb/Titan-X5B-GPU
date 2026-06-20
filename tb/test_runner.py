@@ -2,14 +2,15 @@ import os
 from cocotb_test.simulator import run
 
 def test_graphics():
+    base_dir = os.path.dirname(__file__)
     run(
         verilog_sources=[
-            "cocotb_graphics_top.v",
-            "../rtl/graphics/titan_x5_rasterizer.v",
-            "../rtl/sr/titan_x5_sr_engine.v",
-            "../rtl/sr/titan_x5_hash_fnv64.v",
-            "../rtl/titan_x5_apex_sr_engine.v",
-            "../rtl/common/titan_x5_skid_buffer.v"
+            os.path.join(base_dir, "cocotb_graphics_top.v"),
+            os.path.join(base_dir, "..", "rtl", "graphics", "titan_x5_rasterizer.v"),
+            os.path.join(base_dir, "..", "rtl", "sr", "titan_x5_sr_engine.v"),
+            os.path.join(base_dir, "..", "rtl", "sr", "titan_x5_hash_fnv64.v"),
+            os.path.join(base_dir, "..", "rtl", "titan_x5_apex_sr_engine.v"),
+            os.path.join(base_dir, "..", "rtl", "common", "titan_x5_skid_buffer.v")
         ],
         toplevel="cocotb_graphics_top",
         module="test_graphics_pipeline",
@@ -17,9 +18,10 @@ def test_graphics():
     )
 
 def test_alu():
+    base_dir = os.path.dirname(__file__)
     run(
         verilog_sources=[
-            "../rtl/core/titan_x5_alu.v"
+            os.path.join(base_dir, "..", "rtl", "core", "titan_x5_alu.v")
         ],
         toplevel="titan_x5_alu",
         module="test_alu",
