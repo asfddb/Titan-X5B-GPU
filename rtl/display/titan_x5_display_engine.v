@@ -48,6 +48,12 @@ module titan_x5_display_engine (
     wire next_vsync = (v_counter >= v_visible + v_front_porch) && (v_counter < v_visible + v_front_porch + v_sync_pulse);
     wire next_de    = (h_counter < h_visible) && (v_counter < v_visible);
 
+    // clock domain crossing (cdc) asynchronous fifo
+    wire        fifo_full;
+    wire        fifo_empty;
+    wire [31:0] fifo_rdata;
+    wire        fifo_rinc;
+
     // sync counters
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
@@ -68,13 +74,6 @@ module titan_x5_display_engine (
             end
         end
     end
-    
-
-    // clock domain crossing (cdc) asynchronous fifo
-    wire        fifo_full;
-    wire        fifo_empty;
-    wire [31:0] fifo_rdata;
-    wire        fifo_rinc;
     
     titan_x5_async_fifo #(
         .DATA_WIDTH(32),
