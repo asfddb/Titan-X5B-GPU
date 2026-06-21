@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns/1ps
 
 /*
@@ -30,7 +38,7 @@ module titan_x5_2048_mul (
     reg [2047:0] b_reg;
     reg [2047:0] b_shift;
     
-    reg [63:0] r_reg [0:63];
+    (* ram_style="block" *) reg [63:0] r_reg [0:63];
     
     reg [63:0] carry;
     reg [63:0] a_val;

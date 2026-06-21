@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns / 1ps
 
 /*
@@ -49,7 +57,7 @@ module titan_x5_vertex_transformer (
     // --------------------------------------------------------
     // TENSOR BUFFER: 4x7 skewed matrix = 28 elements = 56 Bytes
     // We will just stream it in dynamically
-    reg signed [15:0] v_in [0:3]; // 1 per row entering systolic array
+    (* ram_style="block" *) reg signed [15:0] v_in [0:3]; // 1 per row entering systolic array
     reg signed [15:0] v_matrix [0:3][0:3];
     
     // --------------------------------------------------------
@@ -142,8 +150,8 @@ module titan_x5_vertex_transformer (
     reg signed [63:0] div_num_y;
     reg signed [33:0] div_den;
     
-    reg signed [15:0] ndc_x [0:3];
-    reg signed [15:0] ndc_y [0:3];
+    (* ram_style="block" *) reg signed [15:0] ndc_x [0:3];
+    (* ram_style="block" *) reg signed [15:0] ndc_y [0:3];
 
     // --------------------------------------------------------
     // Main Control FSM

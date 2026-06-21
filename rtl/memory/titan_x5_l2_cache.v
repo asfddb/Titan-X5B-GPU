@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns / 1ps
 
 /*
@@ -50,7 +58,7 @@ module titan_x5_l2_cache #(
     wire [TAG_BITS-1:0]    req_tag   = req_addr[ADDR_WIDTH-1 : OFFSET_BITS+BANK_BITS+INDEX_BITS];
 
     // bank registers
-    reg  bank_req_valid [0:BANKS-1];
+    (* ram_style="block" *) reg  bank_req_valid [0:BANKS-1];
     wire bank_req_ready [0:BANKS-1];
 
     // instantiate 4 banks logically or procedurally

@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 /*
  * Nexus Neuromorphic HDC Engine
  * Module: titan_x5_associative_memory
@@ -17,10 +25,10 @@ module titan_x5_associative_memory (
     output reg         done
 );
 
-    reg [63:0] concepts_0 [0:15];
-    reg [63:0] concepts_1 [0:15];
-    reg [63:0] concepts_2 [0:15];
-    reg [63:0] concepts_3 [0:15];
+    (* ram_style="block" *) reg [63:0] concepts_0 [0:15];
+    (* ram_style="block" *) reg [63:0] concepts_1 [0:15];
+    (* ram_style="block" *) reg [63:0] concepts_2 [0:15];
+    (* ram_style="block" *) reg [63:0] concepts_3 [0:15];
 
     reg [1:0]  state;
     reg [3:0]  idx;

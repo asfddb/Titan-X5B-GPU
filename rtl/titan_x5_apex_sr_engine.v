@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns/1ps
 
 /*
@@ -104,7 +112,7 @@ module titan_x5_apex_sr_engine #(
     // --- PIPELINE STAGE 3: CACHE MATCH & EGRESS ---
     // direct mapped temporal cache
     localparam CACHE_DEPTH = 1 << CACHE_ADDR_BITS;
-    reg [31:0] cache_tags [0:CACHE_DEPTH-1];
+    (* ram_style="block" *) reg [31:0] cache_tags [0:CACHE_DEPTH-1];
     reg [CACHE_DEPTH-1:0] cache_valid;
 
     wire [CACHE_ADDR_BITS-1:0] cache_index = s2_tag[CACHE_ADDR_BITS-1:0];

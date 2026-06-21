@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns/1ps
 
 module titan_x5_pipeline (
@@ -78,8 +86,8 @@ module titan_x5_pipeline (
     end
 
     // instruction fifo (8 entries)
-    reg [2:0]  fifo_warp [0:7];
-    reg [31:0] fifo_inst [0:7];
+    (* ram_style="block" *) reg [2:0]  fifo_warp [0:7];
+    (* ram_style="block" *) reg [31:0] fifo_inst [0:7];
     reg [3:0]  fifo_wp;
     reg [3:0]  fifo_rp;
     reg [3:0]  fifo_count;

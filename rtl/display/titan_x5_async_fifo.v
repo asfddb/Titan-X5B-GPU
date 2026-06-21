@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns / 1ps
 
 module titan_x5_async_fifo #(
@@ -21,7 +29,7 @@ module titan_x5_async_fifo #(
 
     localparam DEPTH = 1 << DEPTH_LOG2;
     
-    reg [DATA_WIDTH-1:0] mem [0:DEPTH-1];
+    (* ram_style="block" *) reg [DATA_WIDTH-1:0] mem [0:DEPTH-1];
     
     reg [DEPTH_LOG2:0] wptr_bin, rptr_bin;
     reg [DEPTH_LOG2:0] wptr_gray, rptr_gray;

@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns/1ps
 
 /*
@@ -52,12 +60,12 @@ module titan_x5_tmu (
     reg [1:0]  texel_idx;
 
     // direct-mapped 4kb cache (1k words)
-    reg [31:0] cache_data [0:1023];
-    reg [19:0] cache_tag  [0:1023];
-    reg        cache_valid[0:1023];
+    (* ram_style="block" *) reg [31:0] cache_data [0:1023];
+    (* ram_style="block" *) reg [19:0] cache_tag  [0:1023];
+    (* ram_style="block" *) reg        cache_valid[0:1023];
 
-    reg [31:0] t_addr [0:3];
-    reg [31:0] c_data [0:3];
+    (* ram_style="block" *) reg [31:0] t_addr [0:3];
+    (* ram_style="block" *) reg [31:0] c_data [0:3];
     
     reg [7:0] uf_reg, vf_reg;
     reg [1:0] fmt_reg;

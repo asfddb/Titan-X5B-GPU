@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns / 1ps
 
 /*
@@ -19,7 +27,7 @@ module titan_x5_perf_counters (
 );
 
     // 32 x 48-bit counters
-    reg [47:0] counters [0:31];
+    (* ram_style="block" *) reg [47:0] counters [0:31];
     
     integer i;
     

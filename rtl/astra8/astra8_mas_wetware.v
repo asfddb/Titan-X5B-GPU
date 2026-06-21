@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns / 1ps
 `default_nettype none
 
@@ -46,9 +54,9 @@ module astra8_mas_wetware #(
     // these generate errors during elaboration if constraints are violated.
     generate
         if (DATA_WIDTH < 4) begin : gen_chk_dw
-            // synopsys translate_off
+`ifdef SIMULATION
             initial $display("ERROR: DATA_WIDTH must be >= 4, got %0d", DATA_WIDTH);
-            // synopsys translate_on
+`endif
             PARAMETER_ERROR_DATA_WIDTH_TOO_SMALL invalid_param();
         end
         if (GRID_X < 1 || GRID_Y < 1) begin : gen_chk_grid
@@ -63,8 +71,8 @@ module astra8_mas_wetware #(
     endgenerate
 
     // chemical concentration registers (activator u, inhibitor v)
-    reg [DATA_WIDTH-1:0] chem_u [0:(GRID_X*GRID_Y)-1];
-    reg [DATA_WIDTH-1:0] chem_v [0:(GRID_X*GRID_Y)-1];
+    (* ram_style="block" *) reg [DATA_WIDTH-1:0] chem_u [0:(GRID_X*GRID_Y)-1];
+    (* ram_style="block" *) reg [DATA_WIDTH-1:0] chem_v [0:(GRID_X*GRID_Y)-1];
 
     // initialization block (for simulation startup and fpga power-up seed)
     initial begin : sim_init

@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns / 1ps
 
 /*
@@ -87,7 +95,7 @@ module titan_x5_rt_core #(
     endfunction
 
     // traversal stack
-    reg [31:0] stack [0:31];
+    (* ram_style="block" *) reg [31:0] stack [0:31];
     reg [5:0]  sp;
     
     localparam STATE_IDLE           = 5'd0;

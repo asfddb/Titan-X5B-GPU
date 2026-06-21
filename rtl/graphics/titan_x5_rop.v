@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 `timescale 1ns/1ps
 
 /*
@@ -55,8 +63,8 @@ module titan_x5_rop #(
 );
 
     // Tile Buffer SRAM (16x16 = 256 pixels)
-    reg [31:0] color_tile_sram [0:255];
-    reg [31:0] depth_tile_sram [0:255];
+    (* ram_style="block" *) reg [31:0] color_tile_sram [0:255];
+    (* ram_style="block" *) reg [31:0] depth_tile_sram [0:255];
     reg [255:0] tile_dirty;
     
     reg [15:0] current_tile_x, current_tile_y;

@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 /*
  * Nexus Neuromorphic HDC Engine
  * Module: titan_x5_hyper_alu
@@ -21,9 +29,9 @@ module titan_x5_hyper_alu (
     output reg         done
 );
 
-    reg [63:0] mem_a [0:15];
-    reg [63:0] mem_b [0:15];
-    reg [63:0] mem_c [0:15];
+    (* ram_style="block" *) reg [63:0] mem_a [0:15];
+    (* ram_style="block" *) reg [63:0] mem_b [0:15];
+    (* ram_style="block" *) reg [63:0] mem_c [0:15];
 
     reg [1:0]  state;
     reg [3:0]  idx;
