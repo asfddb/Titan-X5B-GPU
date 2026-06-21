@@ -19,6 +19,18 @@
 
 
 
+## 📜 Licensing
+
+Titan X5-B is **dual-licensed**:
+
+- **Open Source:** CERN-OHL-S-2.0 (free for research, education, and
+  personal use; derivative works must remain open under the same license)
+- **Commercial:** Available separately for use in closed-source commercial
+  products. Includes warranty, indemnification, and support.
+
+See [LICENSE](LICENSE) and [COMMERCIAL.md](COMMERCIAL.md) for full details.
+For commercial license inquiries, see [CONTACT.md](CONTACT.md).
+
 ## Overview
 
 Titan X5-B is an experimental, synthesizable GPU architecture written in SystemVerilog. It is designed as an educational project to explore modern graphics, tensor math, and compute pipelines at the RTL level.
@@ -221,17 +233,7 @@ The full Titan X5-B synthesizes to **3,030,603 logic cells** on Yosys:
 
 
 
-## 📜 License
 
-This project is licensed under the **CERN Open Hardware Licence Version 2 — Strongly Reciprocal (CERN-OHL-S-2.0)**.
-
-This means:
-- ✅ You can view, study, and modify the design
-- ✅ You must share any modifications under the same license
-- ❌ You cannot use this commercially without explicit permission from the creator
-- ❌ You cannot close-source any derivative work
-
-See [LICENSE](LICENSE) for full details.
 
 ---
 
