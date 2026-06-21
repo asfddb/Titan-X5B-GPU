@@ -118,9 +118,38 @@ module titan_x5_rop #(
                             for (i = 0; i < 16; i = i + 1) begin
                                 if (i_valid[i]) begin
                                     // 16x16 index = (local_y * 16) + local_x
-                                    color_tile_sram[ {i_y[3:0] + i[3:2], i_x[3:0] + i[1:0]} ] <= i_color[i*32 +: 32];
-                                    depth_tile_sram[ {i_y[3:0] + i[3:2], i_x[3:0] + i[1:0]} ] <= i_z[i*32 +: 32];
-                                    tile_dirty[ {i_y[3:0] + i[3:2], i_x[3:0] + i[1:0]} ] <= 1'b1;
+                                    // Use | instead of + to avoid overflow, since inputs are 4-aligned
+                                    reg [7:0] tile_idx;
+                                    reg [31:0] cur_z;
+                                    reg [31:0] new_z;
+                                    reg [31:0] cur_c;
+                                    reg [31:0] new_c;
+                                    reg [7:0] alpha, inv_alpha;
+                                    reg [31:0] final_c;
+                                    
+                                    tile_idx = {i_y[3:2], i[3:2], i_x[3:2], i[1:0]};
+                                    cur_z = depth_tile_sram[tile_idx];
+                                    new_z = i_z[i*32 +: 32];
+                                    
+                                    if (new_z <= cur_z || !tile_dirty[tile_idx]) begin
+                                        cur_c = color_tile_sram[tile_idx];
+                                        new_c = i_color[i*32 +: 32];
+                                        alpha = new_c[31:24];
+                                        inv_alpha = 255 - alpha;
+                                        
+                                        if (cfg_blend_en) begin
+                                            final_c = {8'hFF, 
+                                                (new_c[23:16]*alpha + cur_c[23:16]*inv_alpha) >> 8,
+                                                (new_c[15:8]*alpha  + cur_c[15:8]*inv_alpha)  >> 8,
+                                                (new_c[7:0]*alpha   + cur_c[7:0]*inv_alpha)   >> 8};
+                                        end else begin
+                                            final_c = new_c;
+                                        end
+                                        
+                                        color_tile_sram[tile_idx] <= final_c;
+                                        depth_tile_sram[tile_idx] <= new_z;
+                                        tile_dirty[tile_idx] <= 1'b1;
+                                    end
                                 end
                             end
                         end

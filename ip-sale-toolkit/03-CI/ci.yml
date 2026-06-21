@@ -1,0 +1,294 @@
+# =============================================================================
+# GitHub Actions CI Workflow for Titan X5-B GPU
+# =============================================================================
+#
+# This workflow runs on every push and every pull request, and does:
+#
+#   1. Lint every .v / .sv file with Verilator (warnings → annotations)
+#   2. Compile the full RTL with Icarus Verilog (catches syntax errors)
+#   3. Run the cocotb test suite (test_system, test_graphics, test_alu)
+#   4. Run Yosys synthesis and check the gate count
+#   5. Upload waveform + synth report as artifacts
+#
+# SETUP:
+#   1. Copy this file to: .github/workflows/ci.yml in your repo
+#   2. Ensure your tb/ folder has a Makefile (cocotb-based)
+#   3. The workflow uses Ubuntu 22.04 + apt packages, no secrets needed
+#
+# BADGES (add to README.md):
+#
+#   [![CI](https://github.com/asfddb/Titan-X5B-GPU/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/asfddb/Titan-X5B-GPU/actions/workflows/ci.yml)
+#
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+
+# Cancel in-progress runs on the same PR/branch
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Lint with Verilator
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (Verilator)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Verilator
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq verilator
+
+      - name: Verilator version
+        run: verilator --version
+
+      - name: Lint all RTL files
+        run: |
+          set +e
+          # Find all .v / .sv files and lint each
+          mkdir -p reports
+          LINT_FAIL=0
+          for f in $(find rtl -name '*.v' -o -name '*.sv' | sort); do
+            echo "=== Linting $f ==="
+            verilator --lint-only -Wall -Wno-DECLFILENAME -Wno-WIDTH \
+              --top-module "$(basename $f .v)" \
+              "$f" 2>&1 | tee -a reports/verilator_lint.log
+            if [ ${PIPESTATUS[0]} -ne 0 ]; then
+              LINT_FAIL=1
+            fi
+          done
+          exit $LINT_FAIL
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: reports/
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Compile with Icarus
+  # ---------------------------------------------------------------------------
+  compile:
+    name: Compile (Icarus)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq iverilog
+
+      - name: Icarus version
+        run: vvp -V; iverilog -V
+
+      - name: Compile all RTL + testbenches
+        run: |
+          mkdir -p sim_build
+          # Collect all RTL files
+          RTL_FILES=$(find rtl -name '*.v' -o -name '*.sv' | sort)
+          # Collect all testbench files (the tb_*.v driver wrappers)
+          TB_FILES=$(find tb -name 'tb_*.v' -o -name 'tb_*.sv' | sort)
+
+          echo "Compiling RTL + testbenches..."
+          iverilog -g2012 -DSIMULATION \
+            -I rtl \
+            -o sim_build/titan_x5b.vvp \
+            $TB_FILES $RTL_FILES 2>&1 | tee sim_build/compile.log
+
+          # Fail if compile.log contains ERROR
+          if grep -q "ERROR" sim_build/compile.log; then
+            echo "❌ Compilation failed"
+            exit 1
+          fi
+          echo "✅ Compilation successful"
+
+      - name: Upload build artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compile-output
+          path: sim_build/
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Run cocotb tests
+  # ---------------------------------------------------------------------------
+  test:
+    name: Test (cocotb)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    needs: compile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Icarus + cocotb
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq iverilog
+          pip install --quiet cocotb==1.8.1 cocotb-test pytest cocotbext-axi pillow
+
+      - name: Run all cocotb tests
+        env:
+          cocotb_dir: ${{ github.workspace }}/tb
+        run: |
+          mkdir -p sim_build reports
+          cd tb
+
+          # Run each test_*.py file
+          TESTS_RAN=0
+          TESTS_FAILED=0
+
+          for test_file in test_*.py; do
+            test_name=$(basename "$test_file" .py)
+            echo "=============================================="
+            echo "Running test: $test_name"
+            echo "=============================================="
+
+            # cocotb-test uses pytest as the runner
+            if python -m pytest "$test_file" \
+                --cocotb-make-module="$test_file" \
+                -v --log-cli-level=INFO 2>&1 | tee "../reports/${test_name}.log"; then
+              echo "✅ $test_name PASSED"
+            else
+              echo "❌ $test_name FAILED"
+              TESTS_FAILED=$((TESTS_FAILED + 1))
+            fi
+            TESTS_RAN=$((TESTS_RAN + 1))
+          done
+
+          echo ""
+          echo "=============================================="
+          echo "Test Summary: $((TESTS_RAN - TESTS_FAILED))/$TESTS_RAN passed"
+          echo "=============================================="
+
+          if [ $TESTS_FAILED -gt 0 ]; then
+            exit 1
+          fi
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: reports/
+
+      - name: Upload waveforms
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waveforms
+          path: |
+            tb/*.vcd
+            tb/*.fst
+            sim_build/*.vcd
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Yosys synthesis
+  # ---------------------------------------------------------------------------
+  synth:
+    name: Synthesize (Yosys)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Yosys
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq yosys
+
+      - name: Yosys version
+        run: yosys -V
+
+      - name: Run synthesis
+        run: |
+          mkdir -p syn/reports
+          RTL_FILES=$(find rtl -name '*.v' -o -name '*.sv' | sort | tr '\n' ' ')
+
+          echo "Synthesizing with: $RTL_FILES"
+
+          yosys -p "
+            read_verilog -sv $RTL_FILES;
+            hierarchy -top titan_x5_gpu_top;
+            synth -top titan_x5_gpu_top;
+            stat > syn/reports/synthesis_stats.txt;
+            write_verilog syn/titan_x5b_synth.v;
+          " 2>&1 | tee syn/reports/synthesis.log
+
+          # Fail on ERROR
+          if grep -q "ERROR" syn/reports/synthesis.log; then
+            echo "❌ Synthesis failed"
+            exit 1
+          fi
+
+          # Extract and display gate count
+          echo ""
+          echo "=============================================="
+          echo "Synthesis Statistics:"
+          echo "=============================================="
+          grep -E "Number of cells|Number of wires|Number of memories|Chip area" \
+            syn/reports/synthesis_stats.txt || true
+          echo "=============================================="
+
+      - name: Upload synthesis reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthesis-report
+          path: syn/
+
+  # ---------------------------------------------------------------------------
+  # Job 5: Coverage (optional, slow)
+  # ---------------------------------------------------------------------------
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    needs: test
+    if: github.event_name == 'push'  # only on push to main, not PRs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq iverilog
+          pip install --quiet cocotb==1.8.1 cocotbext-axi pillow cocotb-coverage
+
+      - name: Run coverage
+        run: |
+          mkdir -p reports/coverage
+          cd tb
+          # Run tests with coverage enabled
+          python -m pytest test_system.py -v \
+            --cocotb-make-module=test_system.py 2>&1 | tee ../reports/coverage/coverage.log || true
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: reports/coverage/

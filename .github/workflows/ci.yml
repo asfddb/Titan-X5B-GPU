@@ -152,34 +152,15 @@ jobs:
           mkdir -p sim_build reports
           cd tb
 
-          # Run each test_*.py file
-          TESTS_RAN=0
-          TESTS_FAILED=0
-
-          for test_file in test_*.py; do
-            test_name=$(basename "$test_file" .py)
-            echo "=============================================="
-            echo "Running test: $test_name"
-            echo "=============================================="
-
-            # cocotb-test uses pytest as the runner
-            if python -m pytest "$test_file" \
-                --cocotb-make-module="$test_file" \
-                -v --log-cli-level=INFO 2>&1 | tee "../reports/${test_name}.log"; then
-              echo "✅ $test_name PASSED"
-            else
-              echo "❌ $test_name FAILED"
-              TESTS_FAILED=$((TESTS_FAILED + 1))
-            fi
-            TESTS_RAN=$((TESTS_RAN + 1))
-          done
-
-          echo ""
+          # Run test_runner.py which contains all the cocotb_test definitions
           echo "=============================================="
-          echo "Test Summary: $((TESTS_RAN - TESTS_FAILED))/$TESTS_RAN passed"
+          echo "Running all cocotb tests via test_runner.py"
           echo "=============================================="
 
-          if [ $TESTS_FAILED -gt 0 ]; then
+          if python -m pytest test_runner.py -v --log-cli-level=INFO 2>&1 | tee "../reports/test_runner.log"; then
+            echo "✅ All tests PASSED"
+          else
+            echo "❌ Tests FAILED"
             exit 1
           fi
 
@@ -283,8 +264,7 @@ jobs:
           mkdir -p reports/coverage
           cd tb
           # Run tests with coverage enabled
-          python -m pytest test_system.py -v \
-            --cocotb-make-module=test_system.py 2>&1 | tee ../reports/coverage/coverage.log || true
+          python -m pytest test_runner.py -v 2>&1 | tee ../reports/coverage/coverage.log || true
 
       - name: Upload coverage
         if: always()

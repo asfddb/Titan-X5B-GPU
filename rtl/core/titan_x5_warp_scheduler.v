@@ -78,8 +78,7 @@ module titan_x5_warp_scheduler #(
     always @(*) begin
         for (i = 0; i < NUM_WARPS; i = i + 1) begin
             // hazard if any register is pending in the scoreboard for this warp
-            // optimized: only stall if pipeline FIFO is full to allow maximum IPC
-            has_hazard[i] = fifo_full; 
+            has_hazard[i] = fifo_full | (scoreboard[i] != 64'd0); 
         end
     end
     
@@ -143,7 +142,7 @@ module titan_x5_warp_scheduler #(
         
         // pass 1: check for starving warps (age > threshold) — highest priority
         for (i = 0; i < NUM_WARPS; i = i + 1) begin
-            if (warp_ready[i] && age_counter[i] >= STARVATION_THRESHOLD && !found_starving) begin
+            if (warp_ready[i] && age_counter[i] >= STARVATION_THRESHOLD) begin
                 if (age_counter[i] > oldest_age) begin
                     sel_valid = 1'b1;
                     sel_warp  = i[2:0];

@@ -1,0 +1,4 @@
+{
+  "summary":  "The header file for the bare-metal C driver with memory map definitions, AXI addresses, and 64-bit command packet structures.",
+  "updatedAt":  "2026-06-21T07:29:27.804540900Z"
+}

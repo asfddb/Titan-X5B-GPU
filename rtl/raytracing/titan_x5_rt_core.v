@@ -336,39 +336,50 @@ module q16_div_fast #(parameter W=32) (
     output reg         done,
     output reg signed [W-1:0] quo
 );
-    // 3-cycle Pipelined Hardware Reciprocal Multiplier
-    reg [2:0] valid_pipe;
-    reg signed [W-1:0] num_p1, den_p1;
-    reg signed [W-1:0] num_p2, den_p2;
+    // Iterative Radix-2 Restoring Divider (32 cycles)
+    reg [5:0] count;
+    reg [63:0] dividend;
+    reg [31:0] divisor;
+    reg sign;
+    reg active;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             done <= 0;
             quo <= 0;
-            valid_pipe <= 3'b0;
+            active <= 0;
+            count <= 0;
+            dividend <= 0;
+            divisor <= 0;
+            sign <= 0;
         end else begin
-            valid_pipe[0] <= start;
-            valid_pipe[1] <= valid_pipe[0];
-            valid_pipe[2] <= valid_pipe[1];
-            done <= valid_pipe[2];
-
+            done <= 0;
             if (start) begin
-                num_p1 <= num;
-                den_p1 <= den;
-            end
-            if (valid_pipe[0]) begin
-                num_p2 <= num_p1;
-                den_p2 <= den_p1;
-            end
-            if (valid_pipe[1]) begin
-                if (den_p2 != 0) begin
-                    // Hardware synthesis maps this to DSP Reciprocal Multiply
-                    quo <= ($signed({{32{num_p2[W-1]}}, num_p2}) <<< 16) / den_p2;
-                end else begin
+                if (den == 0) begin
+                    done <= 1;
                     quo <= 32'h7FFFFFFF;
+                    active <= 0;
+                end else begin
+                    active <= 1;
+                    count <= 6'd32;
+                    sign <= (num[W-1] ^ den[W-1]);
+                    // Q16.16: shift numerator left by 16
+                    dividend <= {16'b0, (num[W-1] ? -num : num), 16'b0};
+                    divisor <= (den[W-1] ? -den : den);
                 end
-            end else begin
-                done <= 0;
+            end else if (active) begin
+                if (count == 0) begin
+                    active <= 0;
+                    done <= 1;
+                    quo <= sign ? -$signed(dividend[31:0]) : $signed(dividend[31:0]);
+                end else begin
+                    count <= count - 1;
+                    if (dividend[63:31] >= {1'b0, divisor}) begin
+                        dividend <= {dividend[62:31] - divisor, dividend[30:0], 1'b1};
+                    end else begin
+                        dividend <= {dividend[62:0], 1'b0};
+                    end
+                end
             end
         end
     end

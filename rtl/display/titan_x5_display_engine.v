@@ -68,10 +68,7 @@ module titan_x5_display_engine (
             h_counter <= 12'd0;
             v_counter <= 12'd0;
         end else begin
-            // Stall pixel consumption and timings if FIFO starves during active display area
-            if (next_de && fifo_empty) begin
-                // Do nothing, stall h_counter and v_counter
-            end else if (h_counter == h_total - 1) begin
+            if (h_counter == h_total - 1) begin
                 h_counter <= 12'd0;
                 if (v_counter == v_total - 1)
                     v_counter <= 12'd0;

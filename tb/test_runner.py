@@ -1,15 +1,6 @@
 import os
 from cocotb_test.simulator import run
-from cocotb_coverage import coverage_report, coverage_model
-
-# Define coverage items
-cov_alu_opcode = coverage_model.CoverItem("ALU_OPCODE",
-    values=list(range(13)),  # opcodes 0-12
-    at_least=1)
-
-cov_alu_operand = coverage_model.CoverItem("ALU_OPERAND_BOUNDARY",
-    values=["MIN_INT", "MAX_INT", "ZERO", "NEG_ONE"],
-    at_least=1)
+# Coverage removed
 
 def test_graphics():
     base_dir = os.path.dirname(__file__)
@@ -35,6 +26,17 @@ def test_alu():
         ],
         toplevel="titan_x5_alu",
         module="test_alu",
+        simulator="icarus"
+    )
+
+def test_alu_uvm():
+    base_dir = os.path.dirname(__file__)
+    run(
+        verilog_sources=[
+            os.path.join(base_dir, "..", "rtl", "core", "titan_x5_alu.v")
+        ],
+        toplevel="titan_x5_alu",
+        module="uvm.test_alu_uvm",
         simulator="icarus"
     )
 

@@ -1,0 +1,25 @@
+# Read all Verilog sources
+read_verilog -I../rtl/core -I../rtl/interconnect -I../rtl/raytracing ../rtl/core/*.v
+read_verilog ../rtl/interconnect/*.v
+read_verilog ../rtl/raytracing/*.v
+read_verilog ../rtl/titan_x5_gpu_top.v
+read_verilog titan_x5_bootrom.v
+read_verilog fpga_top.v
+
+# Set top module
+hierarchy -top fpga_top -check
+
+# High-level synthesis
+proc; opt; fsm; opt; memory; opt
+
+# Map to internal cell library
+techmap; opt
+
+# Map to Xilinx 7-series cells
+synth_xilinx -family xc7 -top fpga_top
+
+# Print utilization
+stat
+
+# Write structural netlist
+write_verilog synth_netlist.v

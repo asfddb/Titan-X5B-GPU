@@ -83,8 +83,9 @@ module titan_x5_command_processor (
                     end
                     if (mem_valid) begin
                         cmd_opcode <= mem_data[7:0]; // Lower 8 bits of first word is opcode
+                        cmd_payload <= mem_data[63:8]; // Upper 56 bits for payload
                         payload_word_cnt <= 0;
-                        ring_read_ptr <= ring_read_ptr + 1;
+                        ring_read_ptr <= (ring_read_ptr + 1) & 32'h000000FF; // Wrap at 256
                         state <= S_FETCH_PAY;
                     end
                 end
@@ -100,7 +101,7 @@ module titan_x5_command_processor (
                         end
                         if (mem_valid && waiting_for_data) begin
                             full_payload[payload_word_cnt * 32 +: 32] <= mem_data[31:0];
-                            ring_read_ptr <= ring_read_ptr + 1;
+                            ring_read_ptr <= (ring_read_ptr + 1) & 32'h000000FF;
                             payload_word_cnt <= payload_word_cnt + 1;
                             waiting_for_data <= 1'b0;
                         end

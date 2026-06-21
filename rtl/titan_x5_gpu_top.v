@@ -262,12 +262,12 @@ module titan_x5_gpu_top #(
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_gen
-            titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(4)) u_sm (
+            titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(32)) u_sm (
                 .clk(clk),
                 .rst_n(rst_n),
                 .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),
                 .l1_dcache_addr(sm_dcache_addr[gi]), .l1_dcache_wdata(sm_dcache_wdata[gi]), .l1_dcache_req(sm_dcache_req[gi]), .l1_dcache_we(sm_dcache_we[gi]), .l1_dcache_rdata(xbar_m_resp_rdata[(13+gi)*32 +: 32]), .l1_dcache_rvalid(xbar_m_resp_valid[13+gi]),
-                .warp_active      (8'h00), .warp_pc_in(256'h0)
+                .warp_active      (8'hFF), .warp_pc_in(256'h0)
             );
         end
     endgenerate
@@ -399,7 +399,7 @@ module titan_x5_gpu_top #(
                     .dcc_req(), .dcc_we(), .dcc_addr(), .dcc_wdata(),
                     .dcc_gnt(1'b1), .dcc_valid(1'b1),
                     .base_color(32'h0), .base_depth(32'h10000000),
-                    .dbg_state(dbg_rop_state)
+                    .dbg_state()
                 );
             end
         end

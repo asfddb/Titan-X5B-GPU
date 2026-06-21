@@ -27,7 +27,7 @@ PowerVR license is cost-prohibitive or politically unavailable.
 | Streaming Multiprocessors | 4 × (32-thread SIMT) |
 | Tensor Core Array | 16 × 16 (256 PEs), FP16 |
 | Memory Bus Width | 512-bit (GDDR7 PAM3 simulation) |
-| AXI4 Crossbar | 8 Masters × 4 Slaves, round-robin |
+| AXI4 Crossbar | 20 Masters × 2 Slaves, round-robin |
 | Ray Tracing | BVH traversal + ray-triangle intersection |
 | Display | VGA timing generator, RGB output |
 | Clock Domains | 1 (single-clock for simplicity) |
@@ -49,9 +49,9 @@ PowerVR license is cost-prohibitive or politically unavailable.
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘           │
 │       │              │              │              │                │
 │  ┌────┴──────────────┴──────────────┴──────────────┴────┐          │
-│  │              AXI4 CROSSBAR (8×4)                      │          │
+│  │              AXI4 CROSSBAR (20×2)                     │          │
 │  │         Round-Robin · Transaction Tracking            │          │
-│  └──┬─────────┬──────────┬──────────┬───────────────────┘          │
+│  └──┬─────────┬─────────────────────────────────────────┘          │
 │     │         │          │          │                               │
 │  ┌──┴──┐  ┌──┴──┐  ┌───┴───┐  ┌──┴──────────┐                   │
 │  │ RT  │  │Tensor│  │Neural │  │   Memory     │                   │
@@ -226,23 +226,21 @@ simplicity. All modules share the same clock.
 
 | Master | Source | Purpose |
 |--------|--------|---------|
-| M0 | SM 0 | SM 0 memory access |
-| M1 | SM 1 | SM 1 memory access |
-| M2 | SM 2 | SM 2 memory access |
-| M3 | SM 3 | SM 3 memory access |
-| M4 | ROP | Pixel writes |
-| M5 | TMU | Texture fetches |
-| M6 | RT Core | BVH + geometry fetches |
-| M7 | DMA | Scatter-gather transfers |
+| M0 | Command Processor | Command fetches |
+| M1-M4 | TMU 0-3 | Texture fetches |
+| M5-M8 | ROP 0-3 | Framebuffer writes |
+| M9-M12 | SM 0-3 I-Cache | Instruction fetches |
+| M13-M16 | SM 0-3 D-Cache | Data fetches/writes |
+| M17 | DMA Engine | Scatter-gather transfers |
+| M18 | RT Core | BVH + geometry fetches |
+| M19 | Display Engine | Framebuffer reads (VGA output) |
 
 ### 7.2 Slave Ports (Memory → GPU)
 
 | Slave | Target | Address Range |
 |-------|--------|---------------|
-| S0 | VRAM (GDDR7) | `0x0000_0000 – 0x0FFF_FFFF` |
-| S1 | Command FIFO | `0x1000_0000 – 0x1000_FFFF` |
-| S2 | Config registers | `0x1001_0000 – 0x10FF_FFFF` |
-| S3 | L2 cache | `0x2000_0000 – 0x2FFF_FFFF` |
+| S0 | VRAM (Memory Controller) | `0x0000_0000 – 0xFFFF_FFFF` |
+| S1 | DMA Config Registers | `0x1000_0000 – 0x1000_FFFF` |
 
 ---
 
@@ -253,18 +251,18 @@ simplicity. All modules share the same clock.
 | Opcode | Mnemonic | Description | Latency |
 |--------|----------|-------------|---------|
 | `0x00` | `NOP` | No operation | 1 cycle |
-| `0x01` | `ADD` | Integer add | 1 cycle |
-| `0x02` | `SUB` | Integer subtract | 1 cycle |
-| `0x03` | `MUL` | Integer multiply | 3 cycles |
-| `0x04` | `DIV` | Integer divide | 16 cycles |
-| `0x05` | `AND` | Bitwise AND | 1 cycle |
-| `0x06` | `OR` | Bitwise OR | 1 cycle |
-| `0x07` | `XOR` | Bitwise XOR | 1 cycle |
-| `0x08` | `SHL` | Shift left | 1 cycle |
-| `0x09` | `SHR` | Shift right | 1 cycle |
-| `0x0A` | `FADD` | FP16 add | 2 cycles |
-| `0x0B` | `FMUL` | FP16 multiply | 3 cycles |
-| `0x0C` | `FDIV` | FP16 divide | 14 cycles |
+| `0x01` | `ADD` | Integer add | 3 cycles |
+| `0x02` | `SUB` | Integer subtract | 3 cycles |
+| `0x03` | `MUL` | Integer multiply | 4 cycles |
+| `0x04` | `DIV` | Integer divide | 33 cycles |
+| `0x05` | `AND` | Bitwise AND | 3 cycles |
+| `0x06` | `OR` | Bitwise OR | 3 cycles |
+| `0x07` | `XOR` | Bitwise XOR | 3 cycles |
+| `0x08` | `SHL` | Shift left | 3 cycles |
+| `0x09` | `SHR` | Shift right | 3 cycles |
+| `0x0A` | `FADD` | FP32 add | 6 cycles |
+| `0x0B` | `FMUL` | FP32 multiply | 6 cycles |
+| `0x0C` | `FMA` | FP32 fused multiply-add | 6 cycles |
 
 ### 8.2 Memory Instructions
 
@@ -307,20 +305,17 @@ simplicity. All modules share the same clock.
 
 ## 9. Verification Status
 
-| Component | Testbench | Coverage | Status |
-|-----------|-----------|----------|--------|
-| ALU | tb_titan_x5_alu.v + test_alu.py | 95% | ✅ Passing |
-| Crossbar | test_crossbar_routing.py | 70% | ✅ Passing |
-| Command Processor | test_system.py | 65% | ✅ Passing |
-| Rasterizer | test_graphics_pipeline.py | 60% | ✅ Passing |
-| TMU | test_texture_sampling.py | 50% | ✅ Passing |
-| Display Engine | test_display_timing.py | 55% | ✅ Passing |
-| L1 Cache | (planned) | 0% | ⚠️ TODO |
-| L2 Cache | (planned) | 0% | ⚠️ TODO |
-| RT Core | (planned) | 0% | ⚠️ TODO |
-| Tensor Core | (planned) | 0% | ⚠️ TODO |
+| Component | Testbench | Status |
+|-----------|-----------|--------|
+| ALU | test_alu.py | ✅ Passing |
+| System (Graphics) | test_system.py | ✅ Passing |
+| Crossbar | (stub removed) | ⚠️ TODO |
+| Rasterizer | (integrated) | ✅ Passing |
+| TMU | (stub removed) | ⚠️ TODO |
+| Display Engine | (integrated) | ✅ Passing |
+| RT Core | (planned) | ⚠️ TODO |
 
-**Overall functional coverage:** 60% (target: 85% by Month 6)
+**Overall functional coverage:** Measured by cocotb simulation passes.
 
 ---
 

@@ -182,14 +182,15 @@ module titan_x5_alu #(
             fp_v5 <= fp_v4;
             // S6: Rounding & IEEE-754 Exception Handling (NaN/Inf/Denormal)
             fp_v6 <= fp_v5;
-            // dummy output logic (representing final fp32 result)
-            fp_res_out <= src1 ^ src2 ^ src3; // mocked for synthesis
+            // FMA fallback (integer equivalent for simulation purposes)
+            fp_res_out <= (src1 * src2) + src3; 
         end
     end
 
     // 5. Writeback Arbiter & Hazard Logic
-    // resolves structural hazards if multiple pipelines complete simultaneously
-    assign ready_out = !div_busy; // block new instructions if divider is running
+    // Resolves structural hazards by stalling
+    wire writeback_collision = (int_val_s2 && mul_v3) || (int_val_s2 && fp_v5) || (mul_v3 && fp_v5);
+    assign ready_out = !div_busy && !writeback_collision; // block new instructions if collision imminent
 
     assign valid_out = int_val_s3 | mul_v4 | div_val_out | fp_v6;
     assign result_out = fp_v6       ? fp_res_out :
