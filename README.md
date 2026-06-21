@@ -9,10 +9,10 @@
 </p>
 
 <p align="center">
-  <a href="#features"><img src="https://img.shields.io/badge/Gates-3%2C030%2C603-brightgreen?style=for-the-badge&logo=nvidia" alt="Gate Count"/></a>
-  <a href="#synthesis"><img src="https://img.shields.io/badge/Yosys-Verified-blue?style=for-the-badge&logo=verilog" alt="Yosys"/></a>
-  <a href="#simulation"><img src="https://img.shields.io/badge/GTKWave-Simulated-orange?style=for-the-badge" alt="GTKWave"/></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-CERN--OHL--S--2.0-red?style=for-the-badge" alt="License"/></a>
+  [![CI](https://github.com/asfddb/Titan-X5B-GPU/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/asfddb/Titan-X5B-GPU/actions/workflows/ci.yml)
+  [![License](https://img.shields.io/badge/License-CERN--OHL--S--2.0%20%2F%20Commercial-red.svg)](LICENSE)
+  [![GitHub stars](https://img.shields.io/github/stars/asfddb/Titan-X5B-GPU)](https://github.com/asfddb/Titan-X5B-GPU/stargazers)
+  [![GitHub issues](https://img.shields.io/github/issues/asfddb/Titan-X5B-GPU)](https://github.com/asfddb/Titan-X5B-GPU/issues)
 </p>
 
 
