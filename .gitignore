@@ -1,55 +1,19 @@
-# Compiled simulation files
-*.vvp
-*.out
-a.out
-
-# VCD waveform dumps (large files)
+# Hardware Simulation/Synthesis
 *.vcd
+*.vvp
+*.lxt2
+sim_build/
+sim/*.log
+syn/*.log
 
-# Synthesis output
-synthesis_*.txt
-
-# Python cache
+# Python
 __pycache__/
 *.pyc
+.pytest_cache/
+.coverage
+htmlcov/
 
-# OS files
-Thumbs.db
+# Editor/OS
 .DS_Store
-
-# IDE
 .vscode/
-.idea/
-
-# Temporary files
-*.tmp
-*.bak
-
-# Large binary archives
-*.zip
-
-# Test output
-test_output.txt
-fb_dump.txt
-rtl_files.txt
-ppa_results.json
-sim_output.txt
-
-# GTKWave extracted
-gtkwave_ext/
-
-# Scratch
-scratch/
-
-# Rendered images (keep rendered_triangle.png)
-triangle.png
-waveform_display.png
-
-# Python scripts (utility, not core)
-*.py
-
-# Cloud deployment
-titan-cloud/
-
-# Artifacts
-artifacts/
+*.swp
