@@ -2,13 +2,20 @@
 
 First off, thank you for considering contributing to the Titan X5-B GPU project! 🎉
 
-## 🛡️ Important: Intellectual Property
+## 📝 Contributor License Agreement (CLA)
 
-This project is licensed under **CERN-OHL-S-2.0** (Strongly Reciprocal). By contributing, you agree that:
+Before your pull request can be merged, you must sign our CLA. This
+ensures that the project maintainer retains the right to relicense the
+project under both the open-source and commercial licenses.
 
-- Your contributions will be licensed under the same CERN-OHL-S-2.0 license
-- You have the right to submit the contribution
-- You understand this is a reciprocal license — any derivative work must remain open
+- **Individual contributors:** See [`.github/CLA/CLA-INDIVIDUAL.md`](.github/CLA/CLA-INDIVIDUAL.md)
+- **Corporate contributors:** See [`.github/CLA/CLA-CORPORATE.md`](.github/CLA/CLA-CORPORATE.md)
+
+By submitting a pull request, you confirm that you have read, understood,
+and agree to the applicable CLA.
+
+The CLA Assistant bot will automatically prompt you to sign when you
+open your first PR.
 
 ## 🚀 How to Contribute
 
