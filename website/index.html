@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Titan X5-B GPU IP | High-Performance Silicon Licensing</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            500: '#10B981',
+                            600: '#00C853',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="icon" type="image/svg+xml" href="../docs/assets/favicon.ico">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .code-font { font-family: 'JetBrains Mono', monospace; }
+        .gradient-text {
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 antialiased selection:bg-brand-500 selection:text-white">
+
+    <!-- Header -->
+    <header class="sticky top-0 z-50 backdrop-blur-md bg-white/70 dark:bg-gray-900/70 border-b border-gray-200 dark:border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <img src="../docs/assets/titan_x5b_logo.svg" alt="Titan Logo" class="h-8">
+                <span class="font-bold text-xl tracking-tight">Titan X5-B</span>
+            </div>
+            <nav class="hidden md:flex gap-6">
+                <a href="#architecture" class="hover:text-brand-500 transition-colors">Architecture</a>
+                <a href="#specs" class="hover:text-brand-500 transition-colors">Specs</a>
+                <a href="#verification" class="hover:text-brand-500 transition-colors">Verification</a>
+                <a href="#licensing" class="hover:text-brand-500 transition-colors">Licensing</a>
+            </nav>
+            <a href="#contact" class="bg-brand-600 hover:bg-brand-500 text-white px-5 py-2 rounded-lg font-medium transition-all shadow-lg shadow-brand-500/30">Contact Us</a>
+        </div>
+    </header>
+
+    <!-- Hero -->
+    <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 lg:py-32 flex flex-col items-center text-center">
+        <h1 class="text-5xl lg:text-7xl font-extrabold tracking-tight mb-6">
+            A 3-Million-Gate <br>
+            <span class="bg-gradient-to-r from-brand-500 to-emerald-300 gradient-text">Blackwell-Class GPU</span>
+        </h1>
+        <p class="text-xl text-gray-600 dark:text-gray-400 max-w-3xl mb-10">
+            Synthesizable, commercially-licenseable SystemVerilog GPU IP featuring a 32-thread SIMT datapath, 16x16 FP16 tensor core array, and full graphics pipeline.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-4">
+            <a href="#contact" class="bg-brand-600 hover:bg-brand-500 text-white px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-lg shadow-brand-500/30">License for Commercial Use</a>
+            <a href="https://github.com/asfddb/Titan-X5B-GPU" target="_blank" class="bg-gray-200 hover:bg-gray-300 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-900 dark:text-white px-8 py-4 rounded-xl font-bold text-lg transition-all border border-gray-300 dark:border-gray-700">View Source Code (CERN-OHL)</a>
+        </div>
+    </section>
+
+    <!-- Architecture -->
+    <section id="architecture" class="py-20 bg-gray-100 dark:bg-gray-800/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold mb-10 text-center">System Architecture</h2>
+            <div class="bg-white dark:bg-gray-900 rounded-2xl p-8 shadow-xl border border-gray-200 dark:border-gray-800 overflow-x-auto">
+<pre class="code-font text-sm md:text-base text-gray-800 dark:text-gray-300">
+┌─────────────────────────────────────────────────────────────────────┐
+│                        TITAN X5-B GPU TOP                          │
+│                                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐           │
+│  │   SM 0   │  │   SM 1   │  │   SM 2   │  │   SM 3   │           │
+│  │ 32-Thread│  │ 32-Thread│  │ 32-Thread│  │ 32-Thread│           │
+│  │ SIMT ALU │  │ SIMT ALU │  │ SIMT ALU │  │ SIMT ALU │           │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └────┬─────┘           │
+│       │              │              │              │                │
+│  ┌────┴──────────────┴──────────────┴──────────────┴────┐          │
+│  │              AXI4 CROSSBAR (8×4)                      │          │
+│  │         Round-Robin · Transaction Tracking            │          │
+│  └──┬─────────┬──────────┬──────────┬───────────────────┘          │
+│     │         │          │          │                               │
+│  ┌──┴──┐  ┌──┴──┐  ┌───┴───┐  ┌──┴──────────┐                   │
+│  │ RT  │  │Tensor│  │Neural │  │   Memory     │                   │
+│  │Core │  │Core  │  │Shader │  │ Controller   │                   │
+│  │Mega │  │16×16 │  │Dispatch│  │  512-bit    │                   │
+│  │Geom │  │FP16  │  │       │  │  GDDR7 PHY  │                   │
+│  └─────┘  └──────┘  └───────┘  └─────────────┘                   │
+│                                                                     │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐           │
+│  │Rasterizer│  │  4× ROP  │  │  4× TMU  │  │ Display  │           │
+│  │          │  │          │  │          │  │ Engine   │           │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘           │
+└─────────────────────────────────────────────────────────────────────┘
+</pre>
+            </div>
+        </div>
+    </section>
+
+    <!-- Specs -->
+    <section id="specs" class="py-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-3xl font-bold mb-10 text-center">Technical Specifications</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div class="bg-gray-100 dark:bg-gray-800/50 rounded-2xl p-8 border border-gray-200 dark:border-gray-700">
+                    <h3 class="text-xl font-semibold mb-4 text-brand-500">Logic & Compute</h3>
+                    <ul class="space-y-3 text-gray-700 dark:text-gray-300">
+                        <li><strong>Gate Count:</strong> 3,030,603 Logic Cells (Yosys)</li>
+                        <li><strong>Streaming Multiprocessors:</strong> 4</li>
+                        <li><strong>SIMT Width:</strong> 32 Threads per SM</li>
+                        <li><strong>Tensor Cores:</strong> 256 PEs (16x16 Array) FP16</li>
+                    </ul>
+                </div>
+                <div class="bg-gray-100 dark:bg-gray-800/50 rounded-2xl p-8 border border-gray-200 dark:border-gray-700">
+                    <h3 class="text-xl font-semibold mb-4 text-brand-500">Memory & Interconnect</h3>
+                    <ul class="space-y-3 text-gray-700 dark:text-gray-300">
+                        <li><strong>Memory Bus:</strong> 512-bit (GDDR7 PAM3 simulation ready)</li>
+                        <li><strong>Crossbar:</strong> AXI4 8-Master / 4-Slave</li>
+                        <li><strong>L1 Cache:</strong> Per SM, 4-Way Set Associative</li>
+                        <li><strong>Display:</strong> Integrated VGA Display Engine</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Verification -->
+    <section id="verification" class="py-20 bg-gray-100 dark:bg-gray-800/50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h2 class="text-3xl font-bold mb-6">Rigorous Verification</h2>
+            <p class="text-lg text-gray-600 dark:text-gray-400 mb-10 max-w-2xl mx-auto">
+                Verified using Cocotb, driving the system clock and applying AXI transactions to manipulate and observe silicon signals natively.
+            </p>
+            <div class="inline-block bg-white dark:bg-gray-900 rounded-xl p-4 shadow-lg border border-gray-200 dark:border-gray-700">
+                <img src="../docs/assets/system_vga_reconstruction.png" alt="VGA Reconstruction Output" class="rounded-lg shadow-sm">
+                <p class="text-sm mt-3 text-gray-500">Actual output reconstructed from full system-level RTL simulation.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Demo Video -->
+    <section class="py-20">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h2 class="text-3xl font-bold mb-8">See it in Action</h2>
+            <div class="aspect-video bg-gray-200 dark:bg-gray-800 rounded-2xl flex items-center justify-center border border-gray-300 dark:border-gray-700 shadow-xl">
+                <span class="text-gray-500 font-medium text-lg">Hardware Demo Video Coming Soon</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Licensing & Contact -->
+    <section id="licensing" class="py-20 bg-brand-600 text-white">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h2 class="text-3xl font-bold mb-6">Commercial Licensing</h2>
+            <p class="text-lg mb-8 text-brand-100">
+                Integrate the Titan X5-B into your proprietary, closed-source SoC. We offer perpetual buyout licenses, subscription models, and royalty-based agreements with full warranty and indemnification.
+            </p>
+            <div id="contact" class="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 text-left">
+                <h3 class="text-2xl font-semibold mb-4">Contact for Quotes & Evaluation IP</h3>
+                <p class="mb-2"><strong>Email:</strong> adhiraj@[YOUR-DOMAIN]</p>
+                <p class="mb-6"><strong>Subject:</strong> Commercial License Inquiry — Titan X5-B GPU</p>
+                <a href="mailto:adhiraj@example.com?subject=Commercial%20License%20Inquiry%20—%20Titan%20X5-B%20GPU" class="inline-block bg-white text-brand-600 px-6 py-3 rounded-lg font-bold hover:bg-gray-100 transition-colors shadow-lg">Email Us</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 py-10 text-center">
+        <p class="text-gray-500 mb-4">&copy; 2026 Adhiraj / [Your LLP Name]. All rights reserved.</p>
+        <div class="flex justify-center gap-6 text-gray-400">
+            <a href="https://github.com/asfddb/Titan-X5B-GPU" class="hover:text-brand-500 transition-colors">GitHub</a>
+            <a href="#" class="hover:text-brand-500 transition-colors">LinkedIn</a>
+        </div>
+    </footer>
+
+</body>
+</html>
