@@ -1,5 +1,15 @@
 import os
 from cocotb_test.simulator import run
+from cocotb_coverage import coverage_report, coverage_model
+
+# Define coverage items
+cov_alu_opcode = coverage_model.CoverItem("ALU_OPCODE",
+    values=list(range(13)),  # opcodes 0-12
+    at_least=1)
+
+cov_alu_operand = coverage_model.CoverItem("ALU_OPERAND_BOUNDARY",
+    values=["MIN_INT", "MAX_INT", "ZERO", "NEG_ONE"],
+    at_least=1)
 
 def test_graphics():
     base_dir = os.path.dirname(__file__)

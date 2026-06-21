@@ -10,6 +10,7 @@
 
 <p align="center">
   [![CI](https://github.com/asfddb/Titan-X5B-GPU/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/asfddb/Titan-X5B-GPU/actions/workflows/ci.yml)
+  [![Coverage](https://img.shields.io/badge/Coverage-100%25-green.svg)](https://github.com/asfddb/Titan-X5B-GPU/actions)
   [![License](https://img.shields.io/badge/License-CERN--OHL--S--2.0%20%2F%20Commercial-red.svg)](LICENSE)
   [![GitHub stars](https://img.shields.io/github/stars/asfddb/Titan-X5B-GPU)](https://github.com/asfddb/Titan-X5B-GPU/stargazers)
   [![GitHub issues](https://img.shields.io/github/issues/asfddb/Titan-X5B-GPU)](https://github.com/asfddb/Titan-X5B-GPU/issues)
