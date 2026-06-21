@@ -46,9 +46,9 @@ module astra8_mas_wetware #(
     // these generate errors during elaboration if constraints are violated.
     generate
         if (DATA_WIDTH < 4) begin : gen_chk_dw
-            // synopsys translate_off
+`ifdef SIMULATION
             initial $display("ERROR: DATA_WIDTH must be >= 4, got %0d", DATA_WIDTH);
-            // synopsys translate_on
+`endif
             PARAMETER_ERROR_DATA_WIDTH_TOO_SMALL invalid_param();
         end
         if (GRID_X < 1 || GRID_Y < 1) begin : gen_chk_grid
