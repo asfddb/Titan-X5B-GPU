@@ -78,8 +78,8 @@ module titan_x5_pipeline (
     end
 
     // instruction fifo (8 entries)
-    reg [2:0]  fifo_warp [0:7];
-    reg [31:0] fifo_inst [0:7];
+    (* ram_style="block" *) reg [2:0]  fifo_warp [0:7];
+    (* ram_style="block" *) reg [31:0] fifo_inst [0:7];
     reg [3:0]  fifo_wp;
     reg [3:0]  fifo_rp;
     reg [3:0]  fifo_count;

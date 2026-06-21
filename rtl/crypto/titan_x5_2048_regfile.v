@@ -24,7 +24,7 @@ module titan_x5_2048_regfile (
 );
 
     integer i;
-    reg [2047:0] registers [0:7];
+    (* ram_style="block" *) reg [2047:0] registers [0:7];
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin

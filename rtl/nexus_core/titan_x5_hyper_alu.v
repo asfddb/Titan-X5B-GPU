@@ -21,9 +21,9 @@ module titan_x5_hyper_alu (
     output reg         done
 );
 
-    reg [63:0] mem_a [0:15];
-    reg [63:0] mem_b [0:15];
-    reg [63:0] mem_c [0:15];
+    (* ram_style="block" *) reg [63:0] mem_a [0:15];
+    (* ram_style="block" *) reg [63:0] mem_b [0:15];
+    (* ram_style="block" *) reg [63:0] mem_c [0:15];
 
     reg [1:0]  state;
     reg [3:0]  idx;

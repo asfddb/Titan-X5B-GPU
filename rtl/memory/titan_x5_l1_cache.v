@@ -81,8 +81,8 @@ module titan_x5_l1_cache #(
     reg [$clog2(WAYS)-1:0]lru_array  [0:SETS-1][0:WAYS-1];
 
     // mshr arrays
-    reg                   mshr_valid [0:MSHR_ENTRIES-1];
-    reg [ADDR_WIDTH-1:0]  mshr_addr  [0:MSHR_ENTRIES-1];
+    (* ram_style="block" *) reg                   mshr_valid [0:MSHR_ENTRIES-1];
+    (* ram_style="block" *) reg [ADDR_WIDTH-1:0]  mshr_addr  [0:MSHR_ENTRIES-1];
 
     wire [TAG_BITS-1:0]   req_tag   = req_addr[ADDR_WIDTH-1 : OFFSET_BITS+INDEX_BITS];
     wire [INDEX_BITS-1:0] req_index = req_addr[OFFSET_BITS+INDEX_BITS-1 : OFFSET_BITS];

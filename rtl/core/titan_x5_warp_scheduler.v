@@ -48,10 +48,10 @@ module titan_x5_warp_scheduler #(
 );
 
     // scoreboard: 64 registers per warp (1 = pending writeback)
-    reg [63:0] scoreboard [0:NUM_WARPS-1];
+    (* ram_style="block" *) reg [63:0] scoreboard [0:NUM_WARPS-1];
     
     // starvation prevention: age counter per warp
-    reg [7:0] age_counter [0:NUM_WARPS-1];
+    (* ram_style="block" *) reg [7:0] age_counter [0:NUM_WARPS-1];
     localparam STARVATION_THRESHOLD = 8'd32;
     
     // barrier state: warps waiting at a barrier

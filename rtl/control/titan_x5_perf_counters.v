@@ -19,7 +19,7 @@ module titan_x5_perf_counters (
 );
 
     // 32 x 48-bit counters
-    reg [47:0] counters [0:31];
+    (* ram_style="block" *) reg [47:0] counters [0:31];
     
     integer i;
     

@@ -50,7 +50,7 @@ module titan_x5_sr_engine #(
     reg [31:0]           tag_ram  [0:3][0:15];
     reg [DATA_WIDTH-1:0] data_ram [0:3][0:15];
     reg                  valid_ram[0:3][0:15];
-    reg [1:0]            repl_way [0:15];
+    (* ram_style="block" *) reg [1:0]            repl_way [0:15];
 
     integer i, j;
     always @(posedge clk or negedge rst_n) begin
@@ -83,9 +83,9 @@ module titan_x5_sr_engine #(
     wire stage2_ready; 
     reg        s1_valid;
     reg [31:0] s1_tag;
-    reg [31:0] s1_read_tags  [0:3];
-    reg [DATA_WIDTH-1:0] s1_read_data [0:3];
-    reg        s1_read_valid [0:3];
+    (* ram_style="block" *) reg [31:0] s1_read_tags  [0:3];
+    (* ram_style="block" *) reg [DATA_WIDTH-1:0] s1_read_data [0:3];
+    (* ram_style="block" *) reg        s1_read_valid [0:3];
     reg        s1_is_write;
 
     assign skid_i_ready = !s1_valid || stage2_ready;

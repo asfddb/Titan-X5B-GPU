@@ -49,9 +49,9 @@ module titan_x5_crossbar #(
     localparam MASTER_BITS = (NUM_MASTERS > 1) ? clog2(NUM_MASTERS) : 1;
 
     // arbitration: basic round robin
-    reg [MASTER_BITS-1:0] rr_ptr [0:NUM_SLAVES-1]; 
-    reg [MASTER_BITS-1:0] grant  [0:NUM_SLAVES-1];
-    reg                   grant_valid [0:NUM_SLAVES-1];
+    (* ram_style="block" *) reg [MASTER_BITS-1:0] rr_ptr [0:NUM_SLAVES-1]; 
+    (* ram_style="block" *) reg [MASTER_BITS-1:0] grant  [0:NUM_SLAVES-1];
+    (* ram_style="block" *) reg                   grant_valid [0:NUM_SLAVES-1];
 
     integer s, m, check_idx;
 
@@ -107,9 +107,9 @@ module titan_x5_crossbar #(
     localparam FIFO_BITS = clog2(FIFO_DEPTH) > 0 ? clog2(FIFO_DEPTH) : 1;
     
     reg [MASTER_BITS-1:0] req_fifo [0:NUM_SLAVES-1][0:FIFO_DEPTH-1];
-    reg [FIFO_BITS:0] fifo_count [0:NUM_SLAVES-1];
-    reg [FIFO_BITS-1:0] fifo_wr_ptr [0:NUM_SLAVES-1];
-    reg [FIFO_BITS-1:0] fifo_rd_ptr [0:NUM_SLAVES-1];
+    (* ram_style="block" *) reg [FIFO_BITS:0] fifo_count [0:NUM_SLAVES-1];
+    (* ram_style="block" *) reg [FIFO_BITS-1:0] fifo_wr_ptr [0:NUM_SLAVES-1];
+    (* ram_style="block" *) reg [FIFO_BITS-1:0] fifo_rd_ptr [0:NUM_SLAVES-1];
 
     wire [MASTER_BITS-1:0] current_resp_master [0:NUM_SLAVES-1];
 

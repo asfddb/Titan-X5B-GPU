@@ -63,8 +63,8 @@ module astra8_mas_wetware #(
     endgenerate
 
     // chemical concentration registers (activator u, inhibitor v)
-    reg [DATA_WIDTH-1:0] chem_u [0:(GRID_X*GRID_Y)-1];
-    reg [DATA_WIDTH-1:0] chem_v [0:(GRID_X*GRID_Y)-1];
+    (* ram_style="block" *) reg [DATA_WIDTH-1:0] chem_u [0:(GRID_X*GRID_Y)-1];
+    (* ram_style="block" *) reg [DATA_WIDTH-1:0] chem_v [0:(GRID_X*GRID_Y)-1];
 
     // initialization block (for simulation startup and fpga power-up seed)
     initial begin : sim_init

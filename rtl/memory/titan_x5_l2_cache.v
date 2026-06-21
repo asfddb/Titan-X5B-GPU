@@ -50,7 +50,7 @@ module titan_x5_l2_cache #(
     wire [TAG_BITS-1:0]    req_tag   = req_addr[ADDR_WIDTH-1 : OFFSET_BITS+BANK_BITS+INDEX_BITS];
 
     // bank registers
-    reg  bank_req_valid [0:BANKS-1];
+    (* ram_style="block" *) reg  bank_req_valid [0:BANKS-1];
     wire bank_req_ready [0:BANKS-1];
 
     // instantiate 4 banks logically or procedurally

@@ -87,7 +87,7 @@ module titan_x5_rt_core #(
     endfunction
 
     // traversal stack
-    reg [31:0] stack [0:31];
+    (* ram_style="block" *) reg [31:0] stack [0:31];
     reg [5:0]  sp;
     
     localparam STATE_IDLE           = 5'd0;

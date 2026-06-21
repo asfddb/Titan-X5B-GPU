@@ -30,7 +30,7 @@ module titan_x5_2048_mul (
     reg [2047:0] b_reg;
     reg [2047:0] b_shift;
     
-    reg [63:0] r_reg [0:63];
+    (* ram_style="block" *) reg [63:0] r_reg [0:63];
     
     reg [63:0] carry;
     reg [63:0] a_val;

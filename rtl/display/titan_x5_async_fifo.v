@@ -21,7 +21,7 @@ module titan_x5_async_fifo #(
 
     localparam DEPTH = 1 << DEPTH_LOG2;
     
-    reg [DATA_WIDTH-1:0] mem [0:DEPTH-1];
+    (* ram_style="block" *) reg [DATA_WIDTH-1:0] mem [0:DEPTH-1];
     
     reg [DEPTH_LOG2:0] wptr_bin, rptr_bin;
     reg [DEPTH_LOG2:0] wptr_gray, rptr_gray;
