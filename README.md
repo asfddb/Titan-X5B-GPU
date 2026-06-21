@@ -23,7 +23,17 @@
 ## 📜 Licensing
 
 Titan X5-B is **dual-licensed**:
+- Open Source: CERN-OHL-S-2.0 (Non-commercial research only)
+- Commercial: Custom IP License (See `docs/DATASHEET.md`)
 
+## 📚 Documentation
+- [Phase 1 Completion Report](docs/PHASE1_REPORT.md)
+- [Architecture Spec](docs/ARCHITECTURE.md)
+- [Microarchitecture (SM/ALU)](docs/MICROARCHITECTURE_PART1.md)
+- [Microarchitecture (Graphics/Mem)](docs/MICROARCHITECTURE_PART2.md)
+- [Verification Plan](docs/VERIFICATION.md)
+- [Product Brief / Pitch Deck](docs/PRODUCT-BRIEF.md)
+- [Sales Templates](docs/COLD_EMAIL_TEMPLATES.md)
 - **Open Source:** CERN-OHL-S-2.0 (free for research, education, and
   personal use; derivative works must remain open under the same license)
 - **Commercial:** Available separately for use in closed-source commercial
