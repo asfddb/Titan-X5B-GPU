@@ -1,3 +1,11 @@
+// ============================================================================
+// Copyright (c) 2026 Adhiraj / [Your LLP]
+// 
+// This file is part of the Titan X5-B GPU project.
+// 
+// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
+// See LICENSE and COMMERCIAL.md for details.
+// ============================================================================
 // titan x-infinity wafer-scale engine (wse)
 // generated grid: 16 x 16 (256 cores)
 // architecture: x/y addressed 2d mesh noc
