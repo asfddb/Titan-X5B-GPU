@@ -1,3 +1,11 @@
+# ============================================================================
+# Copyright (c) 2026 Adhiraj
+# 
+# This file is part of the Titan X5-B GPU project.
+# 
+# Licensed under CERN-OHL-S-2.0.
+# See LICENSE for details.
+# ============================================================================
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
@@ -28,7 +36,8 @@ async def test_alu_add(dut):
     await RisingEdge(dut.clk)
     dut.valid_in.value = 0
     
-    # ADD valid_out goes high exactly 2 cycles after injection
+    # ADD valid_out goes high exactly 3 cycles after injection (s1 -> s2 -> s3)
+    await RisingEdge(dut.clk)
     await RisingEdge(dut.clk)
     await cocotb.triggers.ReadOnly()
     

@@ -7,8 +7,8 @@
 
 ## 1. General Description
 
-Titan X5-B is a synthesizable GPU IP core implementing a Blackwell-class
-SIMT architecture. The IP is delivered as RTL source code in
+Titan X5-B is a synthesizable GPU IP core implementing a SIMT-class educational
+architecture. The IP is delivered as RTL source code in
 SystemVerilog, with full verification suite, documentation, and
 reference designs.
 
@@ -96,7 +96,7 @@ reference designs.
 
 | Parameter | Value |
 |-----------|-------|
-| Process (target) | TSMC 3nm GAAFET (theoretical) |
+| Target Environment | Simulation / FPGA |
 | Gate Count (Yosys) | 3,030,603 |
 | Flip-Flops | 530,000+ |
 | Wire Bits | 3,230,370 |
@@ -233,23 +233,7 @@ macro. Customers synthesize the IP for their target process.
 | FPGA validation | ✅ Artix-7 |
 | Silicon validation | 🚧 TinyTapeout (planned) |
 
----
-
-## 10. Ordering Information
-
-| License Type | SKU | Price (USD) |
-|--------------|-----|-------------|
-| Evaluation (90 days) | TITAN-X5B-EVAL | Free (under NDA) |
-| Perpetual + Royalty | TITAN-X5B-PERP | $150K–$400K + 0.5–2% royalty |
-| Annual Subscription | TITAN-X5B-SUB | $50K–$150K/year |
-| Source Buyout | TITAN-X5B-BUY | $300K–$1M |
-| Custom | TITAN-X5B-CUST | Contact for quote |
-
-Contact `adhiraj@[your-domain]` to place an order.
-
----
-
-## 11. Revision History
+## 10. Revision History
 
 | Version | Date | Changes |
 |---------|------|---------|
@@ -258,5 +242,4 @@ Contact `adhiraj@[your-domain]` to place an order.
 ---
 
 *This datasheet is for informational purposes only. Specifications
-subject to change without notice. Commercial use requires execution
-of a commercial license agreement.*
+subject to change without notice.*

@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -18,7 +18,8 @@ module titan_x5_crossbar #(
     parameter DATA_WIDTH = 32,
     parameter ADDR_WIDTH = 32,
     parameter NUM_MASTERS = 4,
-    parameter NUM_SLAVES = 4
+    parameter NUM_SLAVES = 4,
+    parameter MASTER_BITS = (NUM_MASTERS > 1) ? $clog2(NUM_MASTERS) : 1
 )(
     input wire clk,
     input wire rst_n,
@@ -41,7 +42,10 @@ module titan_x5_crossbar #(
     input wire [NUM_SLAVES-1:0] s_req_ready,
 
     input wire [NUM_SLAVES-1:0] s_resp_valid,
-    input wire [NUM_SLAVES*DATA_WIDTH-1:0] s_resp_rdata
+    input wire [NUM_SLAVES*DATA_WIDTH-1:0] s_resp_rdata,
+    
+    output wire [NUM_SLAVES*MASTER_BITS-1:0] s_req_id,
+    input wire [NUM_SLAVES*MASTER_BITS-1:0] s_resp_id
 );
 
     function integer clog2;
@@ -54,7 +58,6 @@ module titan_x5_crossbar #(
     endfunction
 
     localparam SLAVE_BITS = (NUM_SLAVES > 1) ? clog2(NUM_SLAVES) : 1;
-    localparam MASTER_BITS = (NUM_MASTERS > 1) ? clog2(NUM_MASTERS) : 1;
 
     // arbitration: basic round robin
     (* ram_style="block" *) reg [MASTER_BITS-1:0] rr_ptr [0:NUM_SLAVES-1]; 
@@ -110,106 +113,78 @@ module titan_x5_crossbar #(
         end
     end
 
-    // request tracking fifo per slave
-    localparam FIFO_DEPTH = 16;
-    localparam FIFO_BITS = clog2(FIFO_DEPTH) > 0 ? clog2(FIFO_DEPTH) : 1;
-    
-    reg [MASTER_BITS-1:0] req_fifo [0:NUM_SLAVES-1][0:FIFO_DEPTH-1];
-    (* ram_style="block" *) reg [FIFO_BITS:0] fifo_count [0:NUM_SLAVES-1];
-    (* ram_style="block" *) reg [FIFO_BITS-1:0] fifo_wr_ptr [0:NUM_SLAVES-1];
-    (* ram_style="block" *) reg [FIFO_BITS-1:0] fifo_rd_ptr [0:NUM_SLAVES-1];
+    // pipelined multiplexing to slaves
+    reg [NUM_SLAVES-1:0] s_req_valid_q;
+    reg [NUM_SLAVES*ADDR_WIDTH-1:0] s_req_addr_q;
+    reg [NUM_SLAVES*DATA_WIDTH-1:0] s_req_wdata_q;
+    reg [NUM_SLAVES-1:0] s_req_write_q;
+    reg [NUM_SLAVES*MASTER_BITS-1:0] s_req_id_q;
 
-    wire [MASTER_BITS-1:0] current_resp_master [0:NUM_SLAVES-1];
-
-    wire [NUM_SLAVES-1:0] fifo_has_space;
-    wire [NUM_SLAVES-1:0] req_accepted;
-    generate
-        for (gi = 0; gi < NUM_SLAVES; gi = gi + 1) begin : accept_gen
-            assign fifo_has_space[gi] = (fifo_count[gi] < FIFO_DEPTH) || s_resp_valid[gi];
-            assign req_accepted[gi] = grant_valid[gi] && s_req_ready[gi] && fifo_has_space[gi];
-        end
-    endgenerate
-
-    integer s_idx, f_idx;
+    integer pipe_gi;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            for (s_idx = 0; s_idx < NUM_SLAVES; s_idx = s_idx + 1) begin
-                fifo_count[s_idx] <= 0;
-                fifo_wr_ptr[s_idx] <= 0;
-                fifo_rd_ptr[s_idx] <= 0;
-                for (f_idx = 0; f_idx < FIFO_DEPTH; f_idx = f_idx + 1) begin
-                    req_fifo[s_idx][f_idx] <= 0;
-                end
-            end
+            s_req_valid_q <= 0;
+            s_req_addr_q <= 0;
+            s_req_wdata_q <= 0;
+            s_req_write_q <= 0;
+            s_req_id_q <= 0;
         end else begin
-            for (s_idx = 0; s_idx < NUM_SLAVES; s_idx = s_idx + 1) begin
-                if (req_accepted[s_idx] && !s_resp_valid[s_idx]) begin
-                    req_fifo[s_idx][fifo_wr_ptr[s_idx]] <= grant[s_idx];
-                    fifo_wr_ptr[s_idx] <= fifo_wr_ptr[s_idx] + 1;
-                    fifo_count[s_idx] <= fifo_count[s_idx] + 1;
-                end else if (!req_accepted[s_idx] && s_resp_valid[s_idx]) begin
-                    fifo_rd_ptr[s_idx] <= fifo_rd_ptr[s_idx] + 1;
-                    fifo_count[s_idx] <= fifo_count[s_idx] - 1;
-                end else if (req_accepted[s_idx] && s_resp_valid[s_idx]) begin
-                    req_fifo[s_idx][fifo_wr_ptr[s_idx]] <= grant[s_idx];
-                    fifo_wr_ptr[s_idx] <= fifo_wr_ptr[s_idx] + 1;
-                    fifo_rd_ptr[s_idx] <= fifo_rd_ptr[s_idx] + 1;
+            for (pipe_gi = 0; pipe_gi < NUM_SLAVES; pipe_gi = pipe_gi + 1) begin
+                if (s_req_ready[pipe_gi] || !s_req_valid_q[pipe_gi]) begin
+                    s_req_valid_q[pipe_gi] <= grant_valid[pipe_gi];
+                    if (grant_valid[pipe_gi]) begin
+                        s_req_addr_q[pipe_gi*ADDR_WIDTH +: ADDR_WIDTH] <= m_req_addr[grant[pipe_gi]*ADDR_WIDTH +: ADDR_WIDTH];
+                        s_req_wdata_q[pipe_gi*DATA_WIDTH +: DATA_WIDTH] <= m_req_wdata[grant[pipe_gi]*DATA_WIDTH +: DATA_WIDTH];
+                        s_req_write_q[pipe_gi] <= m_req_write[grant[pipe_gi]];
+                        s_req_id_q[pipe_gi*MASTER_BITS +: MASTER_BITS] <= grant[pipe_gi];
+                    end
                 end
             end
         end
     end
 
-    generate
-        for (gi = 0; gi < NUM_SLAVES; gi = gi + 1) begin : resp_master_gen
-            assign current_resp_master[gi] = req_fifo[gi][fifo_rd_ptr[gi]];
-        end
-    endgenerate
-
-    // multiplexing
-    generate
-        for (gi = 0; gi < NUM_SLAVES; gi = gi + 1) begin : slave_mux
-            assign s_req_valid[gi] = grant_valid[gi] && fifo_has_space[gi];
-            assign s_req_addr[gi*ADDR_WIDTH +: ADDR_WIDTH] = m_req_addr[grant[gi]*ADDR_WIDTH +: ADDR_WIDTH];
-            assign s_req_wdata[gi*DATA_WIDTH +: DATA_WIDTH] = m_req_wdata[grant[gi]*DATA_WIDTH +: DATA_WIDTH];
-            assign s_req_write[gi] = m_req_write[grant[gi]];
-        end
-    endgenerate
+    assign s_req_valid = s_req_valid_q;
+    assign s_req_addr = s_req_addr_q;
+    assign s_req_wdata = s_req_wdata_q;
+    assign s_req_write = s_req_write_q;
+    assign s_req_id = s_req_id_q;
 
     generate
         for (gi = 0; gi < NUM_MASTERS; gi = gi + 1) begin : master_mux
-            // m_req_ready is tricky: is this master granted by its requested slave AND does the FIFO have space?
-            assign m_req_ready[gi] = (grant_valid[req_dest[gi]] && grant[req_dest[gi]] == gi) ? (s_req_ready[req_dest[gi]] && fifo_has_space[req_dest[gi]]) : 1'b0;
+            assign m_req_ready[gi] = (grant_valid[req_dest[gi]] && grant[req_dest[gi]] == gi) ? (s_req_ready[req_dest[gi]] || !s_req_valid_q[req_dest[gi]]) : 1'b0;
         end
     endgenerate
 
-    // response routing based on tracked request master id
-    genvar m_idx, s_idx_gen;
-    generate
-        for (m_idx = 0; m_idx < NUM_MASTERS; m_idx = m_idx + 1) begin : m_resp_gen
-            wire [NUM_SLAVES-1:0] resp_from_slave;
-            wire [DATA_WIDTH-1:0] rdata_from_slave [0:NUM_SLAVES-1];
-            
-            for (s_idx_gen = 0; s_idx_gen < NUM_SLAVES; s_idx_gen = s_idx_gen + 1) begin : s_to_m
-                assign resp_from_slave[s_idx_gen] = s_resp_valid[s_idx_gen] && (fifo_count[s_idx_gen] != 0) && (current_resp_master[s_idx_gen] == m_idx);
-                assign rdata_from_slave[s_idx_gen] = resp_from_slave[s_idx_gen] ? s_resp_rdata[s_idx_gen*DATA_WIDTH +: DATA_WIDTH] : {DATA_WIDTH{1'b0}};
-            end
-            
-            assign m_resp_valid[m_idx] = |resp_from_slave;
-            
-            if (NUM_SLAVES == 1) begin : single_slave_rdata
-                assign m_resp_rdata[m_idx*DATA_WIDTH +: DATA_WIDTH] = rdata_from_slave[0];
-            end else begin : multi_slave_rdata
-                reg [DATA_WIDTH-1:0] temp_rdata;
-                integer s;
-                always @(*) begin
-                    temp_rdata = 0;
-                    for (s = 0; s < NUM_SLAVES; s = s + 1) begin
-                        temp_rdata = temp_rdata | rdata_from_slave[s];
+    // response routing based on s_resp_id (pipelined)
+    reg [NUM_MASTERS-1:0] m_resp_valid_q;
+    reg [NUM_MASTERS*DATA_WIDTH-1:0] m_resp_rdata_q;
+
+    integer m_idx_pipe, s_idx_pipe;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            m_resp_valid_q <= 0;
+            m_resp_rdata_q <= 0;
+        end else begin
+            for (m_idx_pipe = 0; m_idx_pipe < NUM_MASTERS; m_idx_pipe = m_idx_pipe + 1) begin
+                reg valid_this_cycle;
+                reg [DATA_WIDTH-1:0] data_this_cycle;
+                valid_this_cycle = 0;
+                data_this_cycle = 0;
+                for (s_idx_pipe = 0; s_idx_pipe < NUM_SLAVES; s_idx_pipe = s_idx_pipe + 1) begin
+                    if (s_resp_valid[s_idx_pipe] && (s_resp_id[s_idx_pipe*MASTER_BITS +: MASTER_BITS] == m_idx_pipe)) begin
+                        valid_this_cycle = 1;
+                        data_this_cycle = data_this_cycle | s_resp_rdata[s_idx_pipe*DATA_WIDTH +: DATA_WIDTH];
                     end
                 end
-                assign m_resp_rdata[m_idx*DATA_WIDTH +: DATA_WIDTH] = temp_rdata;
+                m_resp_valid_q[m_idx_pipe] <= valid_this_cycle;
+                if (valid_this_cycle) begin
+                    m_resp_rdata_q[m_idx_pipe*DATA_WIDTH +: DATA_WIDTH] <= data_this_cycle;
+                end
             end
         end
-    endgenerate
+    end
+
+    assign m_resp_valid = m_resp_valid_q;
+    assign m_resp_rdata = m_resp_rdata_q;
 
 endmodule

@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -94,18 +94,32 @@ module titan_x5_fpga_top (
     // dummy vram axi wires (vram memory controller handles internal bram/ddr)
     wire [3:0]   vram_arid; wire [31:0]  vram_araddr; wire [7:0]   vram_arlen;
     wire [2:0]   vram_arsize; wire [1:0]   vram_arburst; wire         vram_arvalid;
-    wire         vram_arready = 1'b1;
-    wire [3:0]   vram_rid = vram_arid; wire [255:0] vram_rdata = 256'h0;
-    wire [1:0]   vram_rresp = 2'b00; wire         vram_rlast = 1'b1;
-    wire         vram_rvalid = vram_arvalid; wire         vram_rready;
+    wire         vram_arready;
+    wire [3:0]   vram_rid; wire [255:0] vram_rdata;
+    wire [1:0]   vram_rresp; wire         vram_rlast;
+    wire         vram_rvalid; wire         vram_rready;
     
     wire [3:0]   vram_awid; wire [31:0]  vram_awaddr; wire [7:0]   vram_awlen;
     wire [2:0]   vram_awsize; wire [1:0]   vram_awburst; wire         vram_awvalid;
-    wire         vram_awready = 1'b1;
+    wire         vram_awready;
     wire [255:0] vram_wdata; wire [31:0]  vram_wstrb; wire         vram_wlast;
-    wire         vram_wvalid; wire         vram_wready = 1'b1;
-    wire [3:0]   vram_bid = vram_awid; wire [1:0]   vram_bresp = 2'b00;
-    wire         vram_bvalid = vram_awvalid; wire         vram_bready;
+    wire         vram_wvalid; wire         vram_wready;
+    wire [3:0]   vram_bid; wire [1:0]   vram_bresp;
+    wire         vram_bvalid; wire         vram_bready;
+    
+    titan_x5_vram_ctrl u_vram_ctrl (
+        .clk(clk),
+        .rst_n(rst_n),
+        .s_axi_awid(vram_awid), .s_axi_awaddr(vram_awaddr), .s_axi_awlen(vram_awlen),
+        .s_axi_awsize(vram_awsize), .s_axi_awburst(vram_awburst), .s_axi_awvalid(vram_awvalid), .s_axi_awready(vram_awready),
+        .s_axi_wdata(vram_wdata), .s_axi_wstrb(vram_wstrb), .s_axi_wlast(vram_wlast),
+        .s_axi_wvalid(vram_wvalid), .s_axi_wready(vram_wready),
+        .s_axi_bid(vram_bid), .s_axi_bresp(vram_bresp), .s_axi_bvalid(vram_bvalid), .s_axi_bready(vram_bready),
+        .s_axi_arid(vram_arid), .s_axi_araddr(vram_araddr), .s_axi_arlen(vram_arlen),
+        .s_axi_arsize(vram_arsize), .s_axi_arburst(vram_arburst), .s_axi_arvalid(vram_arvalid), .s_axi_arready(vram_arready),
+        .s_axi_rid(vram_rid), .s_axi_rdata(vram_rdata), .s_axi_rresp(vram_rresp),
+        .s_axi_rlast(vram_rlast), .s_axi_rvalid(vram_rvalid), .s_axi_rready(vram_rready)
+    );
 
     titan_x5_gpu_top u_gpu_core (
         .clk             (clk_core),

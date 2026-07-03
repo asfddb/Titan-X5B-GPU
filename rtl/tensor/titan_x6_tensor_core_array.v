@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -26,6 +26,8 @@ module fp4_mul_to_fp32 (
     reg [22:0] res_mant;
 
     always @(*) begin
+        res_exp = 0;
+        res_mant = 0;
         if (a_zero || b_zero) begin
             res_exp = 0;
             res_mant = 0;
@@ -135,6 +137,15 @@ module fp32_add (
     reg [4:0] shift;
     
     always @(*) begin
+        result = 32'b0;
+        exp_diff = 8'b0;
+        mant_a_aligned = 24'b0;
+        mant_b_aligned = 24'b0;
+        exp_res = 8'b0;
+        sign_res = 1'b0;
+        mant_sum = 25'b0;
+        shift = 5'b0;
+        
         if (a == 0) result = b;
         else if (b == 0) result = a;
         else begin
@@ -210,8 +221,8 @@ endmodule
 
 // massive systolic array
 module titan_x6_tensor_core_array #(
-    parameter ARRAY_SIZE_X = 16,
-    parameter ARRAY_SIZE_Y = 16,
+    parameter ARRAY_SIZE_X = 4,
+    parameter ARRAY_SIZE_Y = 4,
     parameter DATA_WIDTH   = 16,
     parameter ACC_WIDTH    = 32
 )(
@@ -238,14 +249,45 @@ module titan_x6_tensor_core_array #(
 
     genvar i, j;
     generate
-        // initialize row inputs (activations)
         for (i = 0; i < ARRAY_SIZE_Y; i = i + 1) begin : g_act_init
-            assign act_wire[i * (ARRAY_SIZE_X + 1) + 0] = act_in[i * DATA_WIDTH +: DATA_WIDTH];
+            if (i == 0) begin
+                assign act_wire[i * (ARRAY_SIZE_X + 1) + 0] = act_in[i * DATA_WIDTH +: DATA_WIDTH];
+            end else begin
+                reg [DATA_WIDTH-1:0] act_skew_reg [0:i-1];
+                integer k;
+                always @(posedge clk or negedge rst_n) begin
+                    if (!rst_n) begin
+                        for (k = 0; k < i; k = k + 1)
+                            act_skew_reg[k] <= 0;
+                    end else if (en) begin
+                        act_skew_reg[0] <= act_in[i * DATA_WIDTH +: DATA_WIDTH];
+                        for (k = 1; k < i; k = k + 1)
+                            act_skew_reg[k] <= act_skew_reg[k-1];
+                    end
+                end
+                assign act_wire[i * (ARRAY_SIZE_X + 1) + 0] = act_skew_reg[i-1];
+            end
         end
 
-        // initialize column inputs (weights and initial accumulator values)
+        // initialize column inputs (weights) with systolic skew (delay col j by j cycles)
         for (j = 0; j < ARRAY_SIZE_X; j = j + 1) begin : g_weight_init
-            assign weight_wire[0 * ARRAY_SIZE_X + j] = weight_in[j * DATA_WIDTH +: DATA_WIDTH];
+            if (j == 0) begin
+                assign weight_wire[0 * ARRAY_SIZE_X + j] = weight_in[j * DATA_WIDTH +: DATA_WIDTH];
+            end else begin
+                reg [DATA_WIDTH-1:0] weight_skew_reg [0:j-1];
+                integer k;
+                always @(posedge clk or negedge rst_n) begin
+                    if (!rst_n) begin
+                        for (k = 0; k < j; k = k + 1)
+                            weight_skew_reg[k] <= 0;
+                    end else if (en) begin
+                        weight_skew_reg[0] <= weight_in[j * DATA_WIDTH +: DATA_WIDTH];
+                        for (k = 1; k < j; k = k + 1)
+                            weight_skew_reg[k] <= weight_skew_reg[k-1];
+                    end
+                end
+                assign weight_wire[0 * ARRAY_SIZE_X + j] = weight_skew_reg[j-1];
+            end
             assign acc_wire[0 * ARRAY_SIZE_X + j]    = {ACC_WIDTH{1'b0}};
         end
 
@@ -282,8 +324,8 @@ module titan_x6_tensor_core_array #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             valid_pipe <= {ARRAY_SIZE_Y{1'b0}};
-        end else if (en) begin
-            valid_pipe <= {valid_pipe[ARRAY_SIZE_Y-2:0], 1'b1};
+        end else begin
+            valid_pipe <= {valid_pipe[ARRAY_SIZE_Y-2:0], en};
         end
     end
     

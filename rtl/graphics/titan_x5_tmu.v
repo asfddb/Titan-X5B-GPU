@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -59,21 +59,22 @@ module titan_x5_tmu (
     reg [15:0] y_reg;
     reg [1:0]  texel_idx;
 
-    // direct-mapped 4kb cache (1k words)
-    (* ram_style="block" *) reg [31:0] cache_data [0:1023];
-    (* ram_style="block" *) reg [19:0] cache_tag  [0:1023];
-    (* ram_style="block" *) reg        cache_valid[0:1023];
+    // L1 Cache instantiation replaces internal primitive cache
+    wire cache_req_valid;
+    wire [31:0] cache_req_addr;
+    wire cache_req_ready;
+    wire cache_resp_valid;
+    wire [31:0] cache_resp_rdata;
 
-    (* ram_style="block" *) reg [31:0] t_addr [0:3];
-    (* ram_style="block" *) reg [31:0] c_data [0:3];
+    reg [31:0] t_addr [0:3];
+    reg [31:0] c_data [0:3];
     
     reg [7:0] uf_reg, vf_reg;
     reg [1:0] fmt_reg;
 
-    reg mem_req_reg;
-    reg [31:0] mem_addr_reg;
-    assign mem_req = mem_req_reg;
-    assign mem_addr = mem_addr_reg;
+    // mem_req and mem_addr are now driven by the L1 cache
+    assign cache_req_valid = (state == S_CACHE_READ);
+    assign cache_req_addr = {t_addr[texel_idx][31:2], 2'b00};
 
     reg o_valid_reg;
     reg [31:0] o_color_reg;
@@ -107,9 +108,6 @@ module titan_x5_tmu (
     end
 
     wire [2:0] bpp_shift = (i_format == 2'b10) ? 2 : (i_format == 2'b01) ? 1 : 0;
-    
-    wire [9:0]  cache_idx = t_addr[texel_idx][11:2];
-    wire [19:0] cache_tag_req = t_addr[texel_idx][31:12];
 
     function [31:0] extract_color;
     input [31:0] word;
@@ -150,12 +148,46 @@ module titan_x5_tmu (
     reg [31:0] top_mix, bot_mix;
     integer i;
     
+    titan_x5_l1_cache #(
+        .ADDR_WIDTH(32),
+        .DATA_WIDTH(32),
+        .LINE_SIZE(4),
+        .WAYS(4),
+        .SETS(128),
+        .MSHR_ENTRIES(4)
+    ) u_l1_cache (
+        .clk(clk),
+        .rst_n(rst_n),
+        .req_valid(cache_req_valid),
+        .req_addr(cache_req_addr),
+        .req_wdata(32'd0),
+        .req_write(1'b0),
+        .req_ready(cache_req_ready),
+        .resp_valid(cache_resp_valid),
+        .resp_rdata(cache_resp_rdata),
+        
+        .m_axi_awaddr(),
+        .m_axi_awvalid(),
+        .m_axi_awready(1'b1),
+        .m_axi_wdata(),
+        .m_axi_wvalid(),
+        .m_axi_wready(1'b1),
+        .m_axi_bresp(2'b00),
+        .m_axi_bvalid(1'b0),
+        .m_axi_bready(),
+        
+        .m_axi_araddr(mem_addr),
+        .m_axi_arvalid(mem_req),
+        .m_axi_arready(mem_gnt),
+        .m_axi_rdata(mem_rdata),
+        .m_axi_rvalid(mem_valid),
+        .m_axi_rready() // Internal logic relies on ready=1 implicitly
+    );
+    
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= S_IDLE;
             texel_idx <= 2'd0;
-            mem_req_reg <= 1'b0;
-            mem_addr_reg <= 32'd0;
             o_valid_reg <= 1'b0;
             o_color_reg <= 32'd0;
             x_reg <= 16'd0; y_reg <= 16'd0;
@@ -163,7 +195,6 @@ module titan_x5_tmu (
             fmt_reg <= 2'd0;
             top_mix <= 32'd0; bot_mix <= 32'd0;
             for (i = 0; i < 4; i = i + 1) begin t_addr[i] <= 32'd0; c_data[i] <= 32'd0; end
-            for (i = 0; i < 1024; i = i + 1) begin cache_valid[i] <= 1'b0; cache_tag[i] <= 20'd0; cache_data[i] <= 32'd0; end
         end else begin
             case (state)
                 S_IDLE: begin
@@ -186,24 +217,19 @@ module titan_x5_tmu (
                 end
                 
                 S_CACHE_READ: begin
-                    if (cache_valid[cache_idx] && (cache_tag[cache_idx] == cache_tag_req)) begin
-                        c_data[texel_idx] <= extract_color(cache_data[cache_idx], t_addr[texel_idx][1:0], fmt_reg);
-                        if (texel_idx == 3) state <= S_FILTER_1;
-                        else texel_idx <= texel_idx + 1;
-                    end else begin
-                        mem_req_reg <= 1'b1;
-                        mem_addr_reg <= {t_addr[texel_idx][31:2], 2'b00};
-                        state <= S_MEM_WAIT;
+                    if (cache_req_ready) begin
+                        state <= S_MEM_WAIT; // acts as S_CACHE_WAIT
                     end
                 end
                 
                 S_MEM_WAIT: begin
-                    if (mem_gnt && mem_valid) begin
-                        mem_req_reg <= 1'b0;
-                        cache_data[cache_idx] <= mem_rdata;
-                        cache_tag[cache_idx]  <= cache_tag_req;
-                        cache_valid[cache_idx] <= 1'b1;
-                        state <= S_CACHE_READ; // retry with loaded data
+                    if (cache_resp_valid) begin
+                        c_data[texel_idx] <= extract_color(cache_resp_rdata, t_addr[texel_idx][1:0], fmt_reg);
+                        if (texel_idx == 3) state <= S_FILTER_1;
+                        else begin
+                            texel_idx <= texel_idx + 1;
+                            state <= S_CACHE_READ;
+                        end
                     end
                 end
                 

@@ -134,7 +134,7 @@ It's not perfect, but it synthesizes to **3,030,603 gates** on Yosys and passes 
 ## 📁 Directory Structure
 
 ```
-gpuuhj/
+Titan-X5B-GPU/
 ├── rtl/                          # RTL Source Code (SystemVerilog)
 │   ├── titan_x5_gpu_top.v        # Top-level GPU module
 │   ├── core/                     # SIMT compute pipeline
@@ -182,17 +182,15 @@ git clone https://github.com/asfddb/Titan-X5B-GPU.git
 cd Titan-X5B-GPU
 ```
 
-### 2. Run Simulation (Windows PowerShell)
+### 2. Run Simulation
 
-```powershell
-$env:PATH = "C:\tools\oss-cad-suite\oss-cad-suite\bin;$env:PATH"
-
+```bash
 # Compile all RTL
-iverilog -g2012 -I rtl -o tb/ultimate_blackwell.vvp `
-  tb/ultimate_blackwell_tb.v rtl/titan_x5_gpu_top.v `
-  rtl/tensor/*.v rtl/raytracing/*.v rtl/memory/*.v `
-  rtl/graphics/*.v rtl/interconnect/*.v rtl/core/*.v `
-  rtl/control/*.v rtl/sr/*.v rtl/power/*.v `
+iverilog -g2012 -I rtl -o tb/ultimate_blackwell.vvp \
+  tb/ultimate_blackwell_tb.v rtl/titan_x5_gpu_top.v \
+  rtl/tensor/*.v rtl/raytracing/*.v rtl/memory/*.v \
+  rtl/graphics/*.v rtl/interconnect/*.v rtl/core/*.v \
+  rtl/control/*.v rtl/sr/*.v rtl/power/*.v \
   rtl/display/*.v rtl/common/*.v
 
 # Run simulation
@@ -204,7 +202,7 @@ gtkwave tb/blackwell_wave.vcd
 
 ### 3. Run Synthesis (Gate Count Extraction)
 
-```powershell
+```bash
 yosys -p "read_verilog -sv rtl/*.v rtl/**/*.v; hierarchy -top titan_x5_gpu_top; synth; stat"
 ```
 
@@ -224,8 +222,9 @@ test_runner.py ..
 ============================== 2 passed in 3.98s ==============================
 ```
 
-Unit test coverage verifies ALU strict cycle latencies (multi-cycle division), and the system test confirms full rendering from instruction to VGA display.## 🔋 Synthesis Breakdown
+Unit test coverage verifies ALU strict cycle latencies (multi-cycle division), and the system test confirms full rendering from instruction to VGA display.
 
+## 🔋 Synthesis Breakdown
 The full Titan X5-B synthesizes to **3,030,603 logic cells** on Yosys:
 
 | Gate Type | Count | Purpose |
@@ -257,6 +256,6 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 - [ ] FPGA prototype on Artix-7 / ECP5
 - [ ] Additional ISA support
 - [ ] Power estimation with OpenSTA
-- [ ] ASIC tape-out targeting TSMC 3nm
+- [ ] Complete educational feature set
 
 

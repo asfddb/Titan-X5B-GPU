@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -64,8 +64,11 @@ module titan_x5_async_fifo #(
         end
     end
     
-    assign rdata = mem[rptr_bin[DEPTH_LOG2-1:0]];
-    
+    reg [DATA_WIDTH-1:0] rdata_reg;
+    always @(posedge rclk) begin
+        rdata_reg <= mem[rptr_bin[DEPTH_LOG2-1:0]];
+    end
+    assign rdata = rdata_reg;
     // synchronizers
     always @(posedge wclk or negedge wrst_n) begin
         if (!wrst_n) {wq2_rptr, wq1_rptr} <= 0;

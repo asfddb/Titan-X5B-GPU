@@ -18,4 +18,4 @@ This report contains the synthesis results for the Titan X5-B GPU Top level modu
 | PowerVR Series8XE | ~300K | Proprietary |
 | Vortex | ~150K | Open Source (Academic) |
 
-*Note: Due to its extreme size, this GPU will not fit on low-end FPGAs like the Artix-7, but can be scaled for large Virtex Ultrascale+ or Stratix 10 devices, or targeted directly to ASIC/TSMC 3nm.*
+*Note: Due to its size, this GPU will not fit on low-end FPGAs like the Artix-7, but can be scaled for large Virtex Ultrascale+ or Stratix 10 devices.*

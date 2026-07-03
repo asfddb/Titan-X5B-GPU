@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -39,7 +39,7 @@ module titan_x5_register_file #(
     genvar b;
     generate
         for (b = 0; b < NUM_BANKS; b = b + 1) begin : bank_gen
-            (* ram_style="block" *) reg [DATA_WIDTH-1:0] bank_mem [0:REGS_PER_BANK-1];
+            reg [DATA_WIDTH-1:0] bank_mem [0:REGS_PER_BANK-1];
             integer i;
             
             always @(posedge clk or negedge rst_n) begin

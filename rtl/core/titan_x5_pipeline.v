@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -98,6 +98,13 @@ module titan_x5_pipeline (
     wire fifo_pop = !fifo_empty && id_ready;
     wire fifo_push = if_inst_valid && !fifo_full;
 
+    always @(posedge clk) begin
+        if (fifo_push) begin
+            fifo_warp[fifo_wp[2:0]] <= if_warp;
+            fifo_inst[fifo_wp[2:0]] <= if_inst;
+        end
+    end
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             fifo_wp <= 0;
@@ -105,8 +112,6 @@ module titan_x5_pipeline (
             fifo_count <= 0;
         end else begin
             if (fifo_push) begin
-                fifo_warp[fifo_wp[2:0]] <= if_warp;
-                fifo_inst[fifo_wp[2:0]] <= if_inst;
                 fifo_wp <= fifo_wp + 1;
             end
             if (fifo_pop) begin
@@ -128,6 +133,7 @@ module titan_x5_pipeline (
     wire [15:0] dec_imm;
     wire        dec_use_imm, dec_is_branch, dec_is_load, dec_is_store, dec_is_alu, dec_is_valid;
     
+    wire        dec_is_wmma;
     titan_x5_decoder decoder_inst (
         .inst(id_inst_raw),
         .opcode(dec_opcode),
@@ -141,7 +147,8 @@ module titan_x5_pipeline (
         .is_mem_load(dec_is_load),
         .is_mem_store(dec_is_store),
         .is_alu(dec_is_alu),
-        .is_valid(dec_is_valid)
+        .is_valid(dec_is_valid),
+        .is_wmma(dec_is_wmma)
     );
 
     assign rf_rd_addr1 = dec_rs1;
@@ -203,7 +210,7 @@ module titan_x5_pipeline (
             id_is_load   <= dec_is_load;
             id_is_store  <= dec_is_store;
             id_is_alu    <= dec_is_alu;
-            id_is_wmma   <= (id_inst_raw[5:0] == 6'h3F);
+            id_is_wmma   <= dec_is_wmma;
         end
     end
 

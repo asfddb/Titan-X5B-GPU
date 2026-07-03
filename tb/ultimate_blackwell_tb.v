@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -227,9 +227,8 @@ module ultimate_blackwell_tb;
             end
             if (!fb_non_zero) begin
                 $display("===============================================================");
-                $display("  FATAL ERROR: Framebuffer is completely empty (all 0s)!");
+                $fatal(1, "  FATAL ERROR: Framebuffer is completely empty (all 0s)!");
                 $display("===============================================================");
-                $fatal;
             end else begin
                 $display("===============================================================");
                 $display("  TEST PASSED: RTL Simulation Completed Successfully");

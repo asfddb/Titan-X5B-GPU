@@ -1,3 +1,11 @@
+# ============================================================================
+# Copyright (c) 2026 Adhiraj
+# 
+# This file is part of the Titan X5-B GPU project.
+# 
+# Licensed under CERN-OHL-S-2.0.
+# See LICENSE for details.
+# ============================================================================
 import sys
 import matplotlib.pyplot as plt
 from vcdvcd import VCDVCD
@@ -63,9 +71,10 @@ def plot_vcd(vcd_path, out_png, signals_to_plot):
     print(f"Authentic waveform plot saved to {out_png}")
 
 if __name__ == "__main__":
-    vcd_file = r"c:\Users\singb\Downloads\gpuuhj\tb\blackwell_wave.vcd"
-    out_file = r"c:\Users\singb\Downloads\gpuuhj\docs\assets\simulation_waveforms.png"
-    
+    import pathlib
+    base_dir = pathlib.Path(__file__).parent.parent
+    vcd_file = str(base_dir / "tb" / "blackwell_wave.vcd")
+    out_file = str(base_dir / "docs" / "assets" / "simulation_waveforms.png")    
     sigs = [
         "ultimate_blackwell_tb.clk",
         "ultimate_blackwell_tb.rst_n",

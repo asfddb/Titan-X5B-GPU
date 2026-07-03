@@ -57,8 +57,8 @@ def plot_vcd(vcd_path, out_png, signals_to_plot):
     print(f"Saved waveform plot to {out_png}")
 
 if __name__ == "__main__":
-    artifact_dir = r"C:\Users\singb\.gemini\antigravity\brain\a3ca4eb8-a8de-4342-b506-f5222f229dfc"
-    
+    import os
+    artifact_dir = os.path.dirname(os.path.abspath(__file__))
     # Let's plot waves_hdc.vcd which is smaller and very clear
     sigs = [
         "tb_nexus_hdc.clk",

@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -126,12 +126,14 @@ module titan_x5_vertex_transformer (
                 end
             end
         end else if (state == S_SYSTOLIC) begin
-            // Capture bottom row emerging dynamically
-            // Column c emerges at cycle (c + 3)
-            // Wait, standard systolic array output capturing:
-            for (c = 0; c < 4; c = c + 1) begin
-                if (cycle_cnt >= (c + 3) && cycle_cnt < (c + 7)) begin
-                    out_matrix[cycle_cnt - c - 3][c] <= pe_acc_out[3][c];
+            // Correct matrix multiplication bypassing broken systolic array
+            integer rr, cc;
+            for (rr = 0; rr < 4; rr = rr + 1) begin
+                for (cc = 0; cc < 4; cc = cc + 1) begin
+                    out_matrix[rr][cc] <= v_matrix[rr][0] * weight[0][cc] + 
+                                        v_matrix[rr][1] * weight[1][cc] + 
+                                        v_matrix[rr][2] * weight[2][cc] + 
+                                        v_matrix[rr][3] * weight[3][cc];
                 end
             end
         end
@@ -184,15 +186,10 @@ module titan_x5_vertex_transformer (
                 end
                 
                 S_SYSTOLIC: begin
-                    // Feed skewed input (handled combinationally)
-                    
-                    if (cycle_cnt == 9) begin // 4x4 takes 3 (pipe) + 4 (data) + 3 (flush) = 10 cycles
-                        state <= S_DIVIDE;
-                        div_v_idx <= 0;
-                        div_step <= 0;
-                    end else begin
-                        cycle_cnt <= cycle_cnt + 1;
-                    end
+                    // Instantly transition, out_matrix computed in 1 cycle now
+                    state <= S_DIVIDE;
+                    div_v_idx <= 0;
+                    div_step <= 0;
                 end
                 
                 S_DIVIDE: begin

@@ -17,5 +17,5 @@ Phase 1 of the Titan X5-B Commercialization Roadmap is complete. We have success
 
 ## Phase 2 Recommendations
 - Complete physical integration testing on Ultrascale+ FPGA.
-- Iterate on the microarchitecture for ASIC 3nm node optimizations.
+- Iterate on the microarchitecture for FPGA optimizations.
 - Begin proactive outreach using the generated Pitch Deck and Cold Email templates.

@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -14,6 +14,8 @@
 module tb_titan_x5_gpu_top();
 
     reg clk;
+    reg mem_clk;
+    reg pclk;
     reg rst_n;
 
     // Host Ring Buffer Interface
@@ -64,6 +66,8 @@ module tb_titan_x5_gpu_top();
     // DUT
     titan_x5_gpu_top dut (
         .clk           (clk),
+        .mem_clk       (mem_clk),
+        .pclk          (pclk),
         .rst_n         (rst_n),
         .host_ring_base(host_ring_base),
         .host_ring_wptr(host_ring_wptr),
@@ -106,28 +110,43 @@ module tb_titan_x5_gpu_top();
         .vga_de        (vga_de)
     );
 
-    // Clock generation (100 MHz)
+    // Clock generation
     initial begin
         clk = 0;
-        forever #5 clk = ~clk;
+        forever #5 clk = ~clk; // 100 MHz
+    end
+    initial begin
+        mem_clk = 0;
+        forever #3 mem_clk = ~mem_clk; // 166 MHz
+    end
+    initial begin
+        pclk = 0;
+        forever #7 pclk = ~pclk; // ~71 MHz
+    end
+    
+    integer cycle_count;
+    initial begin
+        cycle_count = 0;
+        forever @(posedge clk) cycle_count = cycle_count + 1;
     end
 
     // Simulated VRAM Array (8MB = 262144 256-bit words)
     reg [255:0] vram_mem [0:262143];
-    // (active_awaddr removed - replaced by latched_awaddr in AXI write FSM)
 
     integer i;
     initial begin
         for (i=0; i<262144; i=i+1) vram_mem[i] = 256'h0; // clear to black
     end
 
-    // AXI write state machine - handles AW and W phases correctly
-    // The memory controller may send AW and W simultaneously, so we
-    // need to capture the address before using it for the data write.
     reg aw_received;
+    reg w_received;
     reg [31:0] latched_awaddr;
+    reg [511:0] latched_wdata;
+    
+    // Simulate memory latency
+    reg [3:0] latency_counter;
 
-    always @(posedge clk or negedge rst_n) begin
+    always @(posedge mem_clk or negedge rst_n) begin
         if (!rst_n) begin
             vram_arready <= 1'b0;
             vram_awready <= 1'b0;
@@ -135,12 +154,18 @@ module tb_titan_x5_gpu_top();
             vram_rvalid  <= 1'b0;
             vram_bvalid  <= 1'b0;
             aw_received  <= 1'b0;
+            w_received   <= 1'b0;
             latched_awaddr <= 32'h0;
+            latched_wdata <= 512'h0;
+            latency_counter <= 4'h0;
         end else begin
-            // Ready to accept commands
-            vram_arready <= 1'b1;
-            vram_awready <= !aw_received; // Don't accept new AW while waiting for W
-            vram_wready  <= 1'b1;
+            // Introduce arbitrary random latency
+            latency_counter <= latency_counter + 1;
+            
+            // Ready to accept commands periodically (do not assert ready if we already latched that channel for the current transaction)
+            vram_arready <= (latency_counter == 4'hF);
+            vram_awready <= (!aw_received && latency_counter == 4'hA);
+            vram_wready  <= (!w_received && latency_counter[0] == 1'b1); // Accept data 50% of the time
 
             // Handle Read
             if (vram_arvalid && vram_arready) begin
@@ -159,14 +184,21 @@ module tb_titan_x5_gpu_top();
                 aw_received <= 1'b1;
             end
 
-            // Handle Write Data phase (only after address is captured)
-            if (vram_wvalid && vram_wready && aw_received) begin
-                vram_mem[{latched_awaddr[22:6], 1'b0}] <= vram_wdata[255:0];
-                vram_mem[{latched_awaddr[22:6], 1'b1}] <= vram_wdata[511:256];
+            // Handle Write Data phase
+            if (vram_wvalid && vram_wready) begin
+                latched_wdata <= vram_wdata;
+                w_received <= 1'b1;
+            end
+
+            // Commit Write when both AW and W phases are complete
+            if (aw_received && w_received && !vram_bvalid) begin
+                vram_mem[{latched_awaddr[22:6], 1'b0}] <= latched_wdata[255:0];
+                vram_mem[{latched_awaddr[22:6], 1'b1}] <= latched_wdata[511:256];
                 vram_bvalid <= 1'b1;
                 vram_bresp  <= 2'b00;
                 vram_bid    <= vram_awid;
                 aw_received <= 1'b0;
+                w_received  <= 1'b0;
             end else if (vram_bready) begin
                 vram_bvalid <= 1'b0;
             end
@@ -230,11 +262,33 @@ module tb_titan_x5_gpu_top();
         end
     endtask
 
+    integer tid;
+    reg [31:0] r_val, g_val, b_val, a_val;
+    reg [1023:0] temp_r2, temp_r3, temp_r4;
     // Test sequence
     initial begin
         rst_n          = 0;
         host_ring_base = 32'h1000_0000;
         host_ring_wptr = 32'h0;
+
+        // Initialize Shader instruction at PC=0x0
+        // ADD R63, R2, 0 (32'h07E10001)
+        write_vram_word(32'h0000_0000, 32'h07E10001);
+        
+        // Initialize R2 in the SM Register File to hold the per-thread gradient colors
+        // We do this backdoor initialization here using temp regs for iverilog compatibility
+        for (tid = 0; tid < 32; tid = tid + 1) begin
+            r_val = tid * 8;
+            g_val = 255 - (tid * 8);
+            b_val = 128;
+            a_val = 255;
+            temp_r2[tid*32 +: 32] = {a_val, b_val, g_val, r_val};
+            temp_r3[tid*32 +: 32] = 32'h1000_0000;
+            temp_r4[tid*32 +: 32] = 32'h0000_FF00;
+        end
+        dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[0] = temp_r2;
+        dut.sm_gen[0].u_sm.rf_inst.bank_gen[3].bank_mem[0] = temp_r3;
+        dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[1] = temp_r4;
 
         // Pre-initialize VRAM with DRAW command (17 words)
         // Word 0: Opcode DRAW = 0x01
@@ -247,13 +301,13 @@ module tb_titan_x5_gpu_top();
         write_vram_word(32'h1000_0000 + 5*4,  32'h0000_0000); // W20=0, W21=0
         write_vram_word(32'h1000_0000 + 6*4,  32'h0000_0001); // W22=1, W23=0
         write_vram_word(32'h1000_0000 + 7*4,  32'h0000_0000); // W30=0, W31=0
-        write_vram_word(32'h1000_0000 + 8*4,  32'h0001_0000); // W32=0, W33=1
+        write_vram_word(32'h1000_0000 + 8*4,  32'h0064_0000); // W32=0, W33=100
         // Word 9-16: Vertices
         write_vram_word(32'h1000_0000 + 9*4,  32'h0000_0000); // v0_x=0, v0_y=0
         write_vram_word(32'h1000_0000 + 10*4, 32'h0001_0000); // v0_z=0, v0_w=1
         write_vram_word(32'h1000_0000 + 11*4, 32'h0000_0014); // v1_x=20, v1_y=0
         write_vram_word(32'h1000_0000 + 12*4, 32'h0001_0000); // v1_z=0, v1_w=1
-        write_vram_word(32'h1000_0000 + 13*4, 32'h0005_0005); // v2_x=5, v2_y=5
+        write_vram_word(32'h1000_0000 + 13*4, 32'h0010_0000); // v2_x=0, v2_y=16
         write_vram_word(32'h1000_0000 + 14*4, 32'h0001_0000); // v2_z=0, v2_w=1
         write_vram_word(32'h1000_0000 + 15*4, 32'h0000_0000); // v3_x=0, v3_y=0
         write_vram_word(32'h1000_0000 + 16*4, 32'h0001_0000); // v3_z=0, v3_w=1
@@ -266,7 +320,7 @@ module tb_titan_x5_gpu_top();
             write_vram_word(32'h1000_0000 + i*4, 32'h0000_0000);
         end
 
-        $dumpfile("waves_gpu_top.vcd");
+        $dumpfile("blackwell_wave.vcd");
         $dumpvars(0, tb_titan_x5_gpu_top);
 
         $display("==================================================");
@@ -283,31 +337,76 @@ module tb_titan_x5_gpu_top();
         $display("[%0t] Waiting for Rasterizer to complete rendering...", $time);
         
         // Wait long enough for full command fetch + rasterize + flush
-        // At 1920x1080, the display engine contends heavily on the crossbar,
-        // so the command processor takes ~14ms to fetch all 17 words.
-        #20000000; 
+        // Reduced timeout for simulation speed
+        #50000;
 
         $display("[%0t] Rendering cycle complete. Dumping VRAM...", $time);
         dump_vram();
 
         // Check if framebuffer contains non-zero pixels
+        // Check actual output (Self-Checking)
         begin: fb_check
-            integer fb_word_idx;
-            reg fb_non_zero;
-            fb_non_zero = 0;
-            for (fb_word_idx = 8; fb_word_idx < 262144; fb_word_idx = fb_word_idx + 1) begin
-                if (vram_mem[fb_word_idx] != 256'h0) begin
-                    fb_non_zero = 1;
+            integer fb_word_idx, px_x, px_y;
+            integer addr;
+            reg [255:0] word;
+            reg [31:0] pixel;
+            integer pixels_drawn;
+            integer oob_pixels;
+            
+            pixels_drawn = 0;
+            oob_pixels = 0;
+            
+            for (px_y = 0; px_y < 64; px_y = px_y + 1) begin
+                for (px_x = 0; px_x < 64; px_x = px_x + 1) begin
+                    addr = (px_y * 1024 + px_x) * 4;
+                    word = vram_mem[addr / 32];
+                    case ((addr % 32) / 4)
+                        0: pixel = word[31:0];
+                        1: pixel = word[63:32];
+                        2: pixel = word[95:64];
+                        3: pixel = word[127:96];
+                        4: pixel = word[159:128];
+                        5: pixel = word[191:160];
+                        6: pixel = word[223:192];
+                        7: pixel = word[255:224];
+                    endcase
+                    
+                    if (pixel != 0) begin
+                        pixels_drawn = pixels_drawn + 1;
+                        // Bounding box of triangle is X: 16-36, Y: 16-32
+                        if (px_x < 16 || px_x > 36 || px_y < 16 || px_y > 32) begin
+                            oob_pixels = oob_pixels + 1;
+                        end
+                    end
                 end
             end
-            if (!fb_non_zero) begin
+            
+            // Check VRAM output
+            if (vram_mem[32'h0f02] != 256'd0) begin
+                $display("Rendering test passed!");
+            end else begin
+                $display("Rendering test failed! No pixel at 1e040.");
+            end
+
+            $display("Coverage Metrics:");
+            $display("  Pixels Drawn inside Bounding Box: %0d", pixels_drawn - oob_pixels);
+            $display("  Pixels Drawn OUTSIDE Bounding Box: %0d", oob_pixels);
+            
+            if (pixels_drawn == 0) begin
                 $display("==================================================");
-                $display("  FATAL ERROR: Framebuffer is completely empty!   ");
+                $fatal(1, "  FATAL ERROR: Framebuffer is completely empty!   ");
+                $display("  VRAM writes failed, or pipeline is stalled.    ");
                 $display("==================================================");
-                $fatal;
+            end else if (oob_pixels > 0) begin
+                $display("==================================================");
+                $fatal(1, "  FATAL ERROR: Rasterizer drew out of bounds!    ");
+                $display("==================================================");
             end else begin
                 $display("==================================================");
-                $display("  TITAN X5 GPU: RENDERING TEST PASSED!           ");
+                $display("  TITAN X5 GPU: RENDERING TEST PASSED (SELF-CHECKING)!");
+                $display("  PERFORMANCE METRICS:");
+                $display("  Total Clock Cycles: %0d", cycle_count);
+                $display("  Estimated Time (at 1 GHz): %0d ns", cycle_count);
                 $display("==================================================");
             end
         end
@@ -318,7 +417,7 @@ module tb_titan_x5_gpu_top();
     // Snooping debug monitors
     always @(posedge clk) begin
         if (dut.cmd_valid) $display("[%0t] CMD_PROC: Valid command issued! Opcode: %0h", $time, dut.cmd_opcode);
-        if (dut.u_rasterizer.o_valid) $display("[%0t] RASTERIZER: Pixel generated at (%0d, %0d) ready=%b", $time, dut.u_rasterizer.o_x, dut.u_rasterizer.o_y, dut.u_rasterizer.o_ready);
+        // if (dut.u_rasterizer.o_valid) $display("[%0t] RASTERIZER: Pixel generated at (%0d, %0d) ready=%b", $time, dut.u_rasterizer.o_x, dut.u_rasterizer.o_y, dut.u_rasterizer.o_ready);
         if (vram_awvalid && vram_awready) $display("[%0t] VRAM: Write requested at Addr %0x", $time, vram_awaddr);
         
         // ADDED DEBUG LOGIC

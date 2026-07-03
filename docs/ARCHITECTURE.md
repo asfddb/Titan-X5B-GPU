@@ -10,7 +10,7 @@
 
 ## 1. Overview
 
-Titan X5-B is a Blackwell-class graphics processing unit architecture
+Titan X5-B is a SIMT-class educational graphics processing unit architecture
 implemented in 9,983 lines of SystemVerilog across 57 synthesizable
 modules. The design targets educational, research, and commercial
 display-compute SoC applications where a full Arm Mali or Imagination
@@ -20,7 +20,7 @@ PowerVR license is cost-prohibitive or politically unavailable.
 
 | Feature | Value |
 |---------|-------|
-| Process Node (target) | TSMC 3nm GAAFET (theoretical) / Artix-7 (FPGA) |
+| Target Environment | Simulation / FPGA |
 | Total Logic Cells (Yosys) | 3,030,603 |
 | Flip-Flops | 530,000+ |
 | Wire Bits | 3,230,370 |

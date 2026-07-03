@@ -7,20 +7,17 @@ Download and install the [OSS CAD Suite](https://github.com/YosysHQ/oss-cad-suit
 - **GTKWave** — Waveform viewing
 - **Yosys** — Logic synthesis
 
-## Quick Test (Windows PowerShell)
+## Quick Test
 
-```powershell
-cd c:\Users\singb\Downloads\gpuuhj
+```bash
+cd Titan-X5B-GPU
 
-# Set PATH
-$env:PATH = "C:\tools\oss-cad-suite\oss-cad-suite\bin;$env:PATH"
-
-# Compile all 57 Verilog files
-iverilog -g2012 -I rtl -o tb/ultimate_blackwell.vvp `
-  tb/ultimate_blackwell_tb.v rtl/titan_x5_gpu_top.v `
-  rtl/tensor/*.v rtl/raytracing/*.v rtl/memory/*.v `
-  rtl/graphics/*.v rtl/interconnect/*.v rtl/core/*.v `
-  rtl/control/*.v rtl/sr/*.v rtl/power/*.v `
+# Compile all Verilog files
+iverilog -g2012 -I rtl -o tb/ultimate_blackwell.vvp \
+  tb/ultimate_blackwell_tb.v rtl/titan_x5_gpu_top.v \
+  rtl/tensor/*.v rtl/raytracing/*.v rtl/memory/*.v \
+  rtl/graphics/*.v rtl/interconnect/*.v rtl/core/*.v \
+  rtl/control/*.v rtl/sr/*.v rtl/power/*.v \
   rtl/display/*.v rtl/common/*.v
 
 # Run simulation
@@ -50,7 +47,7 @@ Time=60000  | CLK=0 | RST=1 | Host PTR=10000010 | VRAM_WVALID=0 | VRAM_RVALID=0
 
 After simulation, a VCD (Value Change Dump) file is generated at `tb/blackwell_wave.vcd`.
 
-```powershell
+```bash
 gtkwave tb/blackwell_wave.vcd
 ```
 
@@ -62,7 +59,7 @@ In GTKWave:
 
 ## Running Synthesis
 
-```powershell
+```bash
 yosys -p "read_verilog -sv rtl/tensor/titan_x6_tensor_core_array.v rtl/tensor/titan_x5_fp16_mul.v; synth -top titan_x6_tensor_core_array; stat"
 ```
 

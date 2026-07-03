@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -21,13 +21,15 @@ module titan_x5_l1_cache #(
     parameter LINE_SIZE  = 64,
     parameter WAYS       = 4,
     parameter SETS       = 128,
-    parameter MSHR_ENTRIES = 4
+    parameter MSHR_ENTRIES = 4,
+    parameter NUM_WARPS  = 8
 )(
     input  wire clk,
     input  wire rst_n,
 
     // core interface
     input  wire                    req_valid,
+    input wire [$clog2(NUM_WARPS)-1:0] req_warp_id,
     input wire [ADDR_WIDTH-1:0] req_addr,
     input wire [DATA_WIDTH-1:0] req_wdata,
     input  wire                    req_write,
@@ -35,6 +37,7 @@ module titan_x5_l1_cache #(
 
     output reg                     resp_valid,
     output reg [DATA_WIDTH-1:0] resp_rdata,
+    output reg [NUM_WARPS-1:0]     stall_out,
 
     // axi4 master interface
     output wire [ADDR_WIDTH-1:0] m_axi_awaddr,
@@ -89,8 +92,9 @@ module titan_x5_l1_cache #(
     reg [$clog2(WAYS)-1:0]lru_array  [0:SETS-1][0:WAYS-1];
 
     // mshr arrays
-    (* ram_style="block" *) reg                   mshr_valid [0:MSHR_ENTRIES-1];
-    (* ram_style="block" *) reg [ADDR_WIDTH-1:0]  mshr_addr  [0:MSHR_ENTRIES-1];
+    reg                   mshr_valid [0:MSHR_ENTRIES-1];
+    reg [ADDR_WIDTH-1:0]  mshr_addr  [0:MSHR_ENTRIES-1];
+    reg [$clog2(NUM_WARPS)-1:0] mshr_warp_id [0:MSHR_ENTRIES-1];
 
     wire [TAG_BITS-1:0]   req_tag   = req_addr[ADDR_WIDTH-1 : OFFSET_BITS+INDEX_BITS];
     wire [INDEX_BITS-1:0] req_index = req_addr[OFFSET_BITS+INDEX_BITS-1 : OFFSET_BITS];
@@ -112,13 +116,15 @@ module titan_x5_l1_cache #(
             end
             for (i = 0; i < MSHR_ENTRIES; i = i + 1) begin
                 mshr_valid[i] <= 1'b0;
+                mshr_warp_id[i] <= 0;
             end
+            stall_out <= 0;
         end else begin
             // default assignments
             req_ready <= 1'b1; // accept requests if mshr isn't full
             resp_valid <= 1'b0;
 
-            if (req_valid && req_ready) begin
+            if (req_valid && req_ready) begin : process_req
                 // basic hit detection (combinational in practice, simplified here)
                 reg hit;
                 reg [$clog2(WAYS)-1:0] hit_way;
@@ -141,7 +147,7 @@ module titan_x5_l1_cache #(
                         resp_rdata <= data_array[req_index][hit_way][DATA_WIDTH-1:0]; 
                     end
                     // lru update omitted for brevity
-                end else begin
+                end else begin : allocate_mshr
                     // miss - allocate mshr
                     reg mshr_alloc;
                     mshr_alloc = 1'b0;
@@ -149,6 +155,8 @@ module titan_x5_l1_cache #(
                         if (!mshr_valid[i] && !mshr_alloc) begin
                             mshr_valid[i] <= 1'b1;
                             mshr_addr[i] <= req_addr;
+                            mshr_warp_id[i] <= req_warp_id;
+                            stall_out[req_warp_id] <= 1'b1;
                             mshr_alloc = 1'b1;
                             
                             mem_req_valid <= 1'b1;
@@ -169,6 +177,7 @@ module titan_x5_l1_cache #(
                 for (i = 0; i < MSHR_ENTRIES; i = i + 1) begin
                     if (mshr_valid[i]) begin
                         mshr_valid[i] <= 1'b0;
+                        stall_out[mshr_warp_id[i]] <= 1'b0;
                         // allocate to way 0 (simplification)
                         valid_array[mshr_addr[i][OFFSET_BITS+INDEX_BITS-1:OFFSET_BITS]][0] <= 1'b1;
                         tag_array[mshr_addr[i][OFFSET_BITS+INDEX_BITS-1:OFFSET_BITS]][0] <= mshr_addr[i][ADDR_WIDTH-1:OFFSET_BITS+INDEX_BITS];

@@ -1,6 +1,0 @@
-<testsuites name="results">
-  <testsuite name="all" package="all">
-    <property name="random_seed" value="1780657630" />
-    <testcase name="test_system_vga_reconstruction" classname="test_system" file="C:\Users\singb\Downloads\gpuuhj\tb\test_system.py" lineno="8" time="16.36228585243225" sim_time_ns="230780.0" ratio_time="14104.386274714458" />
-  </testsuite>
-</testsuites>

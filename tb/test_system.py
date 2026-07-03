@@ -1,3 +1,11 @@
+# ============================================================================
+# Copyright (c) 2026 Adhiraj
+# 
+# This file is part of the Titan X5-B GPU project.
+# 
+# Licensed under CERN-OHL-S-2.0.
+# See LICENSE for details.
+# ============================================================================
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer
@@ -50,27 +58,44 @@ async def test_system_vga_reconstruction(dut):
         offset = 4 + (i*4 + i)*2 # Word 0 is 4 bytes. Then offset into 32 byte block.
         cmd_data_fixed[offset:offset+2] = (1).to_bytes(2, 'little', signed=True) # Identity
     
-    # Vertices (4x4 Matrix). v0, v1, v2, v3
-    # v0 = (0, 0, 0, 1)
-    # v1 = (20, 0, 0, 1)
-    # v2 = (5, 5, 0, 1)
-    # v3 = (0, 0, 0, 1)
+    # The hardware expects vertices as column vectors!
+    # v_matrix[r][c] corresponds to i_vertices[(r*4+c)*16].
+    # Row 0: X0, X1, X2, X3
+    # Row 1: Y0, Y1, Y2, Y3
+    # Row 2: Z0, Z1, Z2, Z3
+    # Row 3: W0, W1, W2, W3
+    
+    # Coordinates:
+    # v0 = (0, 0, 0, 100)
+    # v1 = (10, 0, 0, 100)
+    # v2 = (5, 10, 0, 100)
+    # v3 = (0, 0, 0, 100)
+    
     v_base = 4 + 32
     
-    # v0
-    cmd_data_fixed[v_base+0:v_base+2] = (0).to_bytes(2, 'little', signed=True)
-    cmd_data_fixed[v_base+2:v_base+4] = (0).to_bytes(2, 'little', signed=True)
-    cmd_data_fixed[v_base+6:v_base+8] = (1).to_bytes(2, 'little', signed=True) # W
-    # v1
-    cmd_data_fixed[v_base+8:v_base+10] = (20).to_bytes(2, 'little', signed=True)
-    cmd_data_fixed[v_base+10:v_base+12] = (0).to_bytes(2, 'little', signed=True)
-    cmd_data_fixed[v_base+14:v_base+16] = (1).to_bytes(2, 'little', signed=True) # W
-    # v2
-    cmd_data_fixed[v_base+16:v_base+18] = (5).to_bytes(2, 'little', signed=True)
-    cmd_data_fixed[v_base+18:v_base+20] = (5).to_bytes(2, 'little', signed=True)
-    cmd_data_fixed[v_base+22:v_base+24] = (1).to_bytes(2, 'little', signed=True) # W
-    # v3
-    cmd_data_fixed[v_base+30:v_base+32] = (1).to_bytes(2, 'little', signed=True) # W
+    # Row 0 (X coordinates)
+    cmd_data_fixed[v_base+0:v_base+2] = (0).to_bytes(2, 'little', signed=True)   # X0
+    cmd_data_fixed[v_base+2:v_base+4] = (10).to_bytes(2, 'little', signed=True)  # X1
+    cmd_data_fixed[v_base+4:v_base+6] = (5).to_bytes(2, 'little', signed=True)   # X2
+    cmd_data_fixed[v_base+6:v_base+8] = (0).to_bytes(2, 'little', signed=True)   # X3
+    
+    # Row 1 (Y coordinates)
+    cmd_data_fixed[v_base+8:v_base+10] = (0).to_bytes(2, 'little', signed=True)  # Y0
+    cmd_data_fixed[v_base+10:v_base+12] = (0).to_bytes(2, 'little', signed=True) # Y1
+    cmd_data_fixed[v_base+12:v_base+14] = (10).to_bytes(2, 'little', signed=True) # Y2
+    cmd_data_fixed[v_base+14:v_base+16] = (0).to_bytes(2, 'little', signed=True) # Y3
+    
+    # Row 2 (Z coordinates)
+    cmd_data_fixed[v_base+16:v_base+18] = (0).to_bytes(2, 'little', signed=True) # Z0
+    cmd_data_fixed[v_base+18:v_base+20] = (0).to_bytes(2, 'little', signed=True) # Z1
+    cmd_data_fixed[v_base+20:v_base+22] = (0).to_bytes(2, 'little', signed=True) # Z2
+    cmd_data_fixed[v_base+22:v_base+24] = (0).to_bytes(2, 'little', signed=True) # Z3
+    
+    # Row 3 (W coordinates)
+    cmd_data_fixed[v_base+24:v_base+26] = (100).to_bytes(2, 'little', signed=True) # W0
+    cmd_data_fixed[v_base+26:v_base+28] = (100).to_bytes(2, 'little', signed=True) # W1
+    cmd_data_fixed[v_base+28:v_base+30] = (100).to_bytes(2, 'little', signed=True) # W2
+    cmd_data_fixed[v_base+30:v_base+32] = (100).to_bytes(2, 'little', signed=True) # W3
     
     ram.write(0x1000_0000, cmd_data_fixed)
     dut.host_ring_wptr.value = 17
@@ -93,7 +118,7 @@ async def test_system_vga_reconstruction(dut):
     # We will run for a max of 20000 cycles to capture the frame
     # since 32x32 = 1024 pixels + porches = ~1500 cycles per frame
     
-    timeout_cycles = 25000
+    timeout_cycles = 50000
     cycles = 0
     
     while cycles < timeout_cycles:

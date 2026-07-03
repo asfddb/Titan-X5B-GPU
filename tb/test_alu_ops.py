@@ -1,3 +1,11 @@
+# ============================================================================
+# Copyright (c) 2026 Adhiraj
+# 
+# This file is part of the Titan X5-B GPU project.
+# 
+# Licensed under CERN-OHL-S-2.0.
+# See LICENSE for details.
+# ============================================================================
 import cocotb
 from cocotb.clock import Clock
 from cocotb.triggers import RisingEdge, Timer

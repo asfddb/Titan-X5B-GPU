@@ -1,6 +1,6 @@
 # Titan X5-B GPU — Product Brief
 
-**A 3-Million-Gate Open-Source Blackwell-Class GPU, Commercially Licenseable**
+**A 3-Million-Gate Open-Source SIMT-Class Educational GPU**
 
 ---
 
@@ -12,9 +12,7 @@ of SystemVerilog across 57 synthesizable modules. It synthesizes to
 with VPI, and reconstructs real VGA output from system-level
 simulation. It is FPGA-proven on Artix-7 at 50 MHz.
 
-The IP is **dual-licensed**: free for research and education under
-CERN-OHL-S-2.0, and available under a separate commercial license
-for use in closed-source products.
+The IP is licensed under CERN-OHL-S-2.0.
 
 ---
 
@@ -22,7 +20,7 @@ for use in closed-source products.
 
 | Feature | Specification |
 |---------|---------------|
-| Architecture | Blackwell-class, SIMT |
+| Architecture | SIMT-class educational |
 | Streaming Multiprocessors | 4 × (32-thread SIMT) |
 | ALU | INT16 + FP16, multi-cycle |
 | Tensor Cores | 16 × 16 systolic, 256 PEs, FP16 MAC |
@@ -107,19 +105,7 @@ for use in closed-source products.
 
 ## Licensing
 
-**Dual-licensed:**
-
-1. **Open Source:** CERN-OHL-S-2.0 (free for research, education, personal use; derivative works must remain open)
-
-2. **Commercial License:** Available separately for closed-source products. Includes warranty, indemnification, support, and no open-source obligation.
-
-**Pricing models:**
-- Perpetual + Royalty: $150K–$400K upfront + 0.5%–2% per-unit royalty
-- Annual Subscription: $50K–$150K/year per product line
-- Source Buyout: $300K–$1M one-time
-- Evaluation License: Free, 90-day, under NDA
-
-See `COMMERCIAL.md` for full details.
+Licensed under CERN-OHL-S-2.0. (commercial use permitted if derivatives remain open under the same license).
 
 ---
 
@@ -127,17 +113,10 @@ See `COMMERCIAL.md` for full details.
 
 ```
 Adhiraj
-[Your LLP Name]
 India
 
-Email:    adhiraj@[your-domain]
-Web:      https://[your-domain]
 GitHub:   https://github.com/asfddb/Titan-X5B-GPU
-LinkedIn: https://linkedin.com/in/[your-handle]
 ```
-
-For commercial license inquiries, email with subject:
-`"Commercial License Inquiry — Titan X5-B GPU"`
 
 ---
 

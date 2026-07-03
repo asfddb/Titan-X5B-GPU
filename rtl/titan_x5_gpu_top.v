@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -17,6 +17,8 @@ module titan_x5_gpu_top #(
     parameter VGA_V_VISIBLE = 12'd1080
 ) (
     input  wire        clk,
+    input  wire        mem_clk,
+    input  wire        pclk,
     input  wire        rst_n,
 
     // host interface (drives command processor ring buffer)
@@ -91,6 +93,8 @@ module titan_x5_gpu_top #(
     wire [1:0] xbar_s_req_ready;
     wire [1:0] xbar_s_resp_valid;
     wire [2*32-1:0]  xbar_s_resp_rdata;
+    wire [2*5-1:0]   xbar_s_req_id;
+    wire [2*5-1:0]   xbar_s_resp_id;
 
     // helper wires for modules
     wire [31:0] sm_icache_addr [0:3];
@@ -213,7 +217,9 @@ module titan_x5_gpu_top #(
         .s_req_write(xbar_s_req_write),
         .s_req_ready(xbar_s_req_ready),
         .s_resp_valid(xbar_s_resp_valid),
-        .s_resp_rdata(xbar_s_resp_rdata)
+        .s_resp_rdata(xbar_s_resp_rdata),
+        .s_req_id(xbar_s_req_id),
+        .s_resp_id(xbar_s_resp_id)
     );
 
     wire [511:0] vt_payload;
@@ -259,6 +265,10 @@ module titan_x5_gpu_top #(
     );
 
     // 2. Streaming Multiprocessors (4x)
+    wire [3:0] sm_shader_wb_valid;
+    wire [5:0] sm_shader_wb_reg [0:3];
+    wire [1023:0] sm_shader_wb_data [0:3];
+    
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_gen
@@ -267,6 +277,9 @@ module titan_x5_gpu_top #(
                 .rst_n(rst_n),
                 .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),
                 .l1_dcache_addr(sm_dcache_addr[gi]), .l1_dcache_wdata(sm_dcache_wdata[gi]), .l1_dcache_req(sm_dcache_req[gi]), .l1_dcache_we(sm_dcache_we[gi]), .l1_dcache_rdata(xbar_m_resp_rdata[(13+gi)*32 +: 32]), .l1_dcache_rvalid(xbar_m_resp_valid[13+gi]),
+                .shader_wb_valid(sm_shader_wb_valid[gi]),
+                .shader_wb_reg(sm_shader_wb_reg[gi]),
+                .shader_wb_data(sm_shader_wb_data[gi]),
                 .warp_active      (8'hFF), .warp_pc_in(256'h0)
             );
         end
@@ -282,19 +295,22 @@ module titan_x5_gpu_top #(
     wire rast_i_valid = vt_valid;
     assign vt_ready = rast_i_ready;
     wire [31:0] rast_i_color = 32'h000000FF; // Solid Black Triangle
+    wire [511:0] vectorized_z;
+    
     titan_x5_rasterizer #(.COORD_W(16), .WEIGHT_W(32)) u_rasterizer (
         .clk    (clk), .rst_n(rst_n),
         .i_valid(rast_i_valid), .i_ready(rast_i_ready),
         .v0_x   (vt_v0_x), .v0_y(vt_v0_y),
         .v1_x   (vt_v1_x), .v1_y(vt_v1_y),
         .v2_x   (vt_v2_x), .v2_y(vt_v2_y),
+        .v0_z   (32'd0), .v1_z(32'd0), .v2_z(32'd0),
         .o_valid(rast_o_valid), .o_ready(rast_o_ready),
-        .o_x(rast_o_x), .o_y(rast_o_y), .o_w0(), .o_w1(), .o_w2()
+        .o_x(rast_o_x), .o_y(rast_o_y), .o_w0(), .o_w1(), .o_w2(),
+        .o_z(vectorized_z)
     );
 
     // Bypass TMU and SR Engine for the fully Vectorized Z-Pass / Solid Fill Pipeline
     wire [511:0] vectorized_color = {16{32'h000000FF}}; // Solid Black Testing
-    wire [511:0] vectorized_z = {16{32'h00000000}};
     
     assign rast_o_ready = rop_o_ready; // Directly link Rasterizer to ROP
 
@@ -369,6 +385,9 @@ module titan_x5_gpu_top #(
                     .i_valid         (rast_o_valid), .i_ready(rop_o_ready),
                     .i_x             (rast_o_x), .i_y(rast_o_y),
                     .i_z             (vectorized_z), .i_color(vectorized_color),
+                    .shader_wb_valid (sm_shader_wb_valid[gi]),
+                    .shader_wb_reg   (sm_shader_wb_reg[gi]),
+                    .shader_wb_data  (sm_shader_wb_data[gi]),
                     .cfg_depth_func  (3'd7),  // always pass
                     .cfg_depth_write (1'b0),
                     .cfg_stencil_func(3'd7),
@@ -388,6 +407,9 @@ module titan_x5_gpu_top #(
                     .i_valid         (16'b0), .i_ready(),
                     .i_x             (16'h0), .i_y(16'h0),
                     .i_z             (512'h0), .i_color(512'h0),
+                    .shader_wb_valid (sm_shader_wb_valid[gi]),
+                    .shader_wb_reg   (sm_shader_wb_reg[gi]),
+                    .shader_wb_data  (sm_shader_wb_data[gi]),
                     .cfg_depth_func  (3'd7),
                     .cfg_depth_write (1'b0),
                     .cfg_stencil_func(3'd7),
@@ -435,6 +457,7 @@ module titan_x5_gpu_top #(
         .ctrl_req_wdata(xbar_s_req_wdata[1*32 +: 32]), .ctrl_req_write(xbar_s_req_write[1]), 
         .ctrl_req_ready(xbar_s_req_ready[1]), .ctrl_resp_valid(xbar_s_resp_valid[1]), 
         .ctrl_resp_rdata(xbar_s_resp_rdata[1*32 +: 32]),
+        .ctrl_req_id(xbar_s_req_id[1*5 +: 5]), .ctrl_resp_id(xbar_s_resp_id[1*5 +: 5]),
         .dma_interrupt(dma_interrupt), 
         // master interface connected to crossbar master 17
         .mem_req_valid(dma_mem_req_valid), .mem_req_addr(dma_mem_req_addr), .mem_req_write(dma_mem_req_write),
@@ -451,21 +474,69 @@ module titan_x5_gpu_top #(
         .clk(clk), .rst_n(rst_n), .event_pulses(32'h0), .read_en(1'b0), .read_addr(5'h0), .read_data()
     );
 
-    // 11. Memory Controller
+    // 11. Memory Controller (with CDC FIFOs for core_clk <-> mem_clk)
+    wire        mc_req_fifo_full, mc_req_fifo_empty;
+    wire [73:0] mc_req_fifo_rdata;
     
+    titan_x5_async_fifo #(.DATA_WIDTH(74), .DEPTH_LOG2(6)) req_cdc_fifo (
+        .wclk(clk), .wrst_n(rst_n),
+        .winc(xbar_s_req_valid[0] && !mc_req_fifo_full),
+        .wdata({xbar_s_req_addr[0*32 +: 32], xbar_s_req_wdata[0*32 +: 32], 4'h0, xbar_s_req_id[0*5 +: 5], xbar_s_req_write[0]}),
+        .wfull(mc_req_fifo_full),
+        .rclk(mem_clk), .rrst_n(rst_n),
+        .rinc(mc_cdc_req_ready && !mc_req_fifo_empty),
+        .rdata(mc_req_fifo_rdata),
+        .rempty(mc_req_fifo_empty)
+    );
+    assign xbar_s_req_ready[0] = !mc_req_fifo_full;
+    
+    wire mc_cdc_req_valid = !mc_req_fifo_empty;
+    wire mc_cdc_req_ready;
+    wire [31:0] mc_cdc_req_addr = mc_req_fifo_rdata[73:42];
+    wire [31:0] mc_cdc_req_wdata = mc_req_fifo_rdata[41:10];
+    wire [3:0]  mc_cdc_req_len = mc_req_fifo_rdata[9:6];
+    wire [4:0]  mc_cdc_req_id = mc_req_fifo_rdata[5:1];
+    wire        mc_cdc_req_write = mc_req_fifo_rdata[0];
+    
+    wire        mc_cdc_resp_valid;
+    wire [4:0]  mc_cdc_resp_id;
+    wire [31:0] mc_cdc_resp_rdata;
+    
+    wire        mc_resp_fifo_full, mc_resp_fifo_empty;
+    wire [36:0] mc_resp_fifo_rdata;
+    
+    titan_x5_async_fifo #(.DATA_WIDTH(37), .DEPTH_LOG2(6)) resp_cdc_fifo (
+        .wclk(mem_clk), .wrst_n(rst_n),
+        .winc(mc_cdc_resp_valid && !mc_resp_fifo_full),
+        .wdata({mc_cdc_resp_id, mc_cdc_resp_rdata}),
+        .wfull(mc_resp_fifo_full),
+        .rclk(clk), .rrst_n(rst_n),
+        .rinc(!mc_resp_fifo_empty), // always read when available
+        .rdata(mc_resp_fifo_rdata),
+        .rempty(mc_resp_fifo_empty)
+    );
+    
+    assign xbar_s_resp_valid[0] = !mc_resp_fifo_empty;
+    assign xbar_s_resp_id[0*5 +: 5] = mc_resp_fifo_rdata[36:32];
+    assign xbar_s_resp_rdata[0*32 +: 32] = mc_resp_fifo_rdata[31:0];
+
     titan_x5_mem_controller #(
         .AXI_ADDR_WIDTH(32),
         .AXI_DATA_WIDTH(512),
-        .AXI_ID_WIDTH  (4)
+        .AXI_ID_WIDTH  (4),
+        .ID_WIDTH      (5)
     ) u_mem_ctrl (
-        .clk           (clk), .rst_n(rst_n),
-        .req_valid     (xbar_s_req_valid[0]), 
-        .req_addr      (xbar_s_req_addr[0*32 +: 32]),
-        .req_write     (xbar_s_req_write[0]), 
-        .req_wdata     (xbar_s_req_wdata[0*32 +: 32]),
-        .req_len       (4'h0), // 1 beat
-        .req_ready     (xbar_s_req_ready[0]), 
-        .resp_valid    (xbar_s_resp_valid[0]), .resp_rdata(xbar_s_resp_rdata[0*32 +: 32]),
+        .clk           (mem_clk), .rst_n(rst_n),
+        .req_valid     (mc_cdc_req_valid), 
+        .req_addr      (mc_cdc_req_addr),
+        .req_write     (mc_cdc_req_write), 
+        .req_wdata     (mc_cdc_req_wdata),
+        .req_len       (mc_cdc_req_len),
+        .req_id        (mc_cdc_req_id),
+        .req_ready     (mc_cdc_req_ready), 
+        .resp_valid    (mc_cdc_resp_valid), 
+        .resp_id       (mc_cdc_resp_id),
+        .resp_rdata    (mc_cdc_resp_rdata),
         .m_axi_arid    (vram_arid),
         .m_axi_araddr  (vram_araddr),
         .m_axi_arlen   (vram_arlen),
@@ -499,7 +570,7 @@ module titan_x5_gpu_top #(
 
     // 12. Display Engine
     titan_x5_display_engine u_disp_engine (
-        .clk(clk), .pclk(clk), .rst_n(rst_n),
+        .clk(clk), .pclk(pclk), .rst_n(rst_n),
         .h_visible(VGA_H_VISIBLE), .h_front_porch(12'd64), .h_sync_pulse(12'd64), .h_back_porch(12'd64),
         .v_visible(VGA_V_VISIBLE), .v_front_porch(12'd1), .v_sync_pulse(12'd1), .v_back_porch(12'd1),
         .swap_buffers(), .fb_read_addr(disp_mem_addr), .fb_rgba_data(disp_mem_rdata),
@@ -507,13 +578,13 @@ module titan_x5_gpu_top #(
         .vga_hsync(vga_hsync), .vga_vsync(vga_vsync), .vga_r(vga_r), .vga_g(vga_g), .vga_b(vga_b), .vga_de(vga_de)
     );
     // project blackwell: gddr7 pam3 phy integration
-    wire [679:0] gddr7_tx_pins;
-    wire [679:0] gddr7_rx_pins;
+    wire [683:0] gddr7_tx_pins;
+    wire [683:0] gddr7_rx_pins;
     
     titan_x5_gddr7_pam3_phy gddr7_phy (
         .clk_28g(clk),
         .rst_n(rst_n),
-        .tx_data_nrz(vram_wdata),
+        .tx_data_nrz_padded({1'b0, vram_wdata}),
         .tx_valid(vram_wvalid),
         .tx_ready(),
         .rx_data_nrz(),

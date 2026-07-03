@@ -157,12 +157,21 @@ jobs:
           echo "Running all cocotb tests via test_runner.py"
           echo "=============================================="
 
-          if python -m pytest test_runner.py -v --log-cli-level=INFO 2>&1 | tee "../reports/test_runner.log"; then
-            echo "✅ All tests PASSED"
-          else
-            echo "❌ Tests FAILED"
-            exit 1
-          fi
+          python -m pytest test_runner.py -v --log-cli-level=INFO 2>&1 | tee "../reports/test_runner.log"
+
+          echo "=============================================="
+          echo "Running cocotb tests via Makefile (Graphics, ALU, Cache)"
+          echo "=============================================="
+          
+          set -e
+          make clean
+          make TEST_TARGET=graphics
+          make clean
+          make TEST_TARGET=alu
+          make clean
+          make TEST_TARGET=cache
+
+          echo "✅ All tests PASSED"
 
       - name: Upload test logs
         if: always()

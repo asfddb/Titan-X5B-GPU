@@ -1,3 +1,11 @@
+# ============================================================================
+# Copyright (c) 2026 Adhiraj
+# 
+# This file is part of the Titan X5-B GPU project.
+# 
+# Licensed under CERN-OHL-S-2.0.
+# See LICENSE for details.
+# ============================================================================
 import cocotb
 from cocotb.triggers import RisingEdge, ClockCycles
 from cocotb.clock import Clock
@@ -44,14 +52,12 @@ class AluDriver(uvm_driver):
     def connect_phase(self):
         self.dut = cocotb.top
         self.writeback_schedule = {} # cycle_num -> True
+        self.div_busy_until = 0
         
     async def run_phase(self):
         self.dut.valid_in.value = 0
         self.dut.stall_in.value = 0
-        cycle = 0
-        
-        # Start a parallel task to track time
-        cocotb.start_soon(self.track_cycles())
+        self.current_cycle = 0
         
         while True:
             item = await self.seq_item_port.get_next_item()
@@ -69,16 +75,18 @@ class AluDriver(uvm_driver):
             
             # Wait until ready_out is 1 AND no structural writeback collision
             while True:
-                if self.dut.ready_out.value == 1:
+                target_cycle = self.current_cycle + latency
+                if target_cycle not in self.writeback_schedule and self.current_cycle >= self.div_busy_until:
+                    self.writeback_schedule[target_cycle] = True
                     if item.opcode == OP_DIV:
-                        break # Division blocks ready_out anyway
-                    target_cycle = self.current_cycle + latency
-                    if target_cycle not in self.writeback_schedule:
-                        self.writeback_schedule[target_cycle] = True
-                        break
+                        self.div_busy_until = self.current_cycle + 34
+                    break
                 
                 self.dut.valid_in.value = 0
                 await RisingEdge(self.dut.clk)
+                self.current_cycle += 1
+                if (self.current_cycle - 10) in self.writeback_schedule:
+                    del self.writeback_schedule[self.current_cycle - 10]
             
             self.dut.valid_in.value = 1
             self.dut.opcode.value = item.opcode
@@ -89,17 +97,12 @@ class AluDriver(uvm_driver):
             self.ap.write(item)
 
             await RisingEdge(self.dut.clk)
-            self.dut.valid_in.value = 0
-            self.seq_item_port.item_done()
-
-    async def track_cycles(self):
-        self.current_cycle = 0
-        while True:
-            await RisingEdge(self.dut.clk)
             self.current_cycle += 1
-            # Clean up old schedule
             if (self.current_cycle - 10) in self.writeback_schedule:
                 del self.writeback_schedule[self.current_cycle - 10]
+            
+            self.dut.valid_in.value = 0
+            self.seq_item_port.item_done()
 
 class AluMonitor(uvm_monitor):
     def build_phase(self):
@@ -129,6 +132,23 @@ class AluScoreboard(uvm_component):
         pass
 
     def check_phase(self):
+        # Synchronously drain any remaining items from act_fifo
+        while self.act_fifo.can_get():
+            _, act_item = self.act_fifo.try_get()
+            if act_item is not None:
+                act_res = act_item.result
+                found = False
+                for i, (op, s1, s2, exp) in enumerate(self.expected_results):
+                    if exp == act_res:
+                        found = True
+                        self.expected_results.pop(i)
+                        self.matched_count += 1
+                        self.logger.info(f"MATCH (drain): Op={op} src1={hex(s1)} src2={hex(s2)} res={hex(act_res)}")
+                        break
+                if not found:
+                    self.logger.error(f"MISMATCH or UNEXPECTED RESULT (drain): {hex(act_res)}")
+                    self.error_count += 1
+
         if len(self.expected_results) > 0:
             self.logger.error(f"{len(self.expected_results)} results were dropped or not matched!")
             self.error_count += len(self.expected_results)
@@ -237,6 +257,6 @@ class AluTest(uvm_test):
         seq = AluSeq("seq")
         await seq.start(self.env.agent.seqr)
         
-        await ClockCycles(dut.clk, 100) # Wait for pipeline to flush
+        await ClockCycles(dut.clk, 200) # Wait for pipeline to flush
         
         self.drop_objection()

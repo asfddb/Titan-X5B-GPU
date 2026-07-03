@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns / 1ps
 
@@ -16,7 +16,8 @@
 module titan_x5_mem_controller #(
     parameter AXI_ADDR_WIDTH = 32,
     parameter AXI_DATA_WIDTH = 256,
-    parameter AXI_ID_WIDTH   = 4
+    parameter AXI_ID_WIDTH   = 4,
+    parameter ID_WIDTH       = 5
 )(
     input wire clk,
     input wire rst_n,
@@ -27,9 +28,11 @@ module titan_x5_mem_controller #(
     input  wire                       req_write,
     input wire [31:0] req_wdata,
     input wire [3:0] req_len, // burst length (0-15)
+    input wire [ID_WIDTH-1:0] req_id,
     output reg                        req_ready,
 
     output reg                        resp_valid,
+    output reg [ID_WIDTH-1:0] resp_id,
     output reg [31:0] resp_rdata,
 
     // axi4 master interface
@@ -87,6 +90,7 @@ module titan_x5_mem_controller #(
 
     reg [2:0] state, next_state;
     reg [AXI_ADDR_WIDTH-1:0] saved_req_addr;
+    reg [ID_WIDTH-1:0] saved_req_id;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -99,6 +103,7 @@ module titan_x5_mem_controller #(
             req_ready <= 0;
             resp_valid <= 0;
             saved_req_addr <= 0;
+            saved_req_id <= 0;
         end else begin
             state <= next_state;
 
@@ -109,23 +114,22 @@ module titan_x5_mem_controller #(
                     if (req_valid && req_ready) begin
                         req_ready <= 1'b0;
                         saved_req_addr <= req_addr;
+                        saved_req_id <= req_id;
                         if (req_write) begin
                             m_axi_awvalid <= 1'b1;
                             m_axi_awaddr <= req_addr;
                             m_axi_awlen <= 0; // optimized: strictly single beat write supported by request interface
-                            m_axi_awid <= 0;
+                            m_axi_awid <= req_id;
                             
                             m_axi_wvalid <= 1'b1;
                             m_axi_wdata <= {(AXI_DATA_WIDTH/32){req_wdata}}; 
                             m_axi_wstrb <= ( {((AXI_DATA_WIDTH/8)+1){1'b0}} + 4'hF ) << ((req_addr % (AXI_DATA_WIDTH/8)) / 4 * 4);
                             m_axi_wlast <= 1'b1;
-                            
-                            m_axi_bready <= 1'b1;
                         end else begin
                             m_axi_arvalid <= 1'b1;
                             m_axi_araddr <= req_addr;
                             m_axi_arlen <= req_len;
-                            m_axi_arid <= 0;
+                            m_axi_arid <= req_id;
                             m_axi_rready <= 1'b1; // assert rready early
                         end
                     end
@@ -138,6 +142,7 @@ module titan_x5_mem_controller #(
                 R_WAIT: begin
                     if (m_axi_rvalid && m_axi_rready) begin
                         resp_valid <= 1'b1;
+                        resp_id <= saved_req_id;
                         // multiplex the 32-bit word from the AXI_DATA_WIDTH bus using the byte offset
                         // index is (saved_req_addr % (AXI_DATA_WIDTH/8)) / 4
                         resp_rdata <= m_axi_rdata[((saved_req_addr % (AXI_DATA_WIDTH/8)) / 4) * 32 +: 32];
@@ -151,6 +156,10 @@ module titan_x5_mem_controller #(
                 AW_WAIT: begin // optimized to handle AW and W in parallel
                     if (m_axi_awready && m_axi_awvalid) m_axi_awvalid <= 1'b0;
                     if (m_axi_wready && m_axi_wvalid) m_axi_wvalid <= 1'b0;
+                    if ((!m_axi_awvalid || (m_axi_awready && m_axi_awvalid)) && 
+                        (!m_axi_wvalid || (m_axi_wready && m_axi_wvalid))) begin
+                        m_axi_bready <= 1'b1;
+                    end
                 end
                 W_WAIT: begin
                     // unused, kept for parameter compatibility
@@ -159,6 +168,7 @@ module titan_x5_mem_controller #(
                     if (m_axi_bvalid && m_axi_bready) begin
                         m_axi_bready <= 1'b0;
                         resp_valid <= 1'b1;
+                        resp_id <= saved_req_id;
                     end else begin
                         resp_valid <= 1'b0;
                     end

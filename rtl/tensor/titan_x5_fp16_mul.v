@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 /*
  * Module: titan_x5_fp16_mul
@@ -41,7 +41,14 @@ module titan_x5_fp16_mul (
     // multiply mantissas
     wire [21:0] mant_res_full = mant_a * mant_b;
     
+    reg [5:0] exp_res_temp;
+    reg [9:0] frac_res_temp;
+
     always @(*) begin
+        result = 16'b0;
+        exp_res_temp = 6'b0;
+        frac_res_temp = 10'b0;
+        
         if (is_nan_a || is_nan_b) begin
             result = 16'h7E00; // nan
         end else if ((is_inf_a && is_zero_b) || (is_zero_a && is_inf_b)) begin
@@ -52,9 +59,6 @@ module titan_x5_fp16_mul (
             result = {sign_res, 15'b0}; // zero
         end else begin
             // normalization
-            reg [5:0] exp_res_temp;
-            reg [9:0] frac_res_temp;
-            
             exp_res_temp = exp_a + exp_b - 5'd15;
             
             if (mant_res_full[21]) begin

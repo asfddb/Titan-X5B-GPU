@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -28,6 +28,12 @@ module titan_x5_sm #(
     output wire        l1_dcache_we,
     input wire [31:0] l1_dcache_rdata,
     input  wire        l1_dcache_rvalid,
+    
+    // Shader Export Interface
+    output wire        shader_wb_valid,
+    output wire [5:0]  shader_wb_reg,
+    output wire [1023:0] shader_wb_data,
+
     
     // thread/warp control
     input wire [NUM_WARPS-1:0] warp_active,
@@ -162,6 +168,11 @@ module titan_x5_sm #(
         .wmma_a(),
         .wmma_b()
     );
+    
+    assign shader_wb_valid = wb_valid;
+    assign shader_wb_reg   = wb_dest_reg;
+    assign shader_wb_data  = rf_wr_data;
+
     
     // register file bank mapping and connectivity
     wire [3:0] bank_wr_en = (rf_wr_en) ? (4'b0001 << rf_wr_addr[1:0]) : 4'd0;

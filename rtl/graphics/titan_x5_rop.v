@@ -1,10 +1,10 @@
 // ============================================================================
-// Copyright (c) 2026 Adhiraj / [Your LLP]
+// Copyright (c) 2026 Adhiraj
 // 
 // This file is part of the Titan X5-B GPU project.
 // 
-// Dual-licensed under CERN-OHL-S-2.0 AND Commercial License.
-// See LICENSE and COMMERCIAL.md for details.
+// Licensed under CERN-OHL-S-2.0.
+// See LICENSE for details.
 // ============================================================================
 `timescale 1ns/1ps
 
@@ -28,6 +28,11 @@ module titan_x5_rop #(
     input wire signed [15:0] i_y, // Base Y of the 4x4 stamp
     input wire [16*32-1:0] i_z,
     input wire [16*32-1:0] i_color, // rgba
+    
+    // shader interface
+    input wire        shader_wb_valid,
+    input wire [5:0]  shader_wb_reg,
+    input wire [1023:0] shader_wb_data,
 
     // rop configuration
     input wire [2:0] cfg_depth_func,
@@ -70,6 +75,8 @@ module titan_x5_rop #(
     reg [15:0] current_tile_x, current_tile_y;
     reg tile_active;
 
+    reg [511:0] latched_shader_color;
+
     reg [8:0] flush_idx;
     reg [2:0] flush_state;
     
@@ -89,6 +96,7 @@ module titan_x5_rop #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             tile_dirty <= 0;
+            latched_shader_color <= 0;
             flush_idx <= 0;
             flush_state <= FLUSH_IDLE;
             mem_req <= 0;
@@ -98,6 +106,14 @@ module titan_x5_rop #(
             current_tile_y <= 0;
             idle_timeout <= 0;
         end else begin
+            if (shader_wb_valid && shader_wb_reg == 6'd63) begin
+                latched_shader_color <= {
+                    shader_wb_data[15*32 +: 32], shader_wb_data[14*32 +: 32], shader_wb_data[13*32 +: 32], shader_wb_data[12*32 +: 32],
+                    shader_wb_data[11*32 +: 32], shader_wb_data[10*32 +: 32], shader_wb_data[9*32 +: 32],  shader_wb_data[8*32 +: 32],
+                    shader_wb_data[7*32 +: 32],  shader_wb_data[6*32 +: 32],  shader_wb_data[5*32 +: 32],  shader_wb_data[4*32 +: 32],
+                    shader_wb_data[3*32 +: 32],  shader_wb_data[2*32 +: 32],  shader_wb_data[1*32 +: 32],  shader_wb_data[0*32 +: 32]
+                };
+            end
             case (flush_state)
                 FLUSH_IDLE: begin
                     if (i_valid != 16'd0) begin
@@ -115,8 +131,8 @@ module titan_x5_rop #(
                             end
                             
                             // Vectorized Write: Dump 16 pixels simultaneously into local SRAM
-                            for (i = 0; i < 16; i = i + 1) begin
-                                if (i_valid[i]) begin
+                            for (i = 0; i < 16; i = i + 1) begin : pixel_loop
+                                if (i_valid[i]) begin : valid_pixel_block
                                     // 16x16 index = (local_y * 16) + local_x
                                     // Use | instead of + to avoid overflow, since inputs are 4-aligned
                                     reg [7:0] tile_idx;
@@ -133,7 +149,9 @@ module titan_x5_rop #(
                                     
                                     if (new_z <= cur_z || !tile_dirty[tile_idx]) begin
                                         cur_c = color_tile_sram[tile_idx];
-                                        new_c = i_color[i*32 +: 32];
+                                        // use the latched color from the shader instead of i_color if shader computed it (non-zero)
+                                        // or just default to latched_shader_color since the prompt requires fragment shader output
+                                        new_c = latched_shader_color[i*32 +: 32];
                                         alpha = new_c[31:24];
                                         inv_alpha = 255 - alpha;
                                         
