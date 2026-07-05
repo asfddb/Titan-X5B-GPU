@@ -99,10 +99,32 @@ module titan_x5_gpu_top #(
     // helper wires for modules
     wire [31:0] sm_icache_addr [0:3];
     wire [3:0]  sm_icache_req;
-    wire [31:0] sm_dcache_addr [0:3];
-    wire [31:0] sm_dcache_wdata [0:3];
-    wire [3:0]  sm_dcache_req;
-    wire [3:0]  sm_dcache_we;
+
+    // SM L1 D-cache coherent fabric (MESI): 4 SM L1s <-> coherent xbar <-> L2
+    localparam CXB_LINE = 128;
+    wire [3:0]              cxb_m_req_valid, cxb_m_req_ready, cxb_m_resp_valid;
+    wire [4*2-1:0]          cxb_m_req_type;
+    wire [4*32-1:0]         cxb_m_req_addr;
+    wire [4*CXB_LINE*8-1:0] cxb_m_req_wdata;
+    wire [CXB_LINE*8-1:0]   cxb_m_resp_rdata;
+    wire                    cxb_m_resp_shared;
+    wire [3:0]              cxb_snp_req_valid, cxb_snp_resp_valid;
+    wire [3:0]              cxb_snp_resp_hit, cxb_snp_resp_dirty;
+    wire [1:0]              cxb_snp_req_type;
+    wire [31:0]             cxb_snp_req_addr;
+    wire [4*CXB_LINE*8-1:0] cxb_snp_resp_data;
+
+    wire                    l2_req_valid, l2_req_ready, l2_req_write, l2_resp_valid;
+    wire [31:0]             l2_req_addr;
+    wire [CXB_LINE*8-1:0]   l2_req_wdata, l2_resp_rdata;
+
+    wire                    l2m_req_valid, l2m_req_write, l2m_req_ready, l2m_resp_valid;
+    wire [31:0]             l2m_req_addr;
+    wire [CXB_LINE*8-1:0]   l2m_req_wdata, l2m_resp_rdata;
+
+    wire                    l2a_xbar_req_valid, l2a_xbar_req_write;
+    wire [31:0]             l2a_xbar_req_addr;
+    wire [31:0]             l2a_xbar_req_wdata;
     
     wire [31:0] tmu_mem_addr [0:3];
     wire [3:0]  tmu_mem_req;
@@ -156,13 +178,20 @@ module titan_x5_gpu_top #(
         end
     endgenerate
 
-    // masters 13-16: sm d-caches
+    // master 13: L2 backing-store adapter (SM D-cache traffic now flows
+    // SM L1 -> coherent xbar -> L2 -> this adapter -> memory controller)
+    assign xbar_m_req_valid[13]          = l2a_xbar_req_valid;
+    assign xbar_m_req_addr[13*32 +: 32]  = l2a_xbar_req_addr;
+    assign xbar_m_req_wdata[13*32 +: 32] = l2a_xbar_req_wdata;
+    assign xbar_m_req_write[13]          = l2a_xbar_req_write;
+
+    // masters 14-16: reserved (previously per-SM scalar D-cache ports)
     generate
-        for (gi = 0; gi < 4; gi = gi + 1) begin : sm_d_xbar_assign
-            assign xbar_m_req_valid[13+gi] = sm_dcache_req[gi];
-            assign xbar_m_req_addr[(13+gi)*32 +: 32] = sm_dcache_addr[gi];
-            assign xbar_m_req_wdata[(13+gi)*32 +: 32] = sm_dcache_wdata[gi];
-            assign xbar_m_req_write[13+gi] = sm_dcache_we[gi];
+        for (gi = 0; gi < 3; gi = gi + 1) begin : sm_d_xbar_tieoff
+            assign xbar_m_req_valid[14+gi] = 1'b0;
+            assign xbar_m_req_addr[(14+gi)*32 +: 32] = 32'h0;
+            assign xbar_m_req_wdata[(14+gi)*32 +: 32] = 32'h0;
+            assign xbar_m_req_write[14+gi] = 1'b0;
         end
     endgenerate
 
@@ -272,11 +301,34 @@ module titan_x5_gpu_top #(
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_gen
-            titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(32)) u_sm (
+            titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(32), .LINE_BYTES(CXB_LINE)) u_sm (
                 .clk(clk),
                 .rst_n(rst_n),
                 .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),
-                .l1_dcache_addr(sm_dcache_addr[gi]), .l1_dcache_wdata(sm_dcache_wdata[gi]), .l1_dcache_req(sm_dcache_req[gi]), .l1_dcache_we(sm_dcache_we[gi]), .l1_dcache_rdata(xbar_m_resp_rdata[(13+gi)*32 +: 32]), .l1_dcache_rvalid(xbar_m_resp_valid[13+gi]),
+
+                .dbus_req_valid(cxb_m_req_valid[gi]),
+                .dbus_req_ready(cxb_m_req_ready[gi]),
+                .dbus_req_type(cxb_m_req_type[gi*2 +: 2]),
+                .dbus_req_addr(cxb_m_req_addr[gi*32 +: 32]),
+                .dbus_req_wdata(cxb_m_req_wdata[gi*CXB_LINE*8 +: CXB_LINE*8]),
+                .dbus_resp_valid(cxb_m_resp_valid[gi]),
+                .dbus_resp_rdata(cxb_m_resp_rdata),
+                .dbus_resp_shared(cxb_m_resp_shared),
+
+                .snp_req_valid(cxb_snp_req_valid[gi]),
+                .snp_req_type(cxb_snp_req_type),
+                .snp_req_addr(cxb_snp_req_addr),
+                .snp_resp_valid(cxb_snp_resp_valid[gi]),
+                .snp_resp_hit(cxb_snp_resp_hit[gi]),
+                .snp_resp_dirty(cxb_snp_resp_dirty[gi]),
+                .snp_resp_data(cxb_snp_resp_data[gi*CXB_LINE*8 +: CXB_LINE*8]),
+
+                .dbg_mesi_addr(32'd0),
+                .dbg_mesi_state(),
+                .dbg_lsu_resp_valid(),
+                .dbg_lsu_xactions(),
+                .fp_rm(2'b00),
+
                 .shader_wb_valid(sm_shader_wb_valid[gi]),
                 .shader_wb_reg(sm_shader_wb_reg[gi]),
                 .shader_wb_data(sm_shader_wb_data[gi]),
@@ -284,6 +336,89 @@ module titan_x5_gpu_top #(
             );
         end
     endgenerate
+
+    // MESI snooping bus between the four SM L1 D-caches and the L2
+    titan_x5_coherent_xbar #(
+        .NUM_MASTERS(4),
+        .ADDR_WIDTH(32),
+        .LINE_BYTES(CXB_LINE)
+    ) u_coherent_xbar (
+        .clk(clk),
+        .rst_n(rst_n),
+        .m_req_valid(cxb_m_req_valid),
+        .m_req_ready(cxb_m_req_ready),
+        .m_req_type(cxb_m_req_type),
+        .m_req_addr(cxb_m_req_addr),
+        .m_req_wdata(cxb_m_req_wdata),
+        .m_resp_valid(cxb_m_resp_valid),
+        .m_resp_rdata(cxb_m_resp_rdata),
+        .m_resp_shared(cxb_m_resp_shared),
+        .snp_req_valid(cxb_snp_req_valid),
+        .snp_req_type(cxb_snp_req_type),
+        .snp_req_addr(cxb_snp_req_addr),
+        .snp_resp_valid(cxb_snp_resp_valid),
+        .snp_resp_hit(cxb_snp_resp_hit),
+        .snp_resp_dirty(cxb_snp_resp_dirty),
+        .snp_resp_data(cxb_snp_resp_data),
+        .l2_req_valid(l2_req_valid),
+        .l2_req_ready(l2_req_ready),
+        .l2_req_write(l2_req_write),
+        .l2_req_addr(l2_req_addr),
+        .l2_req_wdata(l2_req_wdata),
+        .l2_resp_valid(l2_resp_valid),
+        .l2_resp_rdata(l2_resp_rdata)
+    );
+
+    // Unified L2 (previously unconnected in the hierarchy)
+    titan_x5_l2_cache #(
+        .ADDR_WIDTH(32),
+        .DATA_WIDTH(256),
+        .LINE_SIZE(CXB_LINE),
+        .WAYS(8),
+        .SETS(256),
+        .BANKS(4)
+    ) u_l2_cache (
+        .clk(clk),
+        .rst_n(rst_n),
+        .req_valid(l2_req_valid),
+        .req_addr(l2_req_addr),
+        .req_wdata(l2_req_wdata),
+        .req_write(l2_req_write),
+        .req_ready(l2_req_ready),
+        .resp_valid(l2_resp_valid),
+        .resp_rdata(l2_resp_rdata),
+        .mem_req_valid(l2m_req_valid),
+        .mem_req_addr(l2m_req_addr),
+        .mem_req_write(l2m_req_write),
+        .mem_req_wdata(l2m_req_wdata),
+        .mem_req_ready(l2m_req_ready),
+        .mem_resp_valid(l2m_resp_valid),
+        .mem_resp_rdata(l2m_resp_rdata)
+    );
+
+    // L2 line traffic -> 32-bit legacy crossbar master 13
+    titan_x5_l2_mem_adapter #(
+        .ADDR_WIDTH(32),
+        .LINE_BYTES(CXB_LINE),
+        .DATA_WIDTH(32)
+    ) u_l2_mem_adapter (
+        .clk(clk),
+        .rst_n(rst_n),
+        .l2m_req_valid(l2m_req_valid),
+        .l2m_req_addr(l2m_req_addr),
+        .l2m_req_write(l2m_req_write),
+        .l2m_req_wdata(l2m_req_wdata),
+        .l2m_req_ready(l2m_req_ready),
+        .l2m_resp_valid(l2m_resp_valid),
+        .l2m_resp_rdata(l2m_resp_rdata),
+        .xbar_req_valid(l2a_xbar_req_valid),
+        .xbar_req_addr(l2a_xbar_req_addr),
+        .xbar_req_wdata(l2a_xbar_req_wdata),
+        .xbar_req_write(l2a_xbar_req_write),
+        .xbar_req_ready(xbar_m_req_ready[13]),
+        .xbar_resp_valid(xbar_m_resp_valid[13]),
+        .xbar_resp_rdata(xbar_m_resp_rdata[13*32 +: 32])
+    );
 
     // 3. Rasterizer
     wire [15:0] rast_o_valid;

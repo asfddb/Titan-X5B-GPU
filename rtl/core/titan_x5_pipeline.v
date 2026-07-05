@@ -44,9 +44,11 @@ module titan_x5_pipeline (
     input  wire        alu_valid_out,
     input wire [1023:0] alu_result,
     
-    // data cache / memory interface (mem stage)
+    // data cache / memory interface (mem stage, via the coalescing LSU)
     output wire        mem_req,
+    input  wire        mem_req_ready,
     output wire        mem_we,
+    output wire [2:0]  mem_warp_id,
     output wire [1023:0] mem_addr,
     output wire [1023:0] mem_wdata,
     input wire [1023:0] mem_rdata,
@@ -234,11 +236,19 @@ module titan_x5_pipeline (
     assign alu_src2     = id_data2;
     assign alu_src3     = id_data3;
 
+    // Memory requests are held (not pulsed) until the LSU accepts them:
+    // the EX stage stays busy for a store until acceptance and for a load
+    // until the response returns, which also guarantees the MEM-stage
+    // writeback bookkeeping (warp/rd) stays stable for in-flight loads.
     reg ex_busy_reg;
+    reg mem_pending_reg;
+    reg [1023:0] mem_addr_reg;
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ex_busy_reg <= 0;
             ex_valid_reg <= 0;
+            mem_pending_reg <= 0;
+            mem_addr_reg <= 1024'd0;
         end else begin
             if (ex_launch) begin
                 ex_busy_reg <= 1;
@@ -251,9 +261,30 @@ module titan_x5_pipeline (
                 ex_mem_wdata_reg <= id_data2;
                 ex_wmma_a_reg <= id_data1;
                 ex_wmma_b_reg <= id_data2;
-            end else if (ex_busy_reg && (alu_valid_out || ex_is_wmma_reg)) begin
-                ex_busy_reg <= 0;
-                ex_valid_reg <= 0;
+            end else if (ex_busy_reg) begin
+                if (ex_is_load_reg || ex_is_store_reg) begin
+                    // per-lane addresses arrive from the vector ALU
+                    if (alu_valid_out) begin
+                        mem_pending_reg <= 1'b1;
+                        mem_addr_reg    <= alu_result;
+                    end
+                    // request accepted by the LSU
+                    if (mem_pending_reg && mem_req_ready) begin
+                        mem_pending_reg <= 1'b0;
+                        if (ex_is_store_reg) begin
+                            ex_busy_reg  <= 0;   // stores retire at acceptance
+                            ex_valid_reg <= 0;
+                        end
+                    end
+                    // loads retire when the coalesced response returns
+                    if (ex_is_load_reg && mem_rvalid) begin
+                        ex_busy_reg  <= 0;
+                        ex_valid_reg <= 0;
+                    end
+                end else if (alu_valid_out || ex_is_wmma_reg) begin
+                    ex_busy_reg <= 0;
+                    ex_valid_reg <= 0;
+                end
             end
         end
     end
@@ -276,9 +307,10 @@ module titan_x5_pipeline (
     reg mem_is_load_reg;
     reg [1023:0] mem_alu_res_reg;
     
-    assign mem_req   = ex_valid_reg && (ex_is_load_reg || ex_is_store_reg) && alu_valid_out;
+    assign mem_req   = mem_pending_reg;
     assign mem_we    = ex_is_store_reg;
-    assign mem_addr  = alu_result;
+    assign mem_warp_id = ex_warp_reg;
+    assign mem_addr  = mem_addr_reg;
     assign mem_wdata = ex_mem_wdata_reg;
     
     always @(posedge clk or negedge rst_n) begin

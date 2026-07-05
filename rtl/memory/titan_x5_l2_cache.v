@@ -72,6 +72,8 @@ module titan_x5_l2_cache #(
 
     reg [2:0] state;
     reg [2:0] replace_way; // pseudo-random replacement
+    reg [2:0] victim_way;  // latched at COMPARE so it is stable across
+                           // WRITEBACK/ALLOCATE/REFILL
 
     reg mem_req_valid_reg;
     reg mem_req_write_reg;
@@ -103,6 +105,7 @@ module titan_x5_l2_cache #(
         if (!rst_n) begin
             state <= STATE_IDLE;
             replace_way <= 0;
+            victim_way <= 0;
             mem_req_valid_reg <= 0;
             resp_valid_reg <= 0;
             req_ready_reg <= 1;
@@ -115,10 +118,9 @@ module titan_x5_l2_cache #(
                 end
             end
         end else begin
-            replace_way <= replace_way + 1; // simple pseudo-random replacement
             resp_valid_reg <= 1'b0;
             mem_req_valid_reg <= 1'b0;
-            
+
             case (state)
                 STATE_IDLE: begin
                     req_ready_reg <= 1'b1;
@@ -127,7 +129,7 @@ module titan_x5_l2_cache #(
                         state <= STATE_COMPARE;
                     end
                 end
-                
+
                 STATE_COMPARE: begin
                     if (hit) begin
                         if (req_write) begin
@@ -140,7 +142,10 @@ module titan_x5_l2_cache #(
                         req_ready_reg <= 1'b1;
                         state <= STATE_IDLE;
                     end else begin
-                        // Miss: check dirty bit
+                        // Miss: latch the victim now so it stays stable for
+                        // the whole WRITEBACK/ALLOCATE/REFILL sequence
+                        victim_way <= replace_way;
+                        replace_way <= replace_way + 1; // advance once per allocation
                         if (valid_array[req_bank][req_index][replace_way] && dirty_array[req_bank][req_index][replace_way]) begin
                             state <= STATE_WRITEBACK;
                         end else begin
@@ -148,38 +153,38 @@ module titan_x5_l2_cache #(
                         end
                     end
                 end
-                
+
                 STATE_WRITEBACK: begin
                     mem_req_valid_reg <= 1'b1;
                     mem_req_write_reg <= 1'b1;
-                    mem_req_addr_reg <= {tag_array[req_bank][req_index][replace_way], req_index[INDEX_BITS-1:0], req_bank[BANK_BITS-1:0], {OFFSET_BITS{1'b0}}};
-                    mem_req_wdata_reg <= data_array[req_bank][req_index][replace_way];
-                    if (mem_req_ready) begin
+                    mem_req_addr_reg <= {tag_array[req_bank][req_index][victim_way], req_index[INDEX_BITS-1:0], req_bank[BANK_BITS-1:0], {OFFSET_BITS{1'b0}}};
+                    mem_req_wdata_reg <= data_array[req_bank][req_index][victim_way];
+                    if (mem_req_valid_reg && mem_req_ready) begin
                         state <= STATE_ALLOCATE;
                         mem_req_valid_reg <= 1'b0;
                     end
                 end
-                
+
                 STATE_ALLOCATE: begin
                     mem_req_valid_reg <= 1'b1;
                     mem_req_write_reg <= 1'b0;
                     mem_req_addr_reg <= {req_tag, req_index[INDEX_BITS-1:0], req_bank[BANK_BITS-1:0], {OFFSET_BITS{1'b0}}};
-                    if (mem_req_ready) begin
+                    if (mem_req_valid_reg && mem_req_ready) begin
                         state <= STATE_REFILL;
                         mem_req_valid_reg <= 1'b0;
                     end
                 end
-                
+
                 STATE_REFILL: begin
                     if (mem_resp_valid) begin
-                        valid_array[req_bank][req_index][replace_way] <= 1'b1;
-                        tag_array[req_bank][req_index][replace_way] <= req_tag;
-                        data_array[req_bank][req_index][replace_way] <= mem_resp_rdata;
-                        dirty_array[req_bank][req_index][replace_way] <= 1'b0;
+                        valid_array[req_bank][req_index][victim_way] <= 1'b1;
+                        tag_array[req_bank][req_index][victim_way] <= req_tag;
+                        data_array[req_bank][req_index][victim_way] <= mem_resp_rdata;
+                        dirty_array[req_bank][req_index][victim_way] <= 1'b0;
                         state <= STATE_COMPARE; // Retry compare
                     end
                 end
-                
+
                 default: state <= STATE_IDLE;
             endcase
         end

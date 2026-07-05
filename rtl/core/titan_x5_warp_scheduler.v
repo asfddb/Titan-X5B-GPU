@@ -42,10 +42,15 @@ module titan_x5_warp_scheduler #(
     
     input wire        div_pop,
     input wire [2:0]  div_pop_warp_id,
-    
+
     output wire [31:0] div_popped_pc,
     output wire        div_popped_valid,
     // --------------------------------------
+
+    // combinational active-mask lookup (used by the LSU to fetch the
+    // SIMT lane mask of the warp currently in the MEM stage)
+    input  wire [2:0]  mask_query_id,
+    output wire [31:0] mask_query_mask,
     
     output reg [2:0] sched_warp_id,
     output reg         sched_valid,
@@ -164,6 +169,8 @@ module titan_x5_warp_scheduler #(
         end
     end
     
+    assign mask_query_mask = active_mask[mask_query_id];
+
     wire [2:0] tos_idx = div_stack_ptr[div_pop_warp_id] - 3'd1;
     assign div_popped_pc = (div_stack_ptr[div_pop_warp_id] != 3'd0) ? div_pc_stack[div_pop_warp_id][tos_idx] : 32'd0;
     assign div_popped_valid = div_pop && (div_stack_ptr[div_pop_warp_id] != 3'd0);

@@ -188,3 +188,260 @@ module titan_x5_crossbar #(
     assign m_resp_rdata = m_resp_rdata_q;
 
 endmodule
+
+/*
+ * Titan X5 GPU - Coherent Crossbar (MESI snooping bus)
+ *
+ * Connects NUM_MASTERS caching L1s to one L2. Transactions are serialized:
+ * the arbiter grants one master, broadcasts a snoop to all other masters,
+ * collects their responses, sources the data (dirty snoop copy wins over
+ * L2), and finally responds to the granted master.
+ *
+ * Transaction types (shared encoding with titan_x5_l1_cache):
+ *   BUS_RD   (0): read line.  shared=1 if any other L1 holds it.
+ *                 A dirty (M) snoop hit supplies the data and is also
+ *                 written through to L2 so memory stays clean.
+ *   BUS_RDX  (1): read line for ownership; other copies invalidate. A dirty
+ *                 snoop hit supplies data directly (no L2 update needed -
+ *                 the requester immediately owns the line as M).
+ *   BUS_UPGR (2): upgrade S->M; other copies invalidate; no data returned.
+ *   BUS_WB   (3): write back a dirty line to L2 (no snoop, no response;
+ *                 the grant is the completion).
+ *
+ * Deadlock safety: L1s answer snoops whenever they are not mid-transaction
+ * on the bus, and the bus never snoops the master it granted.
+ */
+module titan_x5_coherent_xbar #(
+    parameter NUM_MASTERS = 4,
+    parameter ADDR_WIDTH  = 32,
+    parameter LINE_BYTES  = 128,
+    parameter MASTER_BITS = (NUM_MASTERS > 1) ? $clog2(NUM_MASTERS) : 1
+)(
+    input  wire                                clk,
+    input  wire                                rst_n,
+
+    // master (L1 bus-side) ports
+    input  wire [NUM_MASTERS-1:0]              m_req_valid,
+    output reg  [NUM_MASTERS-1:0]              m_req_ready,   // 1-cycle grant
+    input  wire [NUM_MASTERS*2-1:0]            m_req_type,
+    input  wire [NUM_MASTERS*ADDR_WIDTH-1:0]   m_req_addr,
+    input  wire [NUM_MASTERS*LINE_BYTES*8-1:0] m_req_wdata,
+    output reg  [NUM_MASTERS-1:0]              m_resp_valid,  // 1-cycle pulse
+    output reg  [LINE_BYTES*8-1:0]             m_resp_rdata,  // shared data bus
+    output reg                                 m_resp_shared,
+
+    // snoop broadcast to masters
+    output reg  [NUM_MASTERS-1:0]              snp_req_valid,
+    output reg  [1:0]                          snp_req_type,
+    output reg  [ADDR_WIDTH-1:0]               snp_req_addr,
+    input  wire [NUM_MASTERS-1:0]              snp_resp_valid,
+    input  wire [NUM_MASTERS-1:0]              snp_resp_hit,
+    input  wire [NUM_MASTERS-1:0]              snp_resp_dirty,
+    input  wire [NUM_MASTERS*LINE_BYTES*8-1:0] snp_resp_data,
+
+    // L2 (next-level) port
+    output reg                                 l2_req_valid,
+    input  wire                                l2_req_ready,
+    output reg                                 l2_req_write,
+    output reg  [ADDR_WIDTH-1:0]               l2_req_addr,
+    output reg  [LINE_BYTES*8-1:0]             l2_req_wdata,
+    input  wire                                l2_resp_valid,
+    input  wire [LINE_BYTES*8-1:0]             l2_resp_rdata
+);
+
+    localparam BUS_RD   = 2'd0;
+    localparam BUS_RDX  = 2'd1;
+    localparam BUS_UPGR = 2'd2;
+    localparam BUS_WB   = 2'd3;
+
+    localparam X_IDLE     = 3'd0;
+    localparam X_SNOOP    = 3'd1;
+    localparam X_L2WR     = 3'd2;  // BusWB: write dirty evict to L2
+    localparam X_L2WR_SNP = 3'd3;  // write dirty snoop data through to L2
+    localparam X_L2RD     = 3'd4;  // fetch line from L2
+    localparam X_RESP     = 3'd5;
+
+    reg [2:0]                  state;
+    reg [MASTER_BITS-1:0]      grant;
+    reg [MASTER_BITS-1:0]      rr_ptr;
+    reg [1:0]                  cur_type;
+    reg [ADDR_WIDTH-1:0]       cur_addr;
+    reg [LINE_BYTES*8-1:0]     cur_wdata;
+    reg [NUM_MASTERS-1:0]      snp_pending;
+    reg                        hit_acc;
+    reg                        dirty_acc;
+    reg [LINE_BYTES*8-1:0]     dirty_data;
+    reg                        l2_accepted;
+    reg                        l2_wr_pending; // write accepted, waiting for L2 to drain
+
+    // round-robin arbitration (combinational, from rr_ptr)
+    integer k;
+    reg                   arb_valid;
+    reg [MASTER_BITS-1:0] arb_grant;
+    reg [MASTER_BITS-1:0] arb_idx;
+    always @(*) begin
+        arb_valid = 1'b0;
+        arb_grant = {MASTER_BITS{1'b0}};
+        for (k = NUM_MASTERS - 1; k >= 0; k = k - 1) begin
+            arb_idx = rr_ptr + k[MASTER_BITS-1:0]; // wraps naturally for pow2
+            if (m_req_valid[arb_idx]) begin
+                arb_valid = 1'b1;
+                arb_grant = arb_idx;
+            end
+        end
+    end
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            state         <= X_IDLE;
+            grant         <= {MASTER_BITS{1'b0}};
+            rr_ptr        <= {MASTER_BITS{1'b0}};
+            m_req_ready   <= {NUM_MASTERS{1'b0}};
+            m_resp_valid  <= {NUM_MASTERS{1'b0}};
+            m_resp_rdata  <= {LINE_BYTES*8{1'b0}};
+            m_resp_shared <= 1'b0;
+            snp_req_valid <= {NUM_MASTERS{1'b0}};
+            snp_req_type  <= BUS_RD;
+            snp_req_addr  <= {ADDR_WIDTH{1'b0}};
+            snp_pending   <= {NUM_MASTERS{1'b0}};
+            hit_acc       <= 1'b0;
+            dirty_acc     <= 1'b0;
+            dirty_data    <= {LINE_BYTES*8{1'b0}};
+            l2_req_valid  <= 1'b0;
+            l2_req_write  <= 1'b0;
+            l2_req_addr   <= {ADDR_WIDTH{1'b0}};
+            l2_req_wdata  <= {LINE_BYTES*8{1'b0}};
+            l2_accepted   <= 1'b0;
+            l2_wr_pending <= 1'b0;
+            cur_type      <= BUS_RD;
+            cur_addr      <= {ADDR_WIDTH{1'b0}};
+            cur_wdata     <= {LINE_BYTES*8{1'b0}};
+        end else begin
+            m_req_ready  <= {NUM_MASTERS{1'b0}};
+            m_resp_valid <= {NUM_MASTERS{1'b0}};
+
+            case (state)
+                X_IDLE: begin
+                    if (arb_valid) begin
+                        grant     <= arb_grant;
+                        rr_ptr    <= arb_grant + 1'b1;
+                        cur_type  <= m_req_type[arb_grant*2 +: 2];
+                        cur_addr  <= m_req_addr[arb_grant*ADDR_WIDTH +: ADDR_WIDTH];
+                        cur_wdata <= m_req_wdata[arb_grant*LINE_BYTES*8 +: LINE_BYTES*8];
+                        m_req_ready[arb_grant] <= 1'b1;
+                        hit_acc   <= 1'b0;
+                        dirty_acc <= 1'b0;
+                        if (m_req_type[arb_grant*2 +: 2] == BUS_WB) begin
+                            l2_accepted   <= 1'b0;
+                            l2_wr_pending <= 1'b0;
+                            state <= X_L2WR;
+                        end else begin
+                            snp_req_type <= m_req_type[arb_grant*2 +: 2];
+                            snp_req_addr <= m_req_addr[arb_grant*ADDR_WIDTH +: ADDR_WIDTH];
+                            snp_pending  <= {NUM_MASTERS{1'b1}} & ~({{NUM_MASTERS-1{1'b0}}, 1'b1} << arb_grant);
+                            snp_req_valid<= {NUM_MASTERS{1'b1}} & ~({{NUM_MASTERS-1{1'b0}}, 1'b1} << arb_grant);
+                            state <= X_SNOOP;
+                        end
+                    end
+                end
+
+                X_SNOOP: begin
+                    for (k = 0; k < NUM_MASTERS; k = k + 1) begin
+                        if (snp_pending[k] && snp_resp_valid[k]) begin
+                            snp_pending[k]   <= 1'b0;
+                            snp_req_valid[k] <= 1'b0;
+                            if (snp_resp_hit[k])   hit_acc   <= 1'b1;
+                            if (snp_resp_dirty[k]) begin
+                                dirty_acc  <= 1'b1;
+                                dirty_data <= snp_resp_data[k*LINE_BYTES*8 +: LINE_BYTES*8];
+                            end
+                        end
+                    end
+                    if (snp_pending == {NUM_MASTERS{1'b0}}) begin
+                        if (cur_type == BUS_UPGR) begin
+                            m_resp_shared <= 1'b0;
+                            state <= X_RESP;
+                        end else if (dirty_acc) begin
+                            m_resp_rdata  <= dirty_data;
+                            m_resp_shared <= 1'b1;
+                            if (cur_type == BUS_RD) begin
+                                // write dirty copy through to L2 (stays clean)
+                                l2_accepted   <= 1'b0;
+                                l2_wr_pending <= 1'b0;
+                                state <= X_L2WR_SNP;
+                            end else begin
+                                state <= X_RESP; // RdX: requester owns as M
+                            end
+                        end else begin
+                            m_resp_shared <= hit_acc;
+                            l2_accepted   <= 1'b0;
+                            state <= X_L2RD;
+                        end
+                    end
+                end
+
+                X_L2WR: begin
+                    // phase 1: valid until accepted; phase 2: wait for the L2
+                    // to return to ready (write fully processed; the L2 uses
+                    // live address/data, so both are held stable throughout)
+                    l2_req_write <= 1'b1;
+                    l2_req_addr  <= cur_addr;
+                    l2_req_wdata <= cur_wdata;
+                    if (!l2_accepted) begin
+                        l2_req_valid <= 1'b1;
+                        if (l2_req_valid && l2_req_ready) begin
+                            l2_req_valid <= 1'b0;
+                            l2_accepted  <= 1'b1;
+                            l2_wr_pending<= 1'b1;
+                        end
+                    end else if (l2_wr_pending && l2_req_ready) begin
+                        l2_wr_pending <= 1'b0;
+                        l2_req_write  <= 1'b0;
+                        state <= X_IDLE;
+                    end
+                end
+
+                X_L2WR_SNP: begin
+                    l2_req_write <= 1'b1;
+                    l2_req_addr  <= cur_addr;
+                    l2_req_wdata <= dirty_data;
+                    if (!l2_accepted) begin
+                        l2_req_valid <= 1'b1;
+                        if (l2_req_valid && l2_req_ready) begin
+                            l2_req_valid <= 1'b0;
+                            l2_accepted  <= 1'b1;
+                            l2_wr_pending<= 1'b1;
+                        end
+                    end else if (l2_wr_pending && l2_req_ready) begin
+                        l2_wr_pending <= 1'b0;
+                        l2_req_write  <= 1'b0;
+                        state <= X_RESP;
+                    end
+                end
+
+                X_L2RD: begin
+                    l2_req_write <= 1'b0;
+                    l2_req_addr  <= cur_addr;
+                    if (!l2_accepted) begin
+                        l2_req_valid <= 1'b1;
+                        if (l2_req_valid && l2_req_ready) begin
+                            l2_req_valid <= 1'b0;
+                            l2_accepted  <= 1'b1;
+                        end
+                    end else if (l2_resp_valid) begin
+                        m_resp_rdata <= l2_resp_rdata;
+                        state <= X_RESP;
+                    end
+                end
+
+                X_RESP: begin
+                    m_resp_valid[grant] <= 1'b1;
+                    state <= X_IDLE;
+                end
+
+                default: state <= X_IDLE;
+            endcase
+        end
+    end
+
+endmodule

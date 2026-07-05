@@ -10,31 +10,52 @@
 
 module titan_x5_sm #(
     parameter NUM_WARPS = 8,
-    parameter NUM_ALUS = 32
+    parameter NUM_ALUS = 32,
+    parameter LINE_BYTES = 128
 )(
     input  wire clk,
     input  wire rst_n,
-    
+
     // L1 Cache Interface (Instruction)
     output wire [31:0] l1_icache_addr,
     output wire        l1_icache_req,
     input wire [31:0] l1_icache_rdata,
     input  wire        l1_icache_rvalid,
-    
-    // L1 Cache Interface (Data)
-    output wire [31:0] l1_dcache_addr,
-    output wire [31:0] l1_dcache_wdata,
-    output wire        l1_dcache_req,
-    output wire        l1_dcache_we,
-    input wire [31:0] l1_dcache_rdata,
-    input  wire        l1_dcache_rvalid,
-    
+
+    // L1 D-cache coherent bus interface (to titan_x5_coherent_xbar)
+    output wire                     dbus_req_valid,
+    input  wire                     dbus_req_ready,
+    output wire [1:0]               dbus_req_type,
+    output wire [31:0]              dbus_req_addr,
+    output wire [LINE_BYTES*8-1:0]  dbus_req_wdata,
+    input  wire                     dbus_resp_valid,
+    input  wire [LINE_BYTES*8-1:0]  dbus_resp_rdata,
+    input  wire                     dbus_resp_shared,
+
+    // L1 D-cache snoop interface (from titan_x5_coherent_xbar)
+    input  wire                     snp_req_valid,
+    input  wire [1:0]               snp_req_type,
+    input  wire [31:0]              snp_req_addr,
+    output wire                     snp_resp_valid,
+    output wire                     snp_resp_hit,
+    output wire                     snp_resp_dirty,
+    output wire [LINE_BYTES*8-1:0]  snp_resp_data,
+
+    // debug/verification: MESI state lookup + coalescing perf pulse
+    input  wire [31:0]              dbg_mesi_addr,
+    output wire [1:0]               dbg_mesi_state,
+    output wire                     dbg_lsu_resp_valid,
+    output wire [5:0]               dbg_lsu_xactions,
+
+    // FP rounding mode for the vector FPUs (00 RNE, 01 RTZ, 10 RDN, 11 RUP)
+    input  wire [1:0]               fp_rm,
+
     // Shader Export Interface
     output wire        shader_wb_valid,
     output wire [5:0]  shader_wb_reg,
     output wire [1023:0] shader_wb_data,
 
-    
+
     // thread/warp control
     input wire [NUM_WARPS-1:0] warp_active,
     input wire [NUM_WARPS*32-1:0] warp_pc_in
@@ -61,6 +82,9 @@ module titan_x5_sm #(
     wire [31:0] alu_result    [0:NUM_ALUS-1];
     wire        fifo_full;
     
+    wire [2:0]  lsu_mask_query_id;
+    wire [31:0] lsu_mask_query_mask;
+
     titan_x5_warp_scheduler #(
         .NUM_WARPS(NUM_WARPS)
     ) warp_sched (
@@ -79,6 +103,8 @@ module titan_x5_sm #(
         .fifo_full(fifo_full),
         .barrier_req(1'b0),
         .barrier_warp_id(3'd0),
+        .mask_query_id(lsu_mask_query_id),
+        .mask_query_mask(lsu_mask_query_mask),
         .sched_warp_id(sched_warp_id),
         .sched_valid(sched_valid),
         .sched_pc(sched_pc),
@@ -100,10 +126,12 @@ module titan_x5_sm #(
                 .src1(alu_src1[i*32 +: 32]),
                 .src2(alu_src2[i*32 +: 32]),
                 .src3(alu_src3[i*32 +: 32]),
+                .fp_rm(fp_rm),
                 .stall_in(1'b0),
                 .valid_out(alu_valid_out[i]),
                 .result_out(alu_result[i]),
-                .ready_out()
+                .ready_out(),
+                .fp_flags_out()
             );
         end
     endgenerate
@@ -115,15 +143,93 @@ module titan_x5_sm #(
         end
     endgenerate
 
-    // pipeline logic
+    // pipeline <-> LSU <-> L1 D-cache datapath (warp-wide, coalescing)
     wire [1023:0] pipeline_mem_addr, pipeline_mem_wdata, pipeline_mem_rdata;
-    
-    // since l1 d-cache is 32-bit (scalar interface in titan_x5_gpu_top), we map thread 0's request
-    assign l1_dcache_addr  = pipeline_mem_addr[31:0];
-    assign l1_dcache_wdata = pipeline_mem_wdata[31:0];
-    
-    // broadcast loaded 32-bit data to all 32 lanes
-    assign pipeline_mem_rdata = {32{l1_dcache_rdata}};
+    wire          pipeline_mem_req, pipeline_mem_we, pipeline_mem_rvalid;
+    wire          lsu_req_ready;
+    wire [2:0]    pipeline_mem_warp;
+
+    // LSU <-> L1 line interface
+    wire                    lsu_l1_req_valid, lsu_l1_req_ready, lsu_l1_req_write;
+    wire [31:0]             lsu_l1_req_addr;
+    wire [LINE_BYTES*8-1:0] lsu_l1_req_wdata;
+    wire [LINE_BYTES-1:0]   lsu_l1_req_be;
+    wire                    lsu_l1_resp_valid;
+    wire [LINE_BYTES*8-1:0] lsu_l1_resp_rdata;
+
+    titan_x5_lsu #(
+        .NUM_LANES(32),
+        .ADDR_WIDTH(32),
+        .DATA_WIDTH(32),
+        .LINE_BYTES(LINE_BYTES)
+    ) u_lsu (
+        .clk(clk),
+        .rst_n(rst_n),
+
+        .warp_req_valid(pipeline_mem_req),
+        .warp_req_ready(lsu_req_ready),
+        .warp_req_wid(pipeline_mem_warp),
+        .warp_req_write(pipeline_mem_we),
+        .warp_req_mask(lsu_mask_query_mask),
+        .warp_req_addr(pipeline_mem_addr),
+        .warp_req_wdata(pipeline_mem_wdata),
+
+        .warp_resp_valid(pipeline_mem_rvalid),
+        .warp_resp_wid(),
+        .warp_resp_rdata(pipeline_mem_rdata),
+        .warp_resp_xactions(dbg_lsu_xactions),
+
+        .mem_req_valid(lsu_l1_req_valid),
+        .mem_req_ready(lsu_l1_req_ready),
+        .mem_req_write(lsu_l1_req_write),
+        .mem_req_addr(lsu_l1_req_addr),
+        .mem_req_wdata(lsu_l1_req_wdata),
+        .mem_req_be(lsu_l1_req_be),
+        .mem_resp_valid(lsu_l1_resp_valid),
+        .mem_resp_rdata(lsu_l1_resp_rdata)
+    );
+
+    assign lsu_mask_query_id  = pipeline_mem_warp;
+    assign dbg_lsu_resp_valid = pipeline_mem_rvalid;
+
+    titan_x5_l1_cache #(
+        .ADDR_WIDTH(32),
+        .LINE_BYTES(LINE_BYTES),
+        .WAYS(4),
+        .SETS(64)
+    ) u_l1_dcache (
+        .clk(clk),
+        .rst_n(rst_n),
+
+        .core_req_valid(lsu_l1_req_valid),
+        .core_req_ready(lsu_l1_req_ready),
+        .core_req_write(lsu_l1_req_write),
+        .core_req_addr(lsu_l1_req_addr),
+        .core_req_wdata(lsu_l1_req_wdata),
+        .core_req_be(lsu_l1_req_be),
+        .core_resp_valid(lsu_l1_resp_valid),
+        .core_resp_rdata(lsu_l1_resp_rdata),
+
+        .bus_req_valid(dbus_req_valid),
+        .bus_req_ready(dbus_req_ready),
+        .bus_req_type(dbus_req_type),
+        .bus_req_addr(dbus_req_addr),
+        .bus_req_wdata(dbus_req_wdata),
+        .bus_resp_valid(dbus_resp_valid),
+        .bus_resp_rdata(dbus_resp_rdata),
+        .bus_resp_shared(dbus_resp_shared),
+
+        .snp_req_valid(snp_req_valid),
+        .snp_req_type(snp_req_type),
+        .snp_req_addr(snp_req_addr),
+        .snp_resp_valid(snp_resp_valid),
+        .snp_resp_hit(snp_resp_hit),
+        .snp_resp_dirty(snp_resp_dirty),
+        .snp_resp_data(snp_resp_data),
+
+        .dbg_addr(dbg_mesi_addr),
+        .dbg_mesi(dbg_mesi_state)
+    );
 
     titan_x5_pipeline pipeline_inst (
         .clk(clk),
@@ -151,12 +257,14 @@ module titan_x5_sm #(
         .alu_src3(alu_src3),
         .alu_valid_out(alu_valid_out[0]), // assume uniform execution latency across warp
         .alu_result(alu_result_flat),
-        .mem_req(l1_dcache_req),
-        .mem_we(l1_dcache_we),
+        .mem_req(pipeline_mem_req),
+        .mem_req_ready(lsu_req_ready),
+        .mem_we(pipeline_mem_we),
+        .mem_warp_id(pipeline_mem_warp),
         .mem_addr(pipeline_mem_addr),
         .mem_wdata(pipeline_mem_wdata),
         .mem_rdata(pipeline_mem_rdata),
-        .mem_rvalid(l1_dcache_rvalid),
+        .mem_rvalid(pipeline_mem_rvalid),
         .id_valid_out(id_valid),
         .id_warp_out(id_warp_id),
         .id_dest_reg_out(id_dest_reg),
