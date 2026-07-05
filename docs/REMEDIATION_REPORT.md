@@ -141,12 +141,64 @@ scenarios; it reports no missing transitions, deadlocks, or coherency holes.
 - Two testbench-side protocol races (read-after-edge sampling), documented
   in the TB code as ReadOnly-phase sampling rules.
 
+## Phase 5 (2026-07-06) — Full-chip "rasterizer out of bounds" root cause
+
+The long-standing full-chip failure (`Rasterizer drew out of bounds`,
+12 stray pixels) was root-caused and fixed. **It was never the rasterizer**
+— the framebuffer had never received a single correctly-colored pixel in
+this test's history, and the "12 stray pixels" were the DRAW/FENCE command
+packet itself: the ring buffer lived at VRAM offset 0 and aliased into the
+region the checker scanned. Eight stacked defects (2 RTL, 6 testbench) hid
+behind that one symptom:
+
+**RTL bugs (both fixed):**
+1. *Warp-scheduler X-lock* (`titan_x5_pipeline.v`) — the scheduler's
+   scoreboard hazard lookup indexed with source-register fields decoded
+   combinationally from the **uninitialized instruction-FIFO head** (X at
+   time 0). `scoreboard[warp][X]` returns X, X-stalling every warp forever,
+   so no SM ever fetched an instruction. Fixed by gating the FIFO head with
+   `fifo_empty`.
+2. *Unthrottled instruction fetch* (`titan_x5_pipeline.v`, `titan_x5_sm.v`,
+   `titan_x5_gpu_top.v`) — the fetch request was held high with **no
+   grant/flow control**, so the crossbar re-accepted the same request every
+   cycle, flooding the memory controller's CDC FIFO with duplicate reads
+   and starving the command processor and ROP (once bug 1 was fixed and the
+   SMs woke up). Fixed by wiring the crossbar accept signal
+   (`xbar_m_req_ready`) into the SM as `l1_icache_gnt` and limiting each SM
+   to one outstanding fetch, with the in-flight warp id captured at accept.
+
+**Testbench bugs (`tb/tb_titan_x5_gpu_top.v`, all fixed):**
+3. Framebuffer read-back used a 1024-pixel row stride; the ROP and display
+   engine both use `VGA_H_VISIBLE` (1920). The TB now derives its stride
+   from one localparam passed down as a parameter override on the DUT.
+4. The ring buffer at `0x1000_0000` aliases to VRAM offset 0, colliding
+   with the framebuffer scan region and the shader code at PC=0. Moved to
+   1 MiB into VRAM.
+5. `write_vram_word` subtracted a fixed `0x1000_0000` base, so installing
+   the shader instruction at address 0 underflowed to an out-of-bounds
+   array index and was silently dropped — the SMs never had a real program.
+   The task now mirrors the AXI model's 8 MiB address aliasing.
+6. The register-file backdoor init ran at time 0, but the RF zeroes itself
+   while `rst_n` is low, wiping the deposit at the first clock edge. The
+   init now runs after reset deassertion.
+7. The per-thread gradient color was built as `{a_val, b_val, g_val,
+   r_val}` from four 32-bit regs — a 128-bit concatenation truncated to
+   its low word, leaving only the red channel. Now packs byte slices.
+8. The AXI VRAM model ignored `wstrb` (the memory controller replicates
+   the 32-bit payload across the 512-bit bus and strobes one word), so
+   each committed pixel smeared across a 16-pixel block. The model now
+   commits byte-by-byte per the strobes. The fixed `#50000` render wait
+   was also replaced with an adaptive quiesce loop (no new VRAM write
+   commits for 3 consecutive 10 µs windows, 500 µs hard cap).
+
+**Result:** the full-chip render test now genuinely passes — 181 pixels
+drawn, all inside the expected bounding box, zero out of bounds, probe
+pixel (16,30) present, with real per-thread gradient colors flowing
+SM shader → ROP → crossbar → memory controller → AXI VRAM. All four
+regression suites (lsu/fpu/mesi/tmu) re-run green after the RTL changes.
+
 ## Known limitations / pre-existing issues (out of scope)
 
-- **Pre-existing at HEAD:** the full-chip sim's rasterizer check fails
-  (`Rasterizer drew out of bounds`, 12 stray pixels) — byte-identical
-  failure before and after this work; the rasterizer was not part of the
-  four phases.
 - `rtl/titan_x5_fpga_top.v` references Xilinx primitives (BUFG) and a
   missing `titan_x5_vram_ctrl`; simulation builds must scope elaboration
   with `-s tb_titan_x5_gpu_top` (pre-existing).
@@ -156,3 +208,8 @@ scenarios; it reports no missing transitions, deadlocks, or coherency holes.
   is future work.
 - The LSU handles one warp request at a time; MSHR-style hit-under-miss is
   future work.
+- The SM has no instruction cache and no per-warp PC advance
+  (`warp_pc_in` is tied to 0 in `titan_x5_gpu_top.v`), so active warps
+  refetch the same instruction from memory; fetch is now flow-controlled
+  to one outstanding request per SM, but a real I-cache and PC sequencing
+  remain future work.
