@@ -20,6 +20,7 @@ module titan_x5_pipeline (
     // instruction cache / memory interface
     output wire [31:0] if_pc,
     output wire        if_req,
+    input  wire        if_gnt,   // fetch accepted by the interconnect
     input wire [31:0] if_inst,
     input  wire        if_inst_valid,
     
@@ -72,18 +73,26 @@ module titan_x5_pipeline (
 
     // if stage
     reg [2:0]  if_warp;
-    reg        if_valid;
-    
+    reg        if_pending; // fetch accepted, response not yet returned
+
     assign if_pc = sched_pc;
-    assign if_req = sched_valid;
-    
+    // Allow only one outstanding fetch. Without this the request line is
+    // held high and the crossbar re-accepts it every cycle, flooding the
+    // memory controller with duplicate reads and starving every other
+    // master (command processor, ROP) of the shared memory port.
+    assign if_req = sched_valid && !if_pending;
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             if_warp <= 0;
-            if_valid <= 0;
+            if_pending <= 0;
         end else begin
-            if_warp <= sched_warp_id;
-            if_valid <= sched_valid;
+            if (if_req && if_gnt) begin
+                if_warp <= sched_warp_id; // tag the in-flight fetch's warp
+                if_pending <= 1'b1;
+            end else if (if_inst_valid) begin
+                if_pending <= 1'b0;
+            end
         end
     end
 
@@ -125,7 +134,11 @@ module titan_x5_pipeline (
         end
     end
 
-    wire [31:0] id_inst_raw = fifo_inst[fifo_rp[2:0]];
+    // Gate the FIFO head with emptiness: before the first fetch the FIFO RAM
+    // holds X, and an X source-register index would poison the scheduler's
+    // scoreboard lookup (X-stalling every warp forever, so no fetch ever
+    // happens to clear it).
+    wire [31:0] id_inst_raw = fifo_empty ? 32'd0 : fifo_inst[fifo_rp[2:0]];
     wire [2:0]  id_warp_raw = fifo_warp[fifo_rp[2:0]];
     wire        id_inst_valid_raw = !fifo_empty;
 

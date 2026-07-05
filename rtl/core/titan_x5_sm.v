@@ -19,6 +19,7 @@ module titan_x5_sm #(
     // L1 Cache Interface (Instruction)
     output wire [31:0] l1_icache_addr,
     output wire        l1_icache_req,
+    input  wire        l1_icache_gnt,
     input wire [31:0] l1_icache_rdata,
     input  wire        l1_icache_rvalid,
 
@@ -239,6 +240,7 @@ module titan_x5_sm #(
         .sched_pc(sched_pc),
         .if_pc(l1_icache_addr),
         .if_req(l1_icache_req),
+        .if_gnt(l1_icache_gnt),
         .if_inst(l1_icache_rdata),
         .if_inst_valid(l1_icache_rvalid),
         .rf_rd_addr1(rf_rd_addr1),

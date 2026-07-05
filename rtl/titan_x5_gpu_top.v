@@ -304,7 +304,7 @@ module titan_x5_gpu_top #(
             titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(32), .LINE_BYTES(CXB_LINE)) u_sm (
                 .clk(clk),
                 .rst_n(rst_n),
-                .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),
+                .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_gnt(xbar_m_req_ready[9+gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),
 
                 .dbus_req_valid(cxb_m_req_valid[gi]),
                 .dbus_req_ready(cxb_m_req_ready[gi]),
