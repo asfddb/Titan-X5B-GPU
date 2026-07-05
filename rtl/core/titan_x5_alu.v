@@ -32,7 +32,8 @@ module titan_x5_alu #(
     input wire [DATA_WIDTH-1:0] src1,
     input wire [DATA_WIDTH-1:0] src2,
     input wire [DATA_WIDTH-1:0] src3, // for fma
-    
+    input wire [1:0]            fp_rm, // IEEE rounding mode: 00 RNE, 01 RTZ, 10 RDN, 11 RUP
+
     // hazard / flow control
     input  wire                    stall_in,
     
@@ -40,6 +41,7 @@ module titan_x5_alu #(
     output wire                    valid_out,
     output wire [DATA_WIDTH-1:0] result_out,
     output wire                    ready_out, // signals if alu can accept new instruction
+    output wire [3:0]              fp_flags_out, // {invalid, overflow, underflow, inexact}, valid with FP results
     
     // branch interface
     output wire                    branch_valid_out,
@@ -240,35 +242,114 @@ module titan_x5_alu #(
     end
 
     // 4. IEEE-754 Floating Point Datapath (6-Stage Pipeline)
+    //
+    // Structure: titan_x5_fp32_mul occupies stages 1-3, titan_x5_fp32_add
+    // occupies stages 4-6. All three FP ops have a uniform 6-cycle latency:
+    //   FADD: operands delayed 3 cycles, then the adder.
+    //   FMUL: multiplier, then result delayed 3 cycles.
+    //   FMA : multiplier feeds the adder (round(round(a*b) + c); note this
+    //         is a cascade with double rounding, not a fused single-rounding
+    //         FMA - documented deviation).
     reg fp_v1, fp_v2, fp_v3, fp_v4, fp_v5, fp_v6;
-    reg [DATA_WIDTH-1:0] fp_s1_res, fp_s2_res, fp_s3_res, fp_s4_res, fp_s5_res, fp_res_out;
-    
+
+    localparam FPK_ADD = 2'd0;
+    localparam FPK_MUL = 2'd1;
+    localparam FPK_FMA = 2'd2;
+
     wire is_fp_op = (opcode == OP_FADD) || (opcode == OP_FMUL) || (opcode == OP_FMA);
+    wire [1:0] fp_kind_in = (opcode == OP_FADD) ? FPK_ADD :
+                            (opcode == OP_FMUL) ? FPK_MUL : FPK_FMA;
+
+    reg [1:0] fp_kind_s1, fp_kind_s2, fp_kind_s3, fp_kind_s4, fp_kind_s5, fp_kind_s6;
+    reg [31:0] fp_a_d1, fp_a_d2, fp_a_d3;   // src1 delay line (FADD)
+    reg [31:0] fp_b_d1, fp_b_d2, fp_b_d3;   // src2 delay line (FADD)
+    reg [31:0] fp_c_d1, fp_c_d2, fp_c_d3;   // src3 delay line (FMA addend)
+    reg [1:0]  fp_rm_d1, fp_rm_d2, fp_rm_d3;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             fp_v1 <= 0; fp_v2 <= 0; fp_v3 <= 0; fp_v4 <= 0; fp_v5 <= 0; fp_v6 <= 0;
-            fp_res_out <= 0;
+            fp_kind_s1 <= 2'd0; fp_kind_s2 <= 2'd0; fp_kind_s3 <= 2'd0;
+            fp_kind_s4 <= 2'd0; fp_kind_s5 <= 2'd0; fp_kind_s6 <= 2'd0;
+            fp_a_d1 <= 0; fp_a_d2 <= 0; fp_a_d3 <= 0;
+            fp_b_d1 <= 0; fp_b_d2 <= 0; fp_b_d3 <= 0;
+            fp_c_d1 <= 0; fp_c_d2 <= 0; fp_c_d3 <= 0;
+            fp_rm_d1 <= 0; fp_rm_d2 <= 0; fp_rm_d3 <= 0;
         end else if (!stall_in) begin
             fp_v1 <= valid_in && is_fp_op;
-            fp_s1_res <= (src1 * src2) + src3; // Mocking structural datapath
-            
-            fp_v2 <= fp_v1;
-            fp_s2_res <= fp_s1_res;
-            
-            fp_v3 <= fp_v2;
-            fp_s3_res <= fp_s2_res;
-            
-            fp_v4 <= fp_v3;
-            fp_s4_res <= fp_s3_res;
-            
-            fp_v5 <= fp_v4;
-            fp_s5_res <= fp_s4_res;
-            
-            fp_v6 <= fp_v5;
-            fp_res_out <= fp_s5_res;
+            fp_kind_s1 <= fp_kind_in;
+            fp_a_d1 <= src1;  fp_b_d1 <= src2;  fp_c_d1 <= src3;
+            fp_rm_d1 <= fp_rm;
+
+            fp_v2 <= fp_v1;  fp_kind_s2 <= fp_kind_s1;
+            fp_a_d2 <= fp_a_d1; fp_b_d2 <= fp_b_d1; fp_c_d2 <= fp_c_d1;
+            fp_rm_d2 <= fp_rm_d1;
+
+            fp_v3 <= fp_v2;  fp_kind_s3 <= fp_kind_s2;
+            fp_a_d3 <= fp_a_d2; fp_b_d3 <= fp_b_d2; fp_c_d3 <= fp_c_d2;
+            fp_rm_d3 <= fp_rm_d2;
+
+            fp_v4 <= fp_v3;  fp_kind_s4 <= fp_kind_s3;
+            fp_v5 <= fp_v4;  fp_kind_s5 <= fp_kind_s4;
+            fp_v6 <= fp_v5;  fp_kind_s6 <= fp_kind_s5;
         end
     end
+
+    // multiplier: stages 1-3
+    wire        fmul_valid_out;
+    wire [31:0] fmul_result;
+    wire        fmul_inv, fmul_ovf, fmul_unf, fmul_inx;
+
+    titan_x5_fp32_mul u_fp32_mul (
+        .clk(clk), .rst_n(rst_n), .en(!stall_in),
+        .valid_in(valid_in && !stall_in && (opcode == OP_FMUL || opcode == OP_FMA)),
+        .rm(fp_rm),
+        .a(src1), .b(src2),
+        .valid_out(fmul_valid_out),
+        .result(fmul_result),
+        .flag_invalid(fmul_inv), .flag_overflow(fmul_ovf),
+        .flag_underflow(fmul_unf), .flag_inexact(fmul_inx)
+    );
+
+    // delay the multiplier result/flags through stages 4-6 (FMUL path)
+    reg [31:0] fmul_res_d4, fmul_res_d5, fmul_res_d6;
+    reg [3:0]  fmul_flags_d4, fmul_flags_d5, fmul_flags_d6;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            fmul_res_d4 <= 0; fmul_res_d5 <= 0; fmul_res_d6 <= 0;
+            fmul_flags_d4 <= 0; fmul_flags_d5 <= 0; fmul_flags_d6 <= 0;
+        end else if (!stall_in) begin
+            fmul_res_d4 <= fmul_result;
+            fmul_flags_d4 <= {fmul_inv, fmul_ovf, fmul_unf, fmul_inx};
+            fmul_res_d5 <= fmul_res_d4;   fmul_flags_d5 <= fmul_flags_d4;
+            fmul_res_d6 <= fmul_res_d5;   fmul_flags_d6 <= fmul_flags_d5;
+        end
+    end
+
+    // adder: stages 4-6. FMA feeds the rounded product; FADD the operands.
+    wire        fadd_valid_out;
+    wire [31:0] fadd_result;
+    wire        fadd_inv, fadd_ovf, fadd_unf, fadd_inx;
+
+    titan_x5_fp32_add u_fp32_add (
+        .clk(clk), .rst_n(rst_n), .en(!stall_in),
+        .valid_in(fp_v3 && (fp_kind_s3 == FPK_ADD || fp_kind_s3 == FPK_FMA)),
+        .rm(fp_rm_d3),
+        .a((fp_kind_s3 == FPK_FMA) ? fmul_result : fp_a_d3),
+        .b((fp_kind_s3 == FPK_FMA) ? fp_c_d3     : fp_b_d3),
+        .valid_out(fadd_valid_out),
+        .result(fadd_result),
+        .flag_invalid(fadd_inv), .flag_overflow(fadd_ovf),
+        .flag_underflow(fadd_unf), .flag_inexact(fadd_inx)
+    );
+
+    wire [31:0] fp_res_out = (fp_kind_s6 == FPK_MUL) ? fmul_res_d6 : fadd_result;
+    wire [3:0]  fp_flags =
+        (fp_kind_s6 == FPK_MUL) ? fmul_flags_d6 :
+        (fp_kind_s6 == FPK_FMA) ? (fmul_flags_d6 | {fadd_inv, fadd_ovf, fadd_unf, fadd_inx})
+                                : {fadd_inv, fadd_ovf, fadd_unf, fadd_inx};
+
+    assign fp_flags_out = fp_v6 ? fp_flags : 4'd0;
 
     // 5. Tensor Core Array (WMMA)
     reg wmma_v1, wmma_v2, wmma_v3, wmma_v4;

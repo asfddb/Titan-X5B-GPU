@@ -56,6 +56,7 @@ module tb_titan_x5_ultimate;
         .src1(src1),
         .src2(src2),
         .src3(src3),
+        .fp_rm(2'b00),
         .stall_in(1'b0),
         .valid_out(out_valid),
         .result_out(result),

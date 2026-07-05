@@ -25,6 +25,7 @@ module tb_titan_x5_alu();
         .src1(src1),
         .src2(src2),
         .src3(src3),
+        .fp_rm(2'b00),
         .valid_out(valid_out),
         .result_out(result_out)
     );
