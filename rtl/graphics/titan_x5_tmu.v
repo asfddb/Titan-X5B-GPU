@@ -10,8 +10,19 @@
 
 /*
  * Module: titan_x5_tmu
- * Description: Texture Mapping Unit. Bilinear filtering, address generation 
- * (clamp/wrap modes), direct-mapped 4KB cache, 8/16/32-bit format support.
+ * Description: Texture Mapping Unit. Bilinear filtering, address generation
+ * (clamp/wrap modes), 4KB set-associative texture cache, 8/16/32-bit format
+ * support.
+ *
+ * Bilinear pipeline: fetches the 2x2 texel footprint for (U,V) in 16.16
+ * fixed point, expands each texel to RGBA8888 (L8 -> replicated luminance,
+ * RGB565 -> 888 with bit replication), then blends with round-to-nearest
+ * fixed-point lerps: horizontal pairs by the U fraction, then vertically by
+ * the V fraction:
+ *   c(x,f) = a + ((b - a) * f + 128) >> 8      (per 8-bit channel)
+ *
+ * Wrap mode assumes in-range integer texel coordinates (ui < width); clamp
+ * mode handles arbitrary coordinates.
  */
 module titan_x5_tmu (
     input  wire clk,
@@ -109,26 +120,39 @@ module titan_x5_tmu (
 
     wire [2:0] bpp_shift = (i_format == 2'b10) ? 2 : (i_format == 2'b01) ? 1 : 0;
 
+    // extract the addressed texel from the fetched word and expand it to
+    // RGBA8888 so the per-channel blend math is format-independent
     function [31:0] extract_color;
     input [31:0] word;
     input [1:0] offset;
     input [1:0] fmt;
+        reg [15:0] t16;
+        reg [7:0]  t8;
         begin
             if (fmt == 2'b10) begin
+                // RGBA8888: pass through
                 extract_color = word;
             end else if (fmt == 2'b01) begin
-                extract_color = (offset[1]) ? {16'd0, word[31:16]} : {16'd0, word[15:0]};
+                // RGB565 -> RGBA8888 with bit replication, alpha = 0xFF
+                t16 = (offset[1]) ? word[31:16] : word[15:0];
+                extract_color = {8'hFF,                              // A
+                                 {t16[4:0],   t16[4:2]},             // B
+                                 {t16[10:5],  t16[10:9]},            // G
+                                 {t16[15:11], t16[15:13]}};          // R
             end else begin
+                // L8 -> replicated luminance, alpha = 0xFF
                 case (offset)
-                    2'b00: extract_color = {24'd0, word[7:0]};
-                    2'b01: extract_color = {24'd0, word[15:8]};
-                    2'b10: extract_color = {24'd0, word[23:16]};
-                    2'b11: extract_color = {24'd0, word[31:24]};
+                    2'b00: t8 = word[7:0];
+                    2'b01: t8 = word[15:8];
+                    2'b10: t8 = word[23:16];
+                    2'b11: t8 = word[31:24];
                 endcase
+                extract_color = {8'hFF, t8, t8, t8};
             end
         end
     endfunction
 
+    // round-to-nearest fixed-point lerp: a + (b-a)*f/256, f in [0,255]
     function [7:0] lerp;
     input [7:0] a;
     input [7:0] b;
@@ -136,10 +160,10 @@ module titan_x5_tmu (
         reg [15:0] diff;
         begin
             if (a > b) begin
-                diff = (a - b) * f;
+                diff = (a - b) * f + 16'd128;
                 lerp = a - (diff >> 8);
             end else begin
-                diff = (b - a) * f;
+                diff = (b - a) * f + 16'd128;
                 lerp = a + (diff >> 8);
             end
         end
@@ -148,40 +172,47 @@ module titan_x5_tmu (
     reg [31:0] top_mix, bot_mix;
     integer i;
     
+    // 4KB texture cache: 4-byte lines (one 32-bit texel word per line),
+    // 4 ways x 256 sets. Read-only client: lines fill Exclusive and are
+    // never dirtied, so the bus port only ever issues BusRd; the snoop
+    // port is tied off (texture data is not coherent with the SM L1s).
     titan_x5_l1_cache #(
         .ADDR_WIDTH(32),
-        .DATA_WIDTH(32),
-        .LINE_SIZE(4),
+        .LINE_BYTES(4),
         .WAYS(4),
-        .SETS(128),
-        .MSHR_ENTRIES(4)
+        .SETS(256)
     ) u_l1_cache (
         .clk(clk),
         .rst_n(rst_n),
-        .req_valid(cache_req_valid),
-        .req_addr(cache_req_addr),
-        .req_wdata(32'd0),
-        .req_write(1'b0),
-        .req_ready(cache_req_ready),
-        .resp_valid(cache_resp_valid),
-        .resp_rdata(cache_resp_rdata),
-        
-        .m_axi_awaddr(),
-        .m_axi_awvalid(),
-        .m_axi_awready(1'b1),
-        .m_axi_wdata(),
-        .m_axi_wvalid(),
-        .m_axi_wready(1'b1),
-        .m_axi_bresp(2'b00),
-        .m_axi_bvalid(1'b0),
-        .m_axi_bready(),
-        
-        .m_axi_araddr(mem_addr),
-        .m_axi_arvalid(mem_req),
-        .m_axi_arready(mem_gnt),
-        .m_axi_rdata(mem_rdata),
-        .m_axi_rvalid(mem_valid),
-        .m_axi_rready() // Internal logic relies on ready=1 implicitly
+
+        .core_req_valid(cache_req_valid),
+        .core_req_ready(cache_req_ready),
+        .core_req_write(1'b0),
+        .core_req_addr(cache_req_addr),
+        .core_req_wdata(32'd0),
+        .core_req_be(4'h0),
+        .core_resp_valid(cache_resp_valid),
+        .core_resp_rdata(cache_resp_rdata),
+
+        .bus_req_valid(mem_req),
+        .bus_req_ready(mem_gnt),
+        .bus_req_type(),          // always BusRd for a read-only client
+        .bus_req_addr(mem_addr),
+        .bus_req_wdata(),
+        .bus_resp_valid(mem_valid),
+        .bus_resp_rdata(mem_rdata),
+        .bus_resp_shared(1'b0),
+
+        .snp_req_valid(1'b0),
+        .snp_req_type(2'b00),
+        .snp_req_addr(32'd0),
+        .snp_resp_valid(),
+        .snp_resp_hit(),
+        .snp_resp_dirty(),
+        .snp_resp_data(),
+
+        .dbg_addr(32'd0),
+        .dbg_mesi()
     );
     
     always @(posedge clk or negedge rst_n) begin
