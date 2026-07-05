@@ -179,6 +179,50 @@ def fp_mul(a_bits, b_bits, rm, fmt=FP32):
     return _round_pack(sign, ma * mb, ca + cb, rm, fmt)
 
 
+def fp_fma(a_bits, b_bits, c_bits, rm, fmt=FP32):
+    """Fused multiply-add: a*b + c with a SINGLE rounding.
+
+    Special-value rules match the RTL (titan_x5_fp32_fma):
+    - any NaN -> canonical qNaN; invalid if any sNaN.
+    - 0*Inf raises invalid even when the addend is a quiet NaN
+      (RISC-V convention).
+    - Inf product + opposite-signed Inf addend -> qNaN + invalid.
+    - exact zero sum -> +0 (or -0 under RDN); same-signed zero
+      operands keep their sign.
+    """
+    ka, sa, ma, ca = _decode(a_bits, fmt)
+    kb, sb, mb, cb = _decode(b_bits, fmt)
+    kc, sc, mc, cc = _decode(c_bits, fmt)
+    ps = sa ^ sb
+
+    mul_inv = ((ka == "inf" and kb == "zero")
+               or (ka == "zero" and kb == "inf"))
+    if ka in ("nan", "snan") or kb in ("nan", "snan") or kc in ("nan", "snan"):
+        any_snan = "snan" in (ka, kb, kc)
+        return fmt.QNAN, _flags(invalid=any_snan or mul_inv)
+    if mul_inv:
+        return fmt.QNAN, _flags(invalid=True)
+    if ka == "inf" or kb == "inf":
+        if kc == "inf" and sc != ps:
+            return fmt.QNAN, _flags(invalid=True)
+        return fmt.inf(ps), _flags()
+    if kc == "inf":
+        return fmt.inf(sc), _flags()
+    if (ka == "zero" or kb == "zero") and kc == "zero":
+        if ps == sc:
+            return fmt.zero(ps), _flags()
+        return fmt.zero(1 if rm == RM_RDN else 0), _flags()
+
+    scale_p = ca + cb
+    scale = min(scale_p, cc)
+    s = (((ma * mb) << (scale_p - scale)) * (-1 if ps else 1)
+         + ((mc << (cc - scale)) * (-1 if sc else 1)))
+    if s == 0:
+        return fmt.zero(1 if rm == RM_RDN else 0), _flags()
+    sign = 1 if s < 0 else 0
+    return _round_pack(sign, abs(s), scale, rm, fmt)
+
+
 def is_nan(bits, fmt=FP32):
     e = (bits >> fmt.MANT) & fmt.EMAX_FIELD
     f = bits & ((1 << fmt.MANT) - 1)

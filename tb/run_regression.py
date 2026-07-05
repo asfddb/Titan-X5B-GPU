@@ -42,6 +42,7 @@ SUITES = {
         sources=[os.path.join(TB, "tb_fpu_top.v")] + rtl_files(
             "fpu/titan_x5_fp32_add.v",
             "fpu/titan_x5_fp32_mul.v",
+            "fpu/titan_x5_fp32_fma.v",
             "tensor/titan_x5_fp16_mul.v",
             "tensor/titan_x6_tensor_core_array.v",
             "core/titan_x5_alu.v",

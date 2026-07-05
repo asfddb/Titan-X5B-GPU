@@ -32,7 +32,7 @@ import cocotb
 from cocotb.triggers import RisingEdge, ClockCycles, Timer, ReadOnly
 
 from tb_common import start_clock_and_reset, load_vectors
-from fp_ref import fp_add, fp_mul, is_nan, FP32, FP16, RM_RNE
+from fp_ref import fp_add, fp_mul, fp_fma, is_nan, FP32, FP16, RM_RNE
 
 QNAN32 = 0x7FC00000
 
@@ -275,7 +275,7 @@ OP_FADD, OP_FMUL, OP_FMA = 16, 17, 21
 @cocotb.test()
 async def test_alu_fp_integration(dut):
     """End-to-end: FADD/FMUL/FMA through the ALU's 6-stage FP pipeline.
-    FMA reference: round(round(a*b) + c) - the documented cascade."""
+    FMA reference: fp_fma - true fused multiply-add, single rounding."""
     rng = random.Random(0xA1F9)
     await start_clock_and_reset(dut)
     dut.alu_valid_in.value = 0
@@ -321,10 +321,56 @@ async def test_alu_fp_integration(dut):
             f"got {got:08x}, expected {exp:08x}")
 
         got = await alu_op(OP_FMA, a, b, c, rm)
-        prod, _ = fp_mul(a, b, rm)
-        exp, _ = fp_add(prod, c, rm)
+        exp, _ = fp_fma(a, b, c, rm)
         assert got == exp or (is_nan(got) and is_nan(exp)), (
             f"ALU FMA a={a:08x} b={b:08x} c={c:08x} rm={rm}: "
             f"got {got:08x}, expected {exp:08x}")
 
-    dut._log.info("ALU FP pipeline integration passed (FADD/FMUL/FMA)")
+    # Directed fused-vs-cascade cases: each would round differently (or
+    # lose the residual entirely) if computed as round(round(a*b) + c).
+    fused_cases = [
+        # x*x - round(x*x): tiny nonzero residual a cascade returns as 0
+        (0x3F800001, 0x3F800001, 0xBF800002),  # (1+2^-23)^2 - rounded sq
+        (0x3F800001, 0x3F800001, 0x3F800002),
+        # product in the far-below-addend sticky window
+        (0x3F800000, 0x33800000, 0x7F000000),  # 1 * 2^-24 + 2^127
+        (0x3F800000, 0x00800000, 0xFF7FFFFF),  # 1 * 2^-126 - maxfinite
+        # catastrophic cancellation: fused keeps the exact low bits
+        (0x40490FDB, 0x40490FDB, 0xC11DE9E7),  # pi*pi - round(pi*pi)
+        # subnormal product magnitudes
+        (0x00800001, 0x3F000000, 0x80400000),
+        (0x00FFFFFF, 0x3F7FFFFF, 0x80800000),
+        # 0*Inf + qNaN must still raise invalid (RISC-V rule)
+        (0x00000000, 0x7F800000, 0x7FC00000),
+        # Inf product vs opposite Inf addend
+        (0x7F800000, 0x3F800000, 0xFF800000),
+        # exact cancellation to zero
+        (0x3F800000, 0x40000000, 0xC0000000),  # 1*2 - 2
+    ]
+    for a, b, c in fused_cases:
+        for rm in range(4):
+            got = await alu_op(OP_FMA, a, b, c, rm)
+            exp, _ = fp_fma(a, b, c, rm)
+            assert got == exp or (is_nan(got) and is_nan(exp)), (
+                f"ALU FMA directed a={a:08x} b={b:08x} c={c:08x} rm={rm}: "
+                f"got {got:08x}, expected {exp:08x}")
+
+    # Biased FMA randoms: pick the addend exponent near the product's so
+    # the alignment window and catastrophic cancellation get hammered.
+    for trial in range(1000):
+        ea = rng.randrange(1, 255)
+        eb = rng.randrange(1, 255)
+        pe = ea + eb - 127
+        ec = min(254, max(0, pe + rng.randrange(-30, 31)))
+        a = (rng.getrandbits(1) << 31) | (ea << 23) | rng.getrandbits(23)
+        b = (rng.getrandbits(1) << 31) | (eb << 23) | rng.getrandbits(23)
+        c = (rng.getrandbits(1) << 31) | (ec << 23) | rng.getrandbits(23)
+        rm = rng.randrange(4)
+        got = await alu_op(OP_FMA, a, b, c, rm)
+        exp, _ = fp_fma(a, b, c, rm)
+        assert got == exp or (is_nan(got) and is_nan(exp)), (
+            f"ALU FMA biased a={a:08x} b={b:08x} c={c:08x} rm={rm}: "
+            f"got {got:08x}, expected {exp:08x}")
+
+    dut._log.info("ALU FP pipeline integration passed "
+                  "(FADD/FMUL/fused FMA + directed fused cases)")

@@ -244,12 +244,12 @@ module titan_x5_alu #(
     // 4. IEEE-754 Floating Point Datapath (6-Stage Pipeline)
     //
     // Structure: titan_x5_fp32_mul occupies stages 1-3, titan_x5_fp32_add
-    // occupies stages 4-6. All three FP ops have a uniform 6-cycle latency:
+    // occupies stages 4-6, and titan_x5_fp32_fma is a dedicated 6-stage
+    // fused unit. All three FP ops have a uniform 6-cycle latency:
     //   FADD: operands delayed 3 cycles, then the adder.
     //   FMUL: multiplier, then result delayed 3 cycles.
-    //   FMA : multiplier feeds the adder (round(round(a*b) + c); note this
-    //         is a cascade with double rounding, not a fused single-rounding
-    //         FMA - documented deviation).
+    //   FMA : true fused multiply-add - a*b kept exact, c aligned against
+    //         the full 48-bit product, single rounding at the end.
     reg fp_v1, fp_v2, fp_v3, fp_v4, fp_v5, fp_v6;
 
     localparam FPK_ADD = 2'd0;
@@ -302,7 +302,7 @@ module titan_x5_alu #(
 
     titan_x5_fp32_mul u_fp32_mul (
         .clk(clk), .rst_n(rst_n), .en(!stall_in),
-        .valid_in(valid_in && !stall_in && (opcode == OP_FMUL || opcode == OP_FMA)),
+        .valid_in(valid_in && !stall_in && (opcode == OP_FMUL)),
         .rm(fp_rm),
         .a(src1), .b(src2),
         .valid_out(fmul_valid_out),
@@ -326,27 +326,44 @@ module titan_x5_alu #(
         end
     end
 
-    // adder: stages 4-6. FMA feeds the rounded product; FADD the operands.
+    // adder: stages 4-6 (FADD only; FMA has its own fused unit)
     wire        fadd_valid_out;
     wire [31:0] fadd_result;
     wire        fadd_inv, fadd_ovf, fadd_unf, fadd_inx;
 
     titan_x5_fp32_add u_fp32_add (
         .clk(clk), .rst_n(rst_n), .en(!stall_in),
-        .valid_in(fp_v3 && (fp_kind_s3 == FPK_ADD || fp_kind_s3 == FPK_FMA)),
+        .valid_in(fp_v3 && (fp_kind_s3 == FPK_ADD)),
         .rm(fp_rm_d3),
-        .a((fp_kind_s3 == FPK_FMA) ? fmul_result : fp_a_d3),
-        .b((fp_kind_s3 == FPK_FMA) ? fp_c_d3     : fp_b_d3),
+        .a(fp_a_d3),
+        .b(fp_b_d3),
         .valid_out(fadd_valid_out),
         .result(fadd_result),
         .flag_invalid(fadd_inv), .flag_overflow(fadd_ovf),
         .flag_underflow(fadd_unf), .flag_inexact(fadd_inx)
     );
 
-    wire [31:0] fp_res_out = (fp_kind_s6 == FPK_MUL) ? fmul_res_d6 : fadd_result;
+    // fused multiply-add: dedicated 6-stage unit (single rounding)
+    wire        fma_valid_out;
+    wire [31:0] fma_result;
+    wire        fma_inv, fma_ovf, fma_unf, fma_inx;
+
+    titan_x5_fp32_fma u_fp32_fma (
+        .clk(clk), .rst_n(rst_n), .en(!stall_in),
+        .valid_in(valid_in && !stall_in && (opcode == OP_FMA)),
+        .rm(fp_rm),
+        .a(src1), .b(src2), .c(src3),
+        .valid_out(fma_valid_out),
+        .result(fma_result),
+        .flag_invalid(fma_inv), .flag_overflow(fma_ovf),
+        .flag_underflow(fma_unf), .flag_inexact(fma_inx)
+    );
+
+    wire [31:0] fp_res_out = (fp_kind_s6 == FPK_MUL) ? fmul_res_d6 :
+                             (fp_kind_s6 == FPK_FMA) ? fma_result  : fadd_result;
     wire [3:0]  fp_flags =
         (fp_kind_s6 == FPK_MUL) ? fmul_flags_d6 :
-        (fp_kind_s6 == FPK_FMA) ? (fmul_flags_d6 | {fadd_inv, fadd_ovf, fadd_unf, fadd_inx})
+        (fp_kind_s6 == FPK_FMA) ? {fma_inv, fma_ovf, fma_unf, fma_inx}
                                 : {fadd_inv, fadd_ovf, fadd_unf, fadd_inx};
 
     assign fp_flags_out = fp_v6 ? fp_flags : 4'd0;

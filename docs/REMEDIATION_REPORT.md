@@ -58,9 +58,21 @@ rounding.
 
 **ALU integration:** multiplier occupies stages 1-3, adder stages 4-6;
 FADD/FMUL/FMA all have a uniform 6-cycle latency. New ALU ports: `fp_rm`
-(rounding mode) and `fp_flags_out`. **Documented deviation:** FMA executes
-as `round(round(a*b) + c)` — a cascade with double rounding, not a fused
-single-rounding FMA.
+(rounding mode) and `fp_flags_out`. ~~Documented deviation: FMA executes
+as `round(round(a*b) + c)` — a cascade with double rounding.~~
+**Resolved 2026-07-06:** FMA is now a true fused single-rounding unit
+([`rtl/fpu/titan_x5_fp32_fma.v`](../rtl/fpu/titan_x5_fp32_fma.v), 6-stage):
+the 48-bit product is kept exact, the addend is aligned against it in a
+104-bit frame (alignment shift saturating at [-24, +80] with exact
+sticky preservation and addend-anchored exponent re-basing when the
+addend dominates), one magnitude add/subtract, one CLZ normalize, one
+rounding. Specials follow the RISC-V convention (0·∞ raises invalid even
+with a quiet-NaN addend). Verified against a new integer-exact fused
+oracle (`fp_fma` in `tb/uvm/fp_ref.py`, itself cross-checked by 100k
+identity comparisons `fma(a,b,±0)≡mul` and `fma(a,1,c)≡add`): 250
+general randoms, 10 directed fused-vs-cascade cases x 4 rounding modes,
+and 1,000 exponent-overlap-biased randoms stressing catastrophic
+cancellation — all bit-exact.
 
 ## Phase 3 — MESI Cache Coherency
 
@@ -202,7 +214,6 @@ regression suites (lsu/fpu/mesi/tmu) re-run green after the RTL changes.
 - `rtl/titan_x5_fpga_top.v` references Xilinx primitives (BUFG) and a
   missing `titan_x5_vram_ctrl`; simulation builds must scope elaboration
   with `-s tb_titan_x5_gpu_top` (pre-existing).
-- FMA is a double-rounding cascade (see Phase 2).
 - The coherent crossbar serializes transactions (correctness-first snooping
   bus); throughput optimization (split transactions, multiple outstanding)
   is future work.
