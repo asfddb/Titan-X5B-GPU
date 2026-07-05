@@ -1,3 +1,5 @@
+
+
 TOPLEVEL_LANG = verilog
 
 TEST_TARGET ?= graphics
@@ -27,7 +29,17 @@ endif
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
+# -s scopes elaboration to the simulation root (rtl/titan_x5_fpga_top.v
+# references Xilinx primitives that only exist in synthesis)
 sim_top:
-	iverilog -g2012 -I../rtl -o sim_top.vvp tb_titan_x5_gpu_top.v ../rtl/*/*.v ../rtl/*.v
+	iverilog -g2012 -s tb_titan_x5_gpu_top -I../rtl -o sim_top.vvp tb_titan_x5_gpu_top.v ../rtl/*/*.v ../rtl/*.v
 	vvp sim_top.vvp
 	python generate_waveform_proof.py
+
+# Transaction-based verification regression (works without make as well):
+#   python run_regression.py [lsu] [fpu] [mesi] [tmu]
+regression:
+	python run_regression.py
+
+regression_%:
+	python run_regression.py $*
