@@ -191,6 +191,41 @@ jobs:
             sim_build/*.vcd
 
   # ---------------------------------------------------------------------------
+  # Job 3b: Transaction-based regression (lsu / fpu / mesi / tmu suites)
+  # These are the cocotb 2.x suites driven by tb/run_regression.py; they are
+  # independent of the legacy Makefile flow above (which pins cocotb 1.8.1).
+  # ubuntu-24.04 ships Icarus 12, matching local development.
+  # ---------------------------------------------------------------------------
+  regression:
+    name: Regression (lsu/fpu/mesi/tmu)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Icarus + cocotb 2.x
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq iverilog
+          pip install --quiet cocotb==2.0.1 pytest
+          iverilog -V | head -1
+
+      - name: Run regression
+        run: python tb/run_regression.py
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: regression-results
+          path: tb/uvm/*_results.xml
+
+  # ---------------------------------------------------------------------------
   # Job 4: Yosys synthesis
   # ---------------------------------------------------------------------------
   synth:
