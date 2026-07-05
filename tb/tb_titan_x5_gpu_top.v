@@ -13,6 +13,15 @@
 // ----------------------------------------------------------------------------
 module tb_titan_x5_gpu_top();
 
+    // Framebuffer row stride in pixels. The ROP and display engine both use
+    // the DUT's VGA_H_VISIBLE as the stride of the packed framebuffer, so the
+    // TB passes this same value down via the parameter override on `dut`.
+    localparam FB_STRIDE = 1920;
+    // Ring buffer base. VRAM addresses alias modulo 8 MiB (addr[22:0]); the
+    // ring lives 1 MiB in so command words don't collide with the shader
+    // code at address 0 or the framebuffer region scanned by fb_check.
+    localparam [31:0] RING_BASE = 32'h1010_0000;
+
     reg clk;
     reg mem_clk;
     reg pclk;
@@ -64,7 +73,7 @@ module tb_titan_x5_gpu_top();
     wire        vga_de;
 
     // DUT
-    titan_x5_gpu_top dut (
+    titan_x5_gpu_top #(.VGA_H_VISIBLE(FB_STRIDE)) dut (
         .clk           (clk),
         .mem_clk       (mem_clk),
         .pclk          (pclk),
@@ -142,7 +151,10 @@ module tb_titan_x5_gpu_top();
     reg w_received;
     reg [31:0] latched_awaddr;
     reg [511:0] latched_wdata;
-    
+    reg [63:0]  latched_wstrb;
+    integer     vram_wr_commits; // total committed AXI writes (used by the render-quiesce wait)
+    integer     commit_byte;
+
     // Simulate memory latency
     reg [3:0] latency_counter;
 
@@ -157,6 +169,8 @@ module tb_titan_x5_gpu_top();
             w_received   <= 1'b0;
             latched_awaddr <= 32'h0;
             latched_wdata <= 512'h0;
+            latched_wstrb <= 64'h0;
+            vram_wr_commits <= 0;
             latency_counter <= 4'h0;
         end else begin
             // Introduce arbitrary random latency
@@ -187,13 +201,22 @@ module tb_titan_x5_gpu_top();
             // Handle Write Data phase
             if (vram_wvalid && vram_wready) begin
                 latched_wdata <= vram_wdata;
+                latched_wstrb <= vram_wstrb;
                 w_received <= 1'b1;
             end
 
-            // Commit Write when both AW and W phases are complete
+            // Commit Write when both AW and W phases are complete.
+            // Honor the byte strobes: the memory controller replicates the
+            // 32-bit payload across the 512-bit bus and marks only the
+            // addressed word's lanes valid.
             if (aw_received && w_received && !vram_bvalid) begin
-                vram_mem[{latched_awaddr[22:6], 1'b0}] <= latched_wdata[255:0];
-                vram_mem[{latched_awaddr[22:6], 1'b1}] <= latched_wdata[511:256];
+                for (commit_byte = 0; commit_byte < 32; commit_byte = commit_byte + 1) begin
+                    if (latched_wstrb[commit_byte])
+                        vram_mem[{latched_awaddr[22:6], 1'b0}][commit_byte*8 +: 8] <= latched_wdata[commit_byte*8 +: 8];
+                    if (latched_wstrb[32 + commit_byte])
+                        vram_mem[{latched_awaddr[22:6], 1'b1}][commit_byte*8 +: 8] <= latched_wdata[256 + commit_byte*8 +: 8];
+                end
+                vram_wr_commits <= vram_wr_commits + 1;
                 vram_bvalid <= 1'b1;
                 vram_bresp  <= 2'b00;
                 vram_bid    <= vram_awid;
@@ -205,32 +228,29 @@ module tb_titan_x5_gpu_top();
         end
     end
 
+    // Decode pixel (px,py) from the packed FB_STRIDE-wide framebuffer at
+    // VRAM offset 0 (base_color in the DUT is 0).
+    function [31:0] get_pixel;
+        input integer px;
+        input integer py;
+        reg [255:0] word;
+        integer addr;
+        begin
+            addr = (py * FB_STRIDE + px) * 4;
+            word = vram_mem[addr / 32];
+            get_pixel = word[(addr % 32) * 8 +: 32];
+        end
+    endfunction
+
     // Framebuffer Dumper (only dumps top-left 64x64 chunk for speed)
     task dump_vram;
         integer fd;
         integer y, x;
-        reg [31:0] pixel;
-        reg [255:0] word;
-        integer addr;
         begin
             fd = $fopen("fb_dump.txt", "w");
             for (y = 0; y < 64; y = y + 1) begin
                 for (x = 0; x < 64; x = x + 1) begin
-                    // True address in bytes for 1024x768 stride
-                    addr = (y * 1024 + x) * 4;
-                    word = vram_mem[addr / 32];
-                    
-                    case ((addr % 32) / 4)
-                        0: pixel = word[31:0];
-                        1: pixel = word[63:32];
-                        2: pixel = word[95:64];
-                        3: pixel = word[127:96];
-                        4: pixel = word[159:128];
-                        5: pixel = word[191:160];
-                        6: pixel = word[223:192];
-                        7: pixel = word[255:224];
-                    endcase
-                    $fwrite(fd, "%08x\n", pixel);
+                    $fwrite(fd, "%08x\n", get_pixel(x, y));
                 end
             end
             $fclose(fd);
@@ -246,7 +266,10 @@ module tb_titan_x5_gpu_top();
         reg [31:0] word_idx;
         reg [2:0] sub_word;
         begin
-            offset = addr - 32'h1000_0000;
+            // VRAM occupies the low 8 MiB of the address space and aliases
+            // above that (the AXI model indexes with addr[22:6]); mirror that
+            // here instead of assuming a fixed base.
+            offset = addr & 32'h007F_FFFF;
             word_idx = offset / 32;
             sub_word = (offset % 32) / 4;
             case (sub_word)
@@ -268,56 +291,54 @@ module tb_titan_x5_gpu_top();
     // Test sequence
     initial begin
         rst_n          = 0;
-        host_ring_base = 32'h1000_0000;
+        host_ring_base = RING_BASE;
         host_ring_wptr = 32'h0;
 
         // Initialize Shader instruction at PC=0x0
         // ADD R63, R2, 0 (32'h07E10001)
         write_vram_word(32'h0000_0000, 32'h07E10001);
         
-        // Initialize R2 in the SM Register File to hold the per-thread gradient colors
-        // We do this backdoor initialization here using temp regs for iverilog compatibility
+        // Prepare per-thread gradient colors for R2 (deposited into the RF
+        // after reset below — the register file zeroes itself while rst_n
+        // is low, so a time-0 deposit would be wiped at the first clk edge)
         for (tid = 0; tid < 32; tid = tid + 1) begin
             r_val = tid * 8;
             g_val = 255 - (tid * 8);
             b_val = 128;
             a_val = 255;
-            temp_r2[tid*32 +: 32] = {a_val, b_val, g_val, r_val};
+            temp_r2[tid*32 +: 32] = {a_val[7:0], b_val[7:0], g_val[7:0], r_val[7:0]};
             temp_r3[tid*32 +: 32] = 32'h1000_0000;
             temp_r4[tid*32 +: 32] = 32'h0000_FF00;
         end
-        dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[0] = temp_r2;
-        dut.sm_gen[0].u_sm.rf_inst.bank_gen[3].bank_mem[0] = temp_r3;
-        dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[1] = temp_r4;
 
         // Pre-initialize VRAM with DRAW command (17 words)
         // Word 0: Opcode DRAW = 0x01
-        write_vram_word(32'h1000_0000 + 0*4,  32'h0000_0001);
+        write_vram_word(RING_BASE + 0*4,  32'h0000_0001);
         // Word 1-8: Weights (Identity Matrix)
-        write_vram_word(32'h1000_0000 + 1*4,  32'h0000_0001); // W00=1, W01=0
-        write_vram_word(32'h1000_0000 + 2*4,  32'h0000_0000); // W02=0, W03=0
-        write_vram_word(32'h1000_0000 + 3*4,  32'h0001_0000); // W10=0, W11=1
-        write_vram_word(32'h1000_0000 + 4*4,  32'h0000_0000); // W12=0, W13=0
-        write_vram_word(32'h1000_0000 + 5*4,  32'h0000_0000); // W20=0, W21=0
-        write_vram_word(32'h1000_0000 + 6*4,  32'h0000_0001); // W22=1, W23=0
-        write_vram_word(32'h1000_0000 + 7*4,  32'h0000_0000); // W30=0, W31=0
-        write_vram_word(32'h1000_0000 + 8*4,  32'h0064_0000); // W32=0, W33=100
+        write_vram_word(RING_BASE + 1*4,  32'h0000_0001); // W00=1, W01=0
+        write_vram_word(RING_BASE + 2*4,  32'h0000_0000); // W02=0, W03=0
+        write_vram_word(RING_BASE + 3*4,  32'h0001_0000); // W10=0, W11=1
+        write_vram_word(RING_BASE + 4*4,  32'h0000_0000); // W12=0, W13=0
+        write_vram_word(RING_BASE + 5*4,  32'h0000_0000); // W20=0, W21=0
+        write_vram_word(RING_BASE + 6*4,  32'h0000_0001); // W22=1, W23=0
+        write_vram_word(RING_BASE + 7*4,  32'h0000_0000); // W30=0, W31=0
+        write_vram_word(RING_BASE + 8*4,  32'h0064_0000); // W32=0, W33=100
         // Word 9-16: Vertices
-        write_vram_word(32'h1000_0000 + 9*4,  32'h0000_0000); // v0_x=0, v0_y=0
-        write_vram_word(32'h1000_0000 + 10*4, 32'h0001_0000); // v0_z=0, v0_w=1
-        write_vram_word(32'h1000_0000 + 11*4, 32'h0000_0014); // v1_x=20, v1_y=0
-        write_vram_word(32'h1000_0000 + 12*4, 32'h0001_0000); // v1_z=0, v1_w=1
-        write_vram_word(32'h1000_0000 + 13*4, 32'h0010_0000); // v2_x=0, v2_y=16
-        write_vram_word(32'h1000_0000 + 14*4, 32'h0001_0000); // v2_z=0, v2_w=1
-        write_vram_word(32'h1000_0000 + 15*4, 32'h0000_0000); // v3_x=0, v3_y=0
-        write_vram_word(32'h1000_0000 + 16*4, 32'h0001_0000); // v3_z=0, v3_w=1
+        write_vram_word(RING_BASE + 9*4,  32'h0000_0000); // v0_x=0, v0_y=0
+        write_vram_word(RING_BASE + 10*4, 32'h0001_0000); // v0_z=0, v0_w=1
+        write_vram_word(RING_BASE + 11*4, 32'h0000_0014); // v1_x=20, v1_y=0
+        write_vram_word(RING_BASE + 12*4, 32'h0001_0000); // v1_z=0, v1_w=1
+        write_vram_word(RING_BASE + 13*4, 32'h0010_0000); // v2_x=0, v2_y=16
+        write_vram_word(RING_BASE + 14*4, 32'h0001_0000); // v2_z=0, v2_w=1
+        write_vram_word(RING_BASE + 15*4, 32'h0000_0000); // v3_x=0, v3_y=0
+        write_vram_word(RING_BASE + 16*4, 32'h0001_0000); // v3_z=0, v3_w=1
 
         // Pre-initialize VRAM with FENCE command (17 words)
         // Word 17: Opcode FENCE = 0x04
-        write_vram_word(32'h1000_0000 + 17*4, 32'h0000_0004);
+        write_vram_word(RING_BASE + 17*4, 32'h0000_0004);
         // Words 18-33: Payload (all 0)
         for (i = 18; i < 34; i = i + 1) begin
-            write_vram_word(32'h1000_0000 + i*4, 32'h0000_0000);
+            write_vram_word(RING_BASE + i*4, 32'h0000_0000);
         end
 
         $dumpfile("blackwell_wave.vcd");
@@ -329,16 +350,40 @@ module tb_titan_x5_gpu_top();
 
         #20; rst_n = 1; #20;
 
+        // Backdoor-initialize SM0's register file now that reset is done:
+        // R2 = per-thread gradient colors (bank = reg%4, entry = reg/4)
+        dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[0] = temp_r2;
+        dut.sm_gen[0].u_sm.rf_inst.bank_gen[3].bank_mem[0] = temp_r3;
+        dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[1] = temp_r4;
+
         $display("[%0t] Reset done. Queuing CMD_DRAW into ring buffer...", $time);
 
         @(posedge clk); host_ring_wptr = 32'd34; // Trigger DRAW & FENCE
         #50;
 
         $display("[%0t] Waiting for Rasterizer to complete rendering...", $time);
-        
-        // Wait long enough for full command fetch + rasterize + flush
-        // Reduced timeout for simulation speed
-        #50000;
+
+        // Wait adaptively: the render is done when no new VRAM write has
+        // committed for 3 consecutive 10us windows (the ROP's idle-timeout
+        // flush guarantees trailing pixels drain). Hard cap of 50 windows
+        // (500us) so a hung pipeline still terminates and fails the checks.
+        begin : wait_render
+            integer prev_commits, idle_windows, waited_windows;
+            prev_commits = -1;
+            idle_windows = 0;
+            waited_windows = 0;
+            while (idle_windows < 3 && waited_windows < 50) begin
+                #10000;
+                waited_windows = waited_windows + 1;
+                if (vram_wr_commits == prev_commits && vram_wr_commits > 0)
+                    idle_windows = idle_windows + 1;
+                else
+                    idle_windows = 0;
+                prev_commits = vram_wr_commits;
+            end
+            $display("[%0t] Render quiesced after %0d windows (%0d VRAM write commits).",
+                     $time, waited_windows, vram_wr_commits);
+        end
 
         $display("[%0t] Rendering cycle complete. Dumping VRAM...", $time);
         dump_vram();
@@ -346,46 +391,39 @@ module tb_titan_x5_gpu_top();
         // Check if framebuffer contains non-zero pixels
         // Check actual output (Self-Checking)
         begin: fb_check
-            integer fb_word_idx, px_x, px_y;
-            integer addr;
-            reg [255:0] word;
+            integer px_x, px_y;
             reg [31:0] pixel;
             integer pixels_drawn;
             integer oob_pixels;
-            
+
             pixels_drawn = 0;
             oob_pixels = 0;
-            
+
             for (px_y = 0; px_y < 64; px_y = px_y + 1) begin
                 for (px_x = 0; px_x < 64; px_x = px_x + 1) begin
-                    addr = (px_y * 1024 + px_x) * 4;
-                    word = vram_mem[addr / 32];
-                    case ((addr % 32) / 4)
-                        0: pixel = word[31:0];
-                        1: pixel = word[63:32];
-                        2: pixel = word[95:64];
-                        3: pixel = word[127:96];
-                        4: pixel = word[159:128];
-                        5: pixel = word[191:160];
-                        6: pixel = word[223:192];
-                        7: pixel = word[255:224];
-                    endcase
-                    
-                    if (pixel != 0) begin
-                        pixels_drawn = pixels_drawn + 1;
-                        // Bounding box of triangle is X: 16-36, Y: 16-32
-                        if (px_x < 16 || px_x > 36 || px_y < 16 || px_y > 32) begin
-                            oob_pixels = oob_pixels + 1;
+                    // Pixel (0,0) shares VRAM bytes 0-3 with the shader
+                    // instruction at PC=0 (the SMs boot from address 0);
+                    // it is code, not rasterizer output, so skip it.
+                    if (px_x != 0 || px_y != 0) begin
+                        pixel = get_pixel(px_x, px_y);
+                        if (pixel != 0) begin
+                            pixels_drawn = pixels_drawn + 1;
+                            // Bounding box of triangle is X: 16-36, Y: 16-32
+                            if (px_x < 16 || px_x > 36 || px_y < 16 || px_y > 32) begin
+                                oob_pixels = oob_pixels + 1;
+                                $display("  OOB pixel at (%0d,%0d) = %08x", px_x, px_y, pixel);
+                            end
                         end
                     end
                 end
             end
-            
-            // Check VRAM output
-            if (vram_mem[32'h0f02] != 256'd0) begin
+
+            // Probe a pixel that must be covered: (16,30) lies on the left
+            // edge of the transformed triangle (16,16)-(36,16)-(16,32).
+            if (get_pixel(16, 30) != 32'd0) begin
                 $display("Rendering test passed!");
             end else begin
-                $display("Rendering test failed! No pixel at 1e040.");
+                $display("Rendering test failed! No pixel at (16,30).");
             end
 
             $display("Coverage Metrics:");
