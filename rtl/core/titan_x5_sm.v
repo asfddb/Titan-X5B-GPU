@@ -11,7 +11,8 @@
 module titan_x5_sm #(
     parameter NUM_WARPS = 8,
     parameter NUM_ALUS = 32,
-    parameter LINE_BYTES = 128
+    parameter LINE_BYTES = 128,
+    parameter ENABLE_TENSOR = 1 // 0 strips per-lane WMMA arrays (FPGA fit)
 )(
     input  wire clk,
     input  wire rst_n,
@@ -118,7 +119,8 @@ module titan_x5_sm #(
     generate
         for (i=0; i<NUM_ALUS; i=i+1) begin : alu_gen
             titan_x5_alu #(
-                .DATA_WIDTH(32)
+                .DATA_WIDTH(32),
+                .ENABLE_TENSOR(ENABLE_TENSOR)
             ) alu_inst (
                 .clk(clk),
                 .rst_n(rst_n),

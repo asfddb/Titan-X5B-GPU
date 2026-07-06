@@ -1,0 +1,64 @@
+# ============================================================================
+# Yosys synthesis script: titan_x5_fpga_top -> Xilinx Artix-7 (Basys 3)
+# Run from the repository root:
+#   yosys -l syn/reports/fpga_top_synth.log fpga/synth_fpga_top.ys
+#
+# This performs REAL synthesis (synth_xilinx) and reports utilization that
+# can be compared against the Basys 3 xc7a35t budget:
+#   20,800 LUT6 / 41,600 FF / 50 BRAM36 / 90 DSP48E1
+# ============================================================================
+
+# --- Read all synthesizable RTL ---------------------------------------------
+# xilinx_stubs.v is EXCLUDED: it contains simulation stand-ins for Xilinx
+# primitives (BUFG, ...). synth_xilinx provides the real cell models.
+read_verilog rtl/common/titan_x5_skid_buffer.v
+read_verilog rtl/control/titan_x5_command_processor.v
+read_verilog rtl/control/titan_x5_perf_counters.v
+read_verilog rtl/core/titan_x5_alu.v
+read_verilog rtl/core/titan_x5_decoder.v
+read_verilog rtl/core/titan_x5_pipeline.v
+read_verilog rtl/core/titan_x5_register_file.v
+read_verilog rtl/core/titan_x5_sm.v
+read_verilog rtl/core/titan_x5_warp_scheduler.v
+read_verilog rtl/display/titan_x5_async_fifo.v
+read_verilog rtl/display/titan_x5_display_engine.v
+read_verilog rtl/fpu/titan_x5_fp32_add.v
+read_verilog rtl/fpu/titan_x5_fp32_add_comb.v
+read_verilog rtl/fpu/titan_x5_fp32_fma.v
+read_verilog rtl/fpu/titan_x5_fp32_mul.v
+read_verilog rtl/graphics/titan_x5_neural_shader_dispatch.v
+read_verilog rtl/graphics/titan_x5_rasterizer.v
+read_verilog rtl/graphics/titan_x5_rop.v
+read_verilog rtl/graphics/titan_x5_tmu.v
+read_verilog rtl/graphics/titan_x5_vertex_transformer.v
+read_verilog rtl/interconnect/titan_x5_axi4_lite.v
+read_verilog rtl/interconnect/titan_x5_crossbar.v
+read_verilog rtl/interconnect/titan_x5_dma_engine.v
+read_verilog rtl/interconnect/titan_x5_mesh_router.v
+read_verilog rtl/memory/titan_x5_gddr7_pam3_phy.v
+read_verilog rtl/memory/titan_x5_l1_cache.v
+read_verilog rtl/memory/titan_x5_l2_cache.v
+read_verilog rtl/memory/titan_x5_l2_mem_adapter.v
+read_verilog rtl/memory/titan_x5_lsu.v
+read_verilog rtl/memory/titan_x5_mem_controller.v
+read_verilog rtl/memory/titan_x5_shared_memory.v
+read_verilog rtl/memory/titan_x5_vram_ctrl.v
+read_verilog rtl/power/titan_x5_power_mgmt.v
+read_verilog rtl/raytracing/titan_x5_ray_triangle_isect.v
+read_verilog rtl/raytracing/titan_x5_rt_core.v
+read_verilog rtl/sr/titan_x5_hash_fnv64.v
+read_verilog rtl/sr/titan_x5_sr_engine.v
+read_verilog rtl/tensor/titan_x5_fp16_mul.v
+read_verilog rtl/tensor/titan_x6_tensor_core_array.v
+read_verilog rtl/titan_x5_gpu_top.v
+read_verilog rtl/titan_x5_fpga_top.v
+
+# --- Synthesize for 7-series -------------------------------------------------
+synth_xilinx -family xc7 -top titan_x5_fpga_top
+
+# --- Utilization report ------------------------------------------------------
+tee -o syn/reports/fpga_top_utilization.txt stat -tech xilinx
+
+# --- Outputs -----------------------------------------------------------------
+write_json  syn/fpga_top_synth.json
+write_verilog -noattr syn/fpga_top_synth.v

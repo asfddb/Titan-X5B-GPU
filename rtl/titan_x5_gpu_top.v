@@ -14,7 +14,8 @@
 // cmdproc -> rasterizer -> tmu -> rop -> memcontroller -> vram
 module titan_x5_gpu_top #(
     parameter VGA_H_VISIBLE = 12'd1920,
-    parameter VGA_V_VISIBLE = 12'd1080
+    parameter VGA_V_VISIBLE = 12'd1080,
+    parameter ENABLE_TENSOR = 1 // 0 strips per-lane WMMA arrays (FPGA fit)
 ) (
     input  wire        clk,
     input  wire        mem_clk,
@@ -301,7 +302,8 @@ module titan_x5_gpu_top #(
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_gen
-            titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(32), .LINE_BYTES(CXB_LINE)) u_sm (
+            titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(32), .LINE_BYTES(CXB_LINE),
+                          .ENABLE_TENSOR(ENABLE_TENSOR)) u_sm (
                 .clk(clk),
                 .rst_n(rst_n),
                 .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_gnt(xbar_m_req_ready[9+gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),

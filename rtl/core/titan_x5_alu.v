@@ -21,7 +21,11 @@
  */
 
 module titan_x5_alu #(
-    parameter DATA_WIDTH = 32
+    parameter DATA_WIDTH = 32,
+    // 1 = full WMMA tensor array per lane (ASIC config, verified default).
+    // 0 = WMMA returns zero; required to fit FPGA targets, where 128 tensor
+    //     arrays exceed the entire device several times over.
+    parameter ENABLE_TENSOR = 1
 ) (
     input  wire                    clk,
     input  wire                    rst_n,
@@ -382,22 +386,28 @@ module titan_x5_alu #(
     end
 
     wire [127:0] wmma_acc_out;
-    
-    titan_x6_tensor_core_array #(
-        .ARRAY_SIZE_X(4),
-        .ARRAY_SIZE_Y(4),
-        .DATA_WIDTH(16),
-        .ACC_WIDTH(32)
-    ) u_tensor_core (
-        .clk(clk),
-        .rst_n(rst_n),
-        .en(!stall_in), // pipeline runs when not stalled
-        .mode(2'd0), // FP16 mode
-        .act_in({src2, src1}),
-        .weight_in({src3, src2}),
-        .acc_out(wmma_acc_out),
-        .out_valid() // manual tracking used instead
-    );
+
+    generate
+        if (ENABLE_TENSOR) begin : tensor_gen
+            titan_x6_tensor_core_array #(
+                .ARRAY_SIZE_X(4),
+                .ARRAY_SIZE_Y(4),
+                .DATA_WIDTH(16),
+                .ACC_WIDTH(32)
+            ) u_tensor_core (
+                .clk(clk),
+                .rst_n(rst_n),
+                .en(!stall_in), // pipeline runs when not stalled
+                .mode(2'd0), // FP16 mode
+                .act_in({src2, src1}),
+                .weight_in({src3, src2}),
+                .acc_out(wmma_acc_out),
+                .out_valid() // manual tracking used instead
+            );
+        end else begin : no_tensor_gen
+            assign wmma_acc_out = 128'd0;
+        end
+    endgenerate
 
     // 6. Writeback Arbiter & Hazard Logic
     // Resolves structural hazards by stalling

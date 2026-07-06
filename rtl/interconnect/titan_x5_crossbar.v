@@ -60,9 +60,9 @@ module titan_x5_crossbar #(
     localparam SLAVE_BITS = (NUM_SLAVES > 1) ? clog2(NUM_SLAVES) : 1;
 
     // arbitration: basic round robin
-    (* ram_style="block" *) reg [MASTER_BITS-1:0] rr_ptr [0:NUM_SLAVES-1]; 
-    (* ram_style="block" *) reg [MASTER_BITS-1:0] grant  [0:NUM_SLAVES-1];
-    (* ram_style="block" *) reg                   grant_valid [0:NUM_SLAVES-1];
+    reg [MASTER_BITS-1:0] rr_ptr [0:NUM_SLAVES-1]; 
+    reg [MASTER_BITS-1:0] grant  [0:NUM_SLAVES-1];
+    reg                   grant_valid [0:NUM_SLAVES-1];
 
     integer s, m, check_idx;
 

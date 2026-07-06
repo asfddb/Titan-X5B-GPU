@@ -68,8 +68,8 @@ module titan_x5_rop #(
 );
 
     // Tile Buffer SRAM (16x16 = 256 pixels)
-    (* ram_style="block" *) reg [31:0] color_tile_sram [0:255];
-    (* ram_style="block" *) reg [31:0] depth_tile_sram [0:255];
+    reg [31:0] color_tile_sram [0:255];
+    reg [31:0] depth_tile_sram [0:255];
     reg [255:0] tile_dirty;
     
     reg [15:0] current_tile_x, current_tile_y;

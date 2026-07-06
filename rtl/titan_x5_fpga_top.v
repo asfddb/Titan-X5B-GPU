@@ -121,8 +121,20 @@ module titan_x5_fpga_top (
         .s_axi_rlast(vram_rlast), .s_axi_rvalid(vram_rvalid), .s_axi_rready(vram_rready)
     );
 
-    titan_x5_gpu_top u_gpu_core (
+    titan_x5_gpu_top #(
+        // Basys 3 drives a 640x480@60Hz panel from the 25MHz pixel clock;
+        // the 1920x1080 default would generate out-of-spec sync timing.
+        .VGA_H_VISIBLE   (12'd640),
+        .VGA_V_VISIBLE   (12'd480),
+        // 128 per-lane WMMA arrays exceed any Artix-7 several times over;
+        // WMMA ops return zero in the FPGA build.
+        .ENABLE_TENSOR   (0)
+    ) u_gpu_core (
         .clk             (clk_core),
+        // VRAM is on-chip BRAM, so the memory side shares the core clock
+        // (the internal CDC FIFOs tolerate a 1:1 clock ratio).
+        .mem_clk         (clk_core),
+        .pclk            (clk_pixel),
         .rst_n           (sys_rst_n),
         .host_ring_base  (host_ring_base),
         .host_ring_wptr  (host_ring_wptr),
