@@ -165,7 +165,7 @@ module titan_x5_crossbar #(
             m_resp_valid_q <= 0;
             m_resp_rdata_q <= 0;
         end else begin
-            for (m_idx_pipe = 0; m_idx_pipe < NUM_MASTERS; m_idx_pipe = m_idx_pipe + 1) begin
+            for (m_idx_pipe = 0; m_idx_pipe < NUM_MASTERS; m_idx_pipe = m_idx_pipe + 1) begin : resp_pipe
                 reg valid_this_cycle;
                 reg [DATA_WIDTH-1:0] data_this_cycle;
                 valid_this_cycle = 0;

@@ -95,21 +95,21 @@ module titan_x5_fpga_top (
     wire [3:0]   vram_arid; wire [31:0]  vram_araddr; wire [7:0]   vram_arlen;
     wire [2:0]   vram_arsize; wire [1:0]   vram_arburst; wire         vram_arvalid;
     wire         vram_arready;
-    wire [3:0]   vram_rid; wire [255:0] vram_rdata;
+    wire [3:0]   vram_rid; wire [511:0] vram_rdata;
     wire [1:0]   vram_rresp; wire         vram_rlast;
     wire         vram_rvalid; wire         vram_rready;
     
     wire [3:0]   vram_awid; wire [31:0]  vram_awaddr; wire [7:0]   vram_awlen;
     wire [2:0]   vram_awsize; wire [1:0]   vram_awburst; wire         vram_awvalid;
     wire         vram_awready;
-    wire [255:0] vram_wdata; wire [31:0]  vram_wstrb; wire         vram_wlast;
+    wire [511:0] vram_wdata; wire [63:0]  vram_wstrb; wire         vram_wlast;
     wire         vram_wvalid; wire         vram_wready;
     wire [3:0]   vram_bid; wire [1:0]   vram_bresp;
     wire         vram_bvalid; wire         vram_bready;
     
     titan_x5_vram_ctrl u_vram_ctrl (
-        .clk(clk),
-        .rst_n(rst_n),
+        .clk(clk_core),
+        .rst_n(sys_rst_n),
         .s_axi_awid(vram_awid), .s_axi_awaddr(vram_awaddr), .s_axi_awlen(vram_awlen),
         .s_axi_awsize(vram_awsize), .s_axi_awburst(vram_awburst), .s_axi_awvalid(vram_awvalid), .s_axi_awready(vram_awready),
         .s_axi_wdata(vram_wdata), .s_axi_wstrb(vram_wstrb), .s_axi_wlast(vram_wlast),
