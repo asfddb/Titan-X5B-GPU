@@ -20,14 +20,15 @@ module tb_graphics_pipeline;
     reg signed [15:0] i_x1, i_y1;
     reg signed [15:0] i_x2, i_y2;
     
-    // Rasterizer outputs
-    wire rast_valid;
+    // Rasterizer outputs (vectorized 4x4 stamp interface)
+    wire [15:0] rast_valid;            // coverage mask of the 4x4 stamp
     wire rast_ready;
-    wire signed [15:0] rast_x, rast_y;
-    wire signed [31:0] rast_w0, rast_w1, rast_w2;
-    
+    wire signed [15:0] rast_x, rast_y; // stamp base coordinate
+    wire [16*32-1:0] rast_w0, rast_w1, rast_w2; // flattened barycentrics
+    wire [16*32-1:0] rast_z;
+
     // SR Engine inputs
-    wire sr_valid = rast_valid;
+    wire sr_valid = |rast_valid;       // any covered pixel in the stamp
     wire sr_ready;
     wire [7:0] sr_warp_id = 8'd1;
     wire [12:0] sr_pixel_x = rast_x[12:0];
@@ -55,13 +56,15 @@ module tb_graphics_pipeline;
         .rst_n(rst_n),
         .i_valid(i_valid),
         .i_ready(i_ready),
-        .i_x0(i_x0), .i_y0(i_y0),
-        .i_x1(i_x1), .i_y1(i_y1),
-        .i_x2(i_x2), .i_y2(i_y2),
+        .v0_x(i_x0), .v0_y(i_y0),
+        .v1_x(i_x1), .v1_y(i_y1),
+        .v2_x(i_x2), .v2_y(i_y2),
+        .v0_z(32'd0), .v1_z(32'd0), .v2_z(32'd0),
         .o_valid(rast_valid),
         .o_ready(rast_ready),
         .o_x(rast_x), .o_y(rast_y),
-        .o_w0(rast_w0), .o_w1(rast_w1), .o_w2(rast_w2)
+        .o_w0(rast_w0), .o_w1(rast_w1), .o_w2(rast_w2),
+        .o_z(rast_z)
     );
     
     titan_x5_apex_sr_engine #(
