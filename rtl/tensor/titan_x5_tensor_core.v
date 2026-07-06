@@ -6,6 +6,8 @@
 // Licensed under CERN-OHL-S-2.0.
 // See LICENSE for details.
 // ============================================================================
+`timescale 1ns / 1ps
+
 /*
  * Module: titan_x5_tensor_core
  * Description: 4x4 Systolic Matrix Multiply-Accumulate Array.
@@ -32,8 +34,9 @@ module titan_x5_tensor_core #(
 );
 
     // internal wires for systolic array connections
-    wire [DATA_W-1:0] a_wire [0:4][0:3];
-    wire [DATA_W-1:0] b_wire [0:3][0:4];
+    // a flows right (col index reaches 4), b flows down (row index reaches 4)
+    wire [DATA_W-1:0] a_wire [0:3][0:4];
+    wire [DATA_W-1:0] b_wire [0:4][0:3];
     reg  [ACC_W-1:0]  acc_reg [0:3][0:3];
 
     // assign inputs
@@ -92,8 +95,10 @@ module titan_x5_tensor_core #(
                     end
                 end
 
+                // combinational IEEE-754 adder (same-cycle accumulate);
+                // the previous instance referenced a nonexistent `fp32_add`
                 wire [31:0] next_acc_fp32;
-                fp32_add u_fp32_add (
+                titan_x5_fp32_add_comb u_fp32_add (
                     .a(acc_reg[i][j]),
                     .b(prod_pipeline_reg),
                     .result(next_acc_fp32)
