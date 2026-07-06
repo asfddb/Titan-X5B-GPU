@@ -6,6 +6,8 @@
 // Licensed under CERN-OHL-S-2.0.
 // See LICENSE for details.
 // ============================================================================
+`timescale 1ns / 1ps
+
 /*
  * Nexus Neuromorphic HDC Engine
  * Module: titan_x5_hyper_alu
@@ -116,6 +118,7 @@ module titan_x5_hyper_alu (
                     done      <= 1'b0;
                     state     <= IDLE;
                 end
+                default: state <= IDLE;
             endcase
         end
     end

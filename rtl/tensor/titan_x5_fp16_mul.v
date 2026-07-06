@@ -6,6 +6,8 @@
 // Licensed under CERN-OHL-S-2.0.
 // See LICENSE for details.
 // ============================================================================
+`timescale 1ns / 1ps
+
 /*
  * Module: titan_x5_fp16_mul
  * Description: IEEE 754 Half-Precision Floating Point Multiplier.

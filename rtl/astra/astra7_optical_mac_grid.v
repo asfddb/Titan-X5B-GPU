@@ -45,7 +45,10 @@ module astra7_optical_mac_grid #(
             
             // generate the passive interference sum for this row across all columns
             // this happens instantly (0 delay in ideal simulation)
-            wire [INTENSITY_WIDTH*2-1:0] partial_interference [0:GRID_DIM];
+            // split_var: the element-to-element accumulation chain is acyclic,
+            // but Verilator's whole-array view reports it as UNOPTFLAT;
+            // splitting the array into per-element nets removes the false loop.
+            wire [INTENSITY_WIDTH*2-1:0] partial_interference [0:GRID_DIM] /*verilator split_var*/;
             assign partial_interference[0] = {INTENSITY_WIDTH*2{1'b0}};
             
             for (j = 0; j < GRID_DIM; j = j + 1) begin : g_col

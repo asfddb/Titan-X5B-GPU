@@ -230,6 +230,7 @@ module titan_x5_rop #(
                         flush_state <= FLUSH_WRITE_C;
                     end
                 end
+                default: flush_state <= FLUSH_IDLE;
             endcase
         end
     end

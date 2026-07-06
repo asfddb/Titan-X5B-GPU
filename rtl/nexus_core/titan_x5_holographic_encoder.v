@@ -6,6 +6,8 @@
 // Licensed under CERN-OHL-S-2.0.
 // See LICENSE for details.
 // ============================================================================
+`timescale 1ns / 1ps
+
 /*
  * Nexus Neuromorphic HDC Engine
  * Module: titan_x5_holographic_encoder

@@ -112,8 +112,10 @@ module titan_x5_l2_cache #(
             for (b = 0; b < BANKS; b = b + 1) begin
                 for (s = 0; s < SETS_PER_BANK; s = s + 1) begin
                     for (w = 0; w < WAYS; w = w + 1) begin
-                        valid_array[b][s][w] <= 1'b0;
-                        dirty_array[b][s][w] <= 1'b0;
+                        // blocking assigns: reset-only array init; Verilator
+                        // cannot unroll a 2048-iteration NBA loop (BLKLOOPINIT)
+                        valid_array[b][s][w] = 1'b0;
+                        dirty_array[b][s][w] = 1'b0;
                     end
                 end
             end

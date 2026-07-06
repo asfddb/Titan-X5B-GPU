@@ -274,6 +274,7 @@ module titan_x5_warp_scheduler #(
             warp_ready[(rr_ptr + 3'd5) & 3'd7]: begin rr_warp = (rr_ptr + 3'd5) & 3'd7; rr_valid = 1'b1; end
             warp_ready[(rr_ptr + 3'd6) & 3'd7]: begin rr_warp = (rr_ptr + 3'd6) & 3'd7; rr_valid = 1'b1; end
             warp_ready[(rr_ptr + 3'd7) & 3'd7]: begin rr_warp = (rr_ptr + 3'd7) & 3'd7; rr_valid = 1'b1; end
+            default: begin rr_warp = 3'd0; rr_valid = 1'b0; end
         endcase
     end
 

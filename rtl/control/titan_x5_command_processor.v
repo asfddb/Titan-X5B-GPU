@@ -120,6 +120,7 @@ module titan_x5_command_processor (
                         state <= S_IDLE;
                     end
                 end
+                default: state <= S_IDLE;
             endcase
         end
     end

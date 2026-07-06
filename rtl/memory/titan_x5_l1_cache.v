@@ -243,10 +243,12 @@ module titan_x5_l1_cache #(
             req_wdata_q     <= {LINE_BYTES*8{1'b0}};
             req_be_q        <= {LINE_BYTES{1'b0}};
             victim_way_q    <= {WAY_BITS{1'b0}};
+            // blocking assigns: reset-only array init; keeps the loop inside
+            // Verilator's unroll limit handling (BLKLOOPINIT-safe pattern)
             for (s2 = 0; s2 < SETS; s2 = s2 + 1) begin
-                rep_ptr[s2] <= {WAY_BITS{1'b0}};
+                rep_ptr[s2] = {WAY_BITS{1'b0}};
                 for (w2 = 0; w2 < WAYS; w2 = w2 + 1) begin
-                    mesi_array[s2][w2] <= MESI_I;
+                    mesi_array[s2][w2] = MESI_I;
                 end
             end
         end else begin

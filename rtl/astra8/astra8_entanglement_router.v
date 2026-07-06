@@ -185,8 +185,11 @@ module astra8_entanglement_router #(
         end
     end
 
-    // simulation-only checks for invalid stimulus
-    always @(posedge clk) begin
+    // simulation-only checks for invalid stimulus. The sensitivity list
+    // includes the async reset so rst_n is used consistently as an
+    // asynchronous net (mixed sync/async use trips Verilator SYNCASYNCNET);
+    // the body still only checks while out of reset on clock edges.
+    always @(posedge clk or negedge rst_n) begin
         if (rst_n) begin
             if (bell_state_meas_req != {NUM_NODES{1'b0}}) begin
                 if (!src_in_bounds) begin

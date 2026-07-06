@@ -6,6 +6,8 @@
 // Licensed under CERN-OHL-S-2.0.
 // See LICENSE for details.
 // ============================================================================
+`timescale 1ns / 1ps
+
 /*
  * Nexus Neuromorphic HDC Engine
  * Module: titan_x5_associative_memory
@@ -140,6 +142,7 @@ module titan_x5_associative_memory (
                     done      <= 1'b1;
                     state     <= IDLE;
                 end
+                default: state <= IDLE;
             endcase
         end
     end

@@ -127,13 +127,14 @@ module titan_x5_vertex_transformer (
             end
         end else if (state == S_SYSTOLIC) begin
             // Correct matrix multiplication bypassing broken systolic array
-            integer rr, cc;
-            for (rr = 0; rr < 4; rr = rr + 1) begin
-                for (cc = 0; cc < 4; cc = cc + 1) begin
-                    out_matrix[rr][cc] <= v_matrix[rr][0] * weight[0][cc] + 
-                                        v_matrix[rr][1] * weight[1][cc] + 
-                                        v_matrix[rr][2] * weight[2][cc] + 
-                                        v_matrix[rr][3] * weight[3][cc];
+            // (module-scope loop indices: in-block integer declarations make
+            // yosys parse this as a generate-for and reject the loop variable)
+            for (r = 0; r < 4; r = r + 1) begin
+                for (c = 0; c < 4; c = c + 1) begin
+                    out_matrix[r][c] <= v_matrix[r][0] * weight[0][c] +
+                                        v_matrix[r][1] * weight[1][c] +
+                                        v_matrix[r][2] * weight[2][c] +
+                                        v_matrix[r][3] * weight[3][c];
                 end
             end
         end
@@ -233,6 +234,8 @@ module titan_x5_vertex_transformer (
                         state <= S_IDLE;
                     end
                 end
+
+                default: state <= S_IDLE;
             endcase
         end
     end

@@ -287,6 +287,7 @@ module titan_x5_hbm3_controller #(
                         pc1_done <= 1'b1;
                     end
                 end
+                default: ; // recovery handled by the next_state case below
             endcase
         end
     end
@@ -302,8 +303,9 @@ module titan_x5_hbm3_controller #(
                          (pc1_done || (pc1_axi_awready && pc1_awvalid_reg))) next_state = W_WAIT;
             W_WAIT: if ((pc0_done || (pc0_axi_wready && pc0_wvalid_reg)) && 
                         (pc1_done || (pc1_axi_wready && pc1_wvalid_reg))) next_state = B_WAIT;
-            B_WAIT: if ((pc0_done || (pc0_axi_bvalid && pc0_bready_reg)) && 
+            B_WAIT: if ((pc0_done || (pc0_axi_bvalid && pc0_bready_reg)) &&
                         (pc1_done || (pc1_axi_bvalid && pc1_bready_reg))) next_state = IDLE;
+            default: next_state = IDLE;
         endcase
     end
 

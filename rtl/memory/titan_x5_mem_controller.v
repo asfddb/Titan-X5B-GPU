@@ -173,6 +173,7 @@ module titan_x5_mem_controller #(
                         resp_valid <= 1'b0;
                     end
                 end
+                default: ; // recovery handled by the next_state case below
             endcase
         end
     end

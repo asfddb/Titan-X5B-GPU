@@ -66,6 +66,7 @@ module titan_x5_neural_shader_dispatch (
             WAIT_INFER: begin
                 if (i_tensor_done) next_state = IDLE;
             end
+            default: next_state = IDLE;
         endcase
     end
 

@@ -6,6 +6,8 @@
 // Licensed under CERN-OHL-S-2.0.
 // See LICENSE for details.
 // ============================================================================
+`timescale 1ns / 1ps
+
 /*
  * Module: titan_x5_ray_triangle_isect
  * Description: Möller-Trumbore ray-triangle intersection algorithm.
@@ -124,6 +126,7 @@ module titan_x5_ray_triangle_isect #(
                     done <= 1'b1;
                     state <= S_IDLE;
                 end
+                default: state <= S_IDLE;
             endcase
         end
     end

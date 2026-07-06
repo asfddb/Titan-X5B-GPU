@@ -294,6 +294,7 @@ module titan_x5_tmu (
                         state <= S_IDLE;
                     end
                 end
+                default: state <= S_IDLE;
             endcase
         end
     end
