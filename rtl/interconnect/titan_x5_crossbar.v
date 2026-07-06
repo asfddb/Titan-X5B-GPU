@@ -190,12 +190,16 @@ module titan_x5_crossbar #(
 endmodule
 
 /*
- * Titan X5 GPU - Coherent Crossbar (MESI snooping bus)
+ * Titan X5 GPU - Coherent Crossbar (MESI snooping bus, split-transaction)
  *
- * Connects NUM_MASTERS caching L1s to one L2. Transactions are serialized:
- * the arbiter grants one master, broadcasts a snoop to all other masters,
- * collects their responses, sources the data (dirty snoop copy wins over
- * L2), and finally responds to the granted master.
+ * Connects NUM_MASTERS caching L1s to one L2. A snooping FRONT-END (grant,
+ * snoop broadcast, coherency decision) is decoupled from an L2 ENGINE by a
+ * 4-deep in-order transaction queue, so new requests are granted and
+ * snooped while older ones wait out the L2 latency. Grant order is the
+ * global coherence order; per-line conflict masking keeps same-line
+ * requests serialized. BusUpgr and dirty-answered BusRdX respond straight
+ * from the front-end (fast path); everything else drains through the L2.
+ * Dirty snoop data wins over L2 in all cases.
  *
  * Transaction types (shared encoding with titan_x5_l1_cache):
  *   BUS_RD   (0): read line.  shared=1 if any other L1 holds it.
@@ -254,28 +258,90 @@ module titan_x5_coherent_xbar #(
     localparam BUS_UPGR = 2'd2;
     localparam BUS_WB   = 2'd3;
 
-    localparam X_IDLE     = 3'd0;
-    localparam X_SNOOP    = 3'd1;
-    localparam X_L2WR     = 3'd2;  // BusWB: write dirty evict to L2
-    localparam X_L2WR_SNP = 3'd3;  // write dirty snoop data through to L2
-    localparam X_L2RD     = 3'd4;  // fetch line from L2
-    localparam X_RESP     = 3'd5;
+    localparam OFFSET_BITS = $clog2(LINE_BYTES);
 
-    reg [2:0]                  state;
-    reg [MASTER_BITS-1:0]      grant;
-    reg [MASTER_BITS-1:0]      rr_ptr;
-    reg [1:0]                  cur_type;
-    reg [ADDR_WIDTH-1:0]       cur_addr;
-    reg [LINE_BYTES*8-1:0]     cur_wdata;
-    reg [NUM_MASTERS-1:0]      snp_pending;
-    reg                        hit_acc;
-    reg                        dirty_acc;
-    reg [LINE_BYTES*8-1:0]     dirty_data;
-    reg                        l2_accepted;
-    reg                        l2_wr_pending; // write accepted, waiting for L2 to drain
+    // ------------------------------------------------------------------
+    // Split-transaction bus: the FRONT-END (grant + snoop broadcast +
+    // coherency decision) is decoupled from the ENGINE (L2 accesses +
+    // response delivery) by a transaction queue, so new requests can be
+    // snooped while older ones wait out the L2 latency.
+    //
+    // - Snoop order (grant order) is the global coherence order.
+    // - Per-line serialization: a request whose line matches any
+    //   in-flight transaction (front-end, queue, or undelivered fast
+    //   response) is masked from arbitration until it retires.
+    // - Fast transactions (BusUpgr, BusRdX answered by a dirty snoop)
+    //   respond straight from the front-end; L2-bound ones (misses,
+    //   write-backs, dirty write-throughs) queue and complete in order.
+    // - The L2 port itself remains one-operation-at-a-time (the L2 has
+    //   no request IDs); the win is overlapping snoops with L2 latency.
+    // ------------------------------------------------------------------
+    localparam Q_DEPTH = 4;             // one slot per master is enough
+    localparam QPTR_BITS = 2;
 
-    // round-robin arbitration (combinational, from rr_ptr)
+    // front-end
+    localparam F_IDLE  = 2'd0;
+    localparam F_SNOOP = 2'd1;
+    localparam F_FAST  = 2'd2;          // fast response awaiting the bus
+
+    reg [1:0]              fstate;
+    reg [MASTER_BITS-1:0]  f_grant;
+    reg [MASTER_BITS-1:0]  rr_ptr;
+    reg [1:0]              cur_type;
+    reg [ADDR_WIDTH-1:0]   cur_addr;
+    reg [LINE_BYTES*8-1:0] cur_wdata;
+    reg [NUM_MASTERS-1:0]  snp_pending;
+    reg                    hit_acc;
+    reg                    dirty_acc;
+    reg [LINE_BYTES*8-1:0] dirty_data;
+
+    // transaction queue (L2-bound, in-order)
+    reg [Q_DEPTH-1:0]      q_valid;
+    reg [MASTER_BITS-1:0]  q_master  [0:Q_DEPTH-1];
+    reg                    q_wr      [0:Q_DEPTH-1]; // L2 write phase
+    reg                    q_rd      [0:Q_DEPTH-1]; // L2 read phase
+    reg                    q_respond [0:Q_DEPTH-1];
+    reg                    q_shared  [0:Q_DEPTH-1];
+    reg [ADDR_WIDTH-1:0]   q_addr    [0:Q_DEPTH-1];
+    reg [LINE_BYTES*8-1:0] q_wdata   [0:Q_DEPTH-1]; // WB / dirty data (also RD-dirty resp data)
+    reg [QPTR_BITS-1:0]    q_head, q_tail;
+    reg [QPTR_BITS:0]      q_count;
+
+    // engine
+    localparam E_IDLE = 2'd0;
+    localparam E_WR   = 2'd1;
+    localparam E_RD   = 2'd2;
+    localparam E_RESP = 2'd3;
+
+    reg [1:0]              estate;
+    reg                    l2_accepted;
+    reg                    l2_wr_pending;
+    reg [LINE_BYTES*8-1:0] e_rdata;     // captured L2 read data
+
+    wire engine_responding = (estate == E_RESP);
+
+    // ------------------------------------------------------------------
+    // per-master same-line conflict detection (combinational)
+    // ------------------------------------------------------------------
     integer k;
+    integer e;
+    reg [NUM_MASTERS-1:0] conflict;
+    reg [ADDR_WIDTH-OFFSET_BITS-1:0] m_line;
+    always @(*) begin
+        for (k = 0; k < NUM_MASTERS; k = k + 1) begin
+            conflict[k] = 1'b0;
+            m_line = m_req_addr[k*ADDR_WIDTH + OFFSET_BITS +: ADDR_WIDTH-OFFSET_BITS];
+            for (e = 0; e < Q_DEPTH; e = e + 1) begin
+                if (q_valid[e] && q_addr[e][ADDR_WIDTH-1:OFFSET_BITS] == m_line)
+                    conflict[k] = 1'b1;
+            end
+            if (fstate != F_IDLE && cur_addr[ADDR_WIDTH-1:OFFSET_BITS] == m_line)
+                conflict[k] = 1'b1;
+        end
+    end
+
+    // round-robin arbitration over unconflicted requesters (needs queue room)
+    wire queue_full = (q_count == Q_DEPTH);
     reg                   arb_valid;
     reg [MASTER_BITS-1:0] arb_grant;
     reg [MASTER_BITS-1:0] arb_idx;
@@ -284,7 +350,7 @@ module titan_x5_coherent_xbar #(
         arb_grant = {MASTER_BITS{1'b0}};
         for (k = NUM_MASTERS - 1; k >= 0; k = k - 1) begin
             arb_idx = rr_ptr + k[MASTER_BITS-1:0]; // wraps naturally for pow2
-            if (m_req_valid[arb_idx]) begin
+            if (m_req_valid[arb_idx] && !conflict[arb_idx]) begin
                 arb_valid = 1'b1;
                 arb_grant = arb_idx;
             end
@@ -293,8 +359,8 @@ module titan_x5_coherent_xbar #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state         <= X_IDLE;
-            grant         <= {MASTER_BITS{1'b0}};
+            fstate        <= F_IDLE;
+            f_grant       <= {MASTER_BITS{1'b0}};
             rr_ptr        <= {MASTER_BITS{1'b0}};
             m_req_ready   <= {NUM_MASTERS{1'b0}};
             m_resp_valid  <= {NUM_MASTERS{1'b0}};
@@ -307,23 +373,37 @@ module titan_x5_coherent_xbar #(
             hit_acc       <= 1'b0;
             dirty_acc     <= 1'b0;
             dirty_data    <= {LINE_BYTES*8{1'b0}};
+            cur_type      <= BUS_RD;
+            cur_addr      <= {ADDR_WIDTH{1'b0}};
+            cur_wdata     <= {LINE_BYTES*8{1'b0}};
+            q_valid       <= {Q_DEPTH{1'b0}};
+            q_head        <= {QPTR_BITS{1'b0}};
+            q_tail        <= {QPTR_BITS{1'b0}};
+            q_count       <= {QPTR_BITS+1{1'b0}};
+            estate        <= E_IDLE;
             l2_req_valid  <= 1'b0;
             l2_req_write  <= 1'b0;
             l2_req_addr   <= {ADDR_WIDTH{1'b0}};
             l2_req_wdata  <= {LINE_BYTES*8{1'b0}};
             l2_accepted   <= 1'b0;
             l2_wr_pending <= 1'b0;
-            cur_type      <= BUS_RD;
-            cur_addr      <= {ADDR_WIDTH{1'b0}};
-            cur_wdata     <= {LINE_BYTES*8{1'b0}};
-        end else begin
+            e_rdata       <= {LINE_BYTES*8{1'b0}};
+        end else begin : xbar_seq
+            reg push;
+            reg pop;
+            push = 1'b0;
+            pop  = 1'b0;
+
             m_req_ready  <= {NUM_MASTERS{1'b0}};
             m_resp_valid <= {NUM_MASTERS{1'b0}};
 
-            case (state)
-                X_IDLE: begin
-                    if (arb_valid) begin
-                        grant     <= arb_grant;
+            // --------------------------------------------------------
+            // FRONT-END: grant -> snoop -> decide (respond fast / queue)
+            // --------------------------------------------------------
+            case (fstate)
+                F_IDLE: begin
+                    if (arb_valid && !queue_full) begin
+                        f_grant   <= arb_grant;
                         rr_ptr    <= arb_grant + 1'b1;
                         cur_type  <= m_req_type[arb_grant*2 +: 2];
                         cur_addr  <= m_req_addr[arb_grant*ADDR_WIDTH +: ADDR_WIDTH];
@@ -332,20 +412,29 @@ module titan_x5_coherent_xbar #(
                         hit_acc   <= 1'b0;
                         dirty_acc <= 1'b0;
                         if (m_req_type[arb_grant*2 +: 2] == BUS_WB) begin
-                            l2_accepted   <= 1'b0;
-                            l2_wr_pending <= 1'b0;
-                            state <= X_L2WR;
+                            // write-back: no snoop, straight to the queue
+                            q_valid[q_tail]   <= 1'b1;
+                            q_master[q_tail]  <= arb_grant;
+                            q_wr[q_tail]      <= 1'b1;
+                            q_rd[q_tail]      <= 1'b0;
+                            q_respond[q_tail] <= 1'b0;
+                            q_shared[q_tail]  <= 1'b0;
+                            q_addr[q_tail]    <= m_req_addr[arb_grant*ADDR_WIDTH +: ADDR_WIDTH];
+                            q_wdata[q_tail]   <= m_req_wdata[arb_grant*LINE_BYTES*8 +: LINE_BYTES*8];
+                            q_tail <= q_tail + 1'b1;
+                            push = 1'b1;
+                            // fstate stays F_IDLE: WB occupies no snoop phase
                         end else begin
                             snp_req_type <= m_req_type[arb_grant*2 +: 2];
                             snp_req_addr <= m_req_addr[arb_grant*ADDR_WIDTH +: ADDR_WIDTH];
                             snp_pending  <= {NUM_MASTERS{1'b1}} & ~({{NUM_MASTERS-1{1'b0}}, 1'b1} << arb_grant);
                             snp_req_valid<= {NUM_MASTERS{1'b1}} & ~({{NUM_MASTERS-1{1'b0}}, 1'b1} << arb_grant);
-                            state <= X_SNOOP;
+                            fstate <= F_SNOOP;
                         end
                     end
                 end
 
-                X_SNOOP: begin
+                F_SNOOP: begin
                     for (k = 0; k < NUM_MASTERS; k = k + 1) begin
                         if (snp_pending[k] && snp_resp_valid[k]) begin
                             snp_pending[k]   <= 1'b0;
@@ -359,69 +448,102 @@ module titan_x5_coherent_xbar #(
                     end
                     if (snp_pending == {NUM_MASTERS{1'b0}}) begin
                         if (cur_type == BUS_UPGR) begin
-                            m_resp_shared <= 1'b0;
-                            state <= X_RESP;
+                            fstate <= F_FAST; // respond, no data / no L2
+                        end else if (dirty_acc && cur_type == BUS_RDX) begin
+                            fstate <= F_FAST; // dirty copy handed over as M
                         end else if (dirty_acc) begin
-                            m_resp_rdata  <= dirty_data;
-                            m_resp_shared <= 1'b1;
-                            if (cur_type == BUS_RD) begin
-                                // write dirty copy through to L2 (stays clean)
-                                l2_accepted   <= 1'b0;
-                                l2_wr_pending <= 1'b0;
-                                state <= X_L2WR_SNP;
-                            end else begin
-                                state <= X_RESP; // RdX: requester owns as M
-                            end
+                            // BusRd hit dirty: write through to L2, then the
+                            // engine responds with the dirty data (shared)
+                            q_valid[q_tail]   <= 1'b1;
+                            q_master[q_tail]  <= f_grant;
+                            q_wr[q_tail]      <= 1'b1;
+                            q_rd[q_tail]      <= 1'b0;
+                            q_respond[q_tail] <= 1'b1;
+                            q_shared[q_tail]  <= 1'b1;
+                            q_addr[q_tail]    <= cur_addr;
+                            q_wdata[q_tail]   <= dirty_data;
+                            q_tail <= q_tail + 1'b1;
+                            push = 1'b1;
+                            fstate <= F_IDLE;
                         end else begin
-                            m_resp_shared <= hit_acc;
-                            l2_accepted   <= 1'b0;
-                            state <= X_L2RD;
+                            // miss everywhere: fetch the line from L2
+                            q_valid[q_tail]   <= 1'b1;
+                            q_master[q_tail]  <= f_grant;
+                            q_wr[q_tail]      <= 1'b0;
+                            q_rd[q_tail]      <= 1'b1;
+                            q_respond[q_tail] <= 1'b1;
+                            q_shared[q_tail]  <= (cur_type == BUS_RD) && hit_acc;
+                            q_addr[q_tail]    <= cur_addr;
+                            q_wdata[q_tail]   <= {LINE_BYTES*8{1'b0}};
+                            q_tail <= q_tail + 1'b1;
+                            push = 1'b1;
+                            fstate <= F_IDLE;
                         end
                     end
                 end
 
-                X_L2WR: begin
+                F_FAST: begin
+                    // deliver the fast response as soon as the engine is not
+                    // using the shared response bus this cycle
+                    if (!engine_responding) begin
+                        m_resp_valid[f_grant] <= 1'b1;
+                        m_resp_rdata  <= dirty_acc ? dirty_data : {LINE_BYTES*8{1'b0}};
+                        m_resp_shared <= dirty_acc; // BusUpgr: 0, RdX-dirty: 1
+                        fstate <= F_IDLE;
+                    end
+                end
+
+                default: fstate <= F_IDLE;
+            endcase
+
+            // --------------------------------------------------------
+            // ENGINE: drain the queue in order at the L2 port
+            // --------------------------------------------------------
+            case (estate)
+                E_IDLE: begin
+                    if (q_valid[q_head]) begin
+                        l2_accepted   <= 1'b0;
+                        l2_wr_pending <= 1'b0;
+                        if (q_wr[q_head]) begin
+                            l2_req_write <= 1'b1;
+                            l2_req_addr  <= q_addr[q_head];
+                            l2_req_wdata <= q_wdata[q_head];
+                            estate <= E_WR;
+                        end else begin
+                            l2_req_write <= 1'b0;
+                            l2_req_addr  <= q_addr[q_head];
+                            estate <= E_RD;
+                        end
+                    end
+                end
+
+                E_WR: begin
                     // phase 1: valid until accepted; phase 2: wait for the L2
                     // to return to ready (write fully processed; the L2 uses
                     // live address/data, so both are held stable throughout)
-                    l2_req_write <= 1'b1;
-                    l2_req_addr  <= cur_addr;
-                    l2_req_wdata <= cur_wdata;
                     if (!l2_accepted) begin
                         l2_req_valid <= 1'b1;
                         if (l2_req_valid && l2_req_ready) begin
-                            l2_req_valid <= 1'b0;
-                            l2_accepted  <= 1'b1;
-                            l2_wr_pending<= 1'b1;
+                            l2_req_valid  <= 1'b0;
+                            l2_accepted   <= 1'b1;
+                            l2_wr_pending <= 1'b1;
                         end
                     end else if (l2_wr_pending && l2_req_ready) begin
                         l2_wr_pending <= 1'b0;
                         l2_req_write  <= 1'b0;
-                        state <= X_IDLE;
-                    end
-                end
-
-                X_L2WR_SNP: begin
-                    l2_req_write <= 1'b1;
-                    l2_req_addr  <= cur_addr;
-                    l2_req_wdata <= dirty_data;
-                    if (!l2_accepted) begin
-                        l2_req_valid <= 1'b1;
-                        if (l2_req_valid && l2_req_ready) begin
-                            l2_req_valid <= 1'b0;
-                            l2_accepted  <= 1'b1;
-                            l2_wr_pending<= 1'b1;
+                        if (q_respond[q_head]) begin
+                            e_rdata <= q_wdata[q_head]; // dirty data response
+                            estate  <= E_RESP;
+                        end else begin
+                            q_valid[q_head] <= 1'b0;    // silent retire (WB)
+                            q_head <= q_head + 1'b1;
+                            pop = 1'b1;
+                            estate <= E_IDLE;
                         end
-                    end else if (l2_wr_pending && l2_req_ready) begin
-                        l2_wr_pending <= 1'b0;
-                        l2_req_write  <= 1'b0;
-                        state <= X_RESP;
                     end
                 end
 
-                X_L2RD: begin
-                    l2_req_write <= 1'b0;
-                    l2_req_addr  <= cur_addr;
+                E_RD: begin
                     if (!l2_accepted) begin
                         l2_req_valid <= 1'b1;
                         if (l2_req_valid && l2_req_ready) begin
@@ -429,18 +551,26 @@ module titan_x5_coherent_xbar #(
                             l2_accepted  <= 1'b1;
                         end
                     end else if (l2_resp_valid) begin
-                        m_resp_rdata <= l2_resp_rdata;
-                        state <= X_RESP;
+                        e_rdata <= l2_resp_rdata;
+                        estate  <= E_RESP;
                     end
                 end
 
-                X_RESP: begin
-                    m_resp_valid[grant] <= 1'b1;
-                    state <= X_IDLE;
+                E_RESP: begin
+                    // engine has priority on the shared response bus
+                    m_resp_valid[q_master[q_head]] <= 1'b1;
+                    m_resp_rdata  <= e_rdata;
+                    m_resp_shared <= q_shared[q_head];
+                    q_valid[q_head] <= 1'b0;
+                    q_head <= q_head + 1'b1;
+                    pop = 1'b1;
+                    estate <= E_IDLE;
                 end
 
-                default: state <= X_IDLE;
+                default: estate <= E_IDLE;
             endcase
+
+            q_count <= q_count + {{QPTR_BITS{1'b0}}, push} - {{QPTR_BITS{1'b0}}, pop};
         end
     end
 
