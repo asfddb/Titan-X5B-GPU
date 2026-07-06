@@ -21,11 +21,9 @@ TOPLEVEL = titan_x5_alu
 MODULE = test_alu
 endif
 
-ifeq ($(TEST_TARGET), cache)
-VERILOG_SOURCES = $(PWD)/../rtl/memory/titan_x5_l1_cache.v
-TOPLEVEL = titan_x5_l1_cache
-MODULE = test_cache
-endif
+# (the old "cache" target was removed: it referenced a test_cache module
+# that never existed, and the L1 now has a MESI interface covered by the
+# cocotb 2.x regression: python run_regression.py mesi)
 
 include $(shell cocotb-config --makefiles)/Makefile.sim
 
