@@ -29,6 +29,9 @@ import cocotb
 from cocotb.triggers import RisingEdge, ReadOnly
 
 from tb_common import start_clock_and_reset, load_vectors, deterministic_line
+from coverage_util import sample_lsu_warp, export_on_exit
+
+export_on_exit("lsu")
 
 NUM_LANES = 32
 LINE_BYTES = 128
@@ -43,6 +46,7 @@ class LineMemoryModel:
         self.rng = rng
         self.mem = {}          # line_addr -> int (LINE_BYTES*8 bits)
         self.transactions = [] # (addr, write, wdata, be) per accepted req
+        self.stall_count = 0   # cycles a line request waited on backpressure
         self.stop = False
 
     def line(self, addr):
@@ -81,6 +85,8 @@ class LineMemoryModel:
             dut.mem_req_ready.value = 1 if ready else 0
             await ReadOnly()
             valid = int(dut.mem_req_valid.value) == 1
+            if valid and not ready:
+                self.stall_count += 1  # backpressure (skid) coverage
             if valid and ready:
                 addr = int(dut.mem_req_addr.value)
                 write = int(dut.mem_req_write.value)
@@ -129,6 +135,7 @@ async def drive_warp(dut, mem, sb_mem_read, wid, write, mask, addrs, wdata):
 
     # wait for acceptance: sample ready in the ReadOnly phase of the same
     # edge at which the DUT samples valid
+    stall_base = mem.stall_count
     for _ in range(1000):
         await ReadOnly()
         accepted = int(dut.warp_req_ready.value) == 1
@@ -175,6 +182,8 @@ async def drive_warp(dut, mem, sb_mem_read, wid, write, mask, addrs, wdata):
          f"expected {sorted(hex(a) for a in exp_line_set)}")
     assert got_x == len(exp_line_set), \
         f"xaction count {got_x} != optimal {len(exp_line_set)}"
+
+    sample_lsu_warp(mask, got_x, write, mem.stall_count - stall_base)
 
     if write:
         # per-transaction byte enables / data already applied to the model

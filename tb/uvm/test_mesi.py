@@ -37,6 +37,9 @@ import cocotb
 from cocotb.triggers import RisingEdge, ClockCycles, ReadOnly, NextTimeStep
 
 from tb_common import start_clock_and_reset, deterministic_line
+from coverage_util import sample_mesi_state, export_on_exit
+
+export_on_exit("mesi")
 
 LINE_BYTES = 16
 LINE_BITS = LINE_BYTES * 8
@@ -185,6 +188,8 @@ async def check_invariants(dut, lines):
         await ReadOnly()
         states = [int(getattr(dut, f"m{i}_dbg_mesi").value) for i in range(4)]
         await NextTimeStep()
+        for i, s in enumerate(states):
+            sample_mesi_state(i, addr, s)   # FSM occupancy + transitions
         n_m = states.count(3)
         n_e = states.count(2)
         n_s = states.count(1)
@@ -257,6 +262,22 @@ async def test_mesi_directed_producer_consumer(dut):
     for i in (0, 1, 3):
         got = await m[i].read(A)
         assert got == exp, f"m{i} partial-write merge wrong: {got:#x} != {exp:#x}"
+    # directed E-state coverage: exclusive fill then silent E->M upgrade,
+    # and exclusive fill then foreign-BusRdX invalidation (E->I). The
+    # invariant sampler between steps records the FSM transitions.
+    X, Y = 0x0000_3100, 0x0000_3200
+    await m[0].read(X)                    # nobody else has X -> E
+    await check_invariants(dut, [X])
+    await m[0].write(X, v1, full_be)      # silent E->M (no bus traffic)
+    await check_invariants(dut, [X])
+    await m[1].read(Y)                    # -> E in m1
+    await check_invariants(dut, [Y])
+    await m[0].write(Y, v2, full_be)      # BusRdX: m1 E->I
+    await check_invariants(dut, [Y])
+    got = await m[1].read(Y)
+    assert got == v2, f"E->I path stale: {got:#x} != {v2:#x}"
+    await check_invariants(dut, [Y])
+
     dut._log.info("MESI directed producer/consumer passed")
     l2.stop = True
 

@@ -32,6 +32,9 @@ import cocotb
 from cocotb.triggers import RisingEdge, ClockCycles, ReadOnly
 
 from tb_common import start_clock_and_reset
+from coverage_util import sample_tmu, export_on_exit
+
+export_on_exit("tmu")
 
 
 class TextureMemory:
@@ -182,6 +185,7 @@ async def run_case(dut, mem, u_fix, v_fix, w, h, clamp, fmt, base, tag):
         f"clamp={clamp} fmt={fmt}: got {got:08x}, expected {exp:08x}")
     assert gx == (u_fix >> 16) & 0xFFFF and gy == (v_fix >> 16) & 0xFFFF, \
         f"{tag}: x/y echo wrong: ({gx},{gy})"
+    sample_tmu(fmt, clamp, (u_fix >> 8) & 0xFF, (v_fix >> 8) & 0xFF)
 
 
 @cocotb.test()

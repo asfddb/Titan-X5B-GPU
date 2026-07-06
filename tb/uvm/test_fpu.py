@@ -33,6 +33,9 @@ from cocotb.triggers import RisingEdge, ClockCycles, Timer, ReadOnly
 
 from tb_common import start_clock_and_reset, load_vectors
 from fp_ref import fp_add, fp_mul, fp_fma, is_nan, FP32, FP16, RM_RNE
+from coverage_util import sample_fpu_op, export_on_exit
+
+export_on_exit("fpu")
 
 QNAN32 = 0x7FC00000
 
@@ -77,6 +80,7 @@ def check(kind, a, b, rm, got_res, got_flags, exp_res, exp_flags):
                 f"{kind} rm={rm} a={a:08x} b={b:08x}: flag {name} "
                 f"got {got_flags[name]}, expected {exp_flags[name]} "
                 f"(res {got_res:08x})")
+    sample_fpu_op("add" if "add" in kind else "mul", rm, a, b, got_flags)
 
 
 async def run_unit_op(dut, unit, a, b, rm):
@@ -246,6 +250,7 @@ async def test_fp16_mul(dut):
         else:
             assert got == exp, \
                 f"fp16_mul a={a:04x} b={b:04x}: got {got:04x}, expected {exp:04x}"
+        sample_fpu_op("mul16", RM_RNE, a, b, width=16)
 
     for a in directed16:
         for b in directed16:
@@ -282,6 +287,8 @@ async def test_alu_fp_integration(dut):
     await ClockCycles(dut.clk, 2)
 
     async def alu_op(op, a, b, c, rm):
+        sample_fpu_op({OP_FADD: "add", OP_FMUL: "mul"}.get(op, "fma"),
+                      rm, a, b)
         dut.alu_opcode.value = op
         dut.alu_src1.value = a
         dut.alu_src2.value = b
