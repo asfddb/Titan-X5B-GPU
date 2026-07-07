@@ -46,3 +46,14 @@ Please proceed through the following phases based on the user's current compute 
 ### Critical Instructions for Claude:
 * **Preserve the RTL:** Do not make arbitrary changes to the core logic in `rtl/` unless it is strictly required to fix a timing violation discovered during FPGA/ASIC synthesis. The logic is verified and green.
 * **Keep the User Informed:** Synthesis and PnR can take hours. Use background tasks effectively, and never hang the chat session while waiting for a build to finish.
+
+---
+
+## Phase 4: The "RTX 5080" Massive Scaling Protocol (Stretch Goal)
+*The user has requested that we scale this architecture to rival flagship desktop GPUs. If the core phases are completed, begin architecting the massive scale-up.*
+
+**Your Tasks:**
+1. **Ray Tracing Hardening:** Open `rtl/raytracing/titan_x5_ray_triangle_isect.v` and replace the placeholder logic with a fully pipelined Bounding Volume Hierarchy (BVH) traversal and ray-triangle intersection mathematical pipeline.
+2. **Tensor Core Expansion:** Upgrade `titan_x6_tensor_core_array.v` to support massive parallel 4x4 and 16x16 matrix multiplications for AI workloads (specifically targeting FP8/INT8).
+3. **Massive ALU Instantiation:** Rewrite the top-level modules to instantiate thousands of `titan_x5_sm` cores. 
+4. **Crossbar Overhaul:** Upgrade `titan_x5_crossbar.v` to a massive network-on-chip (NoC) mesh to handle the bandwidth of thousands of cores talking to the 512-bit GDDR memory controllers simultaneously without bottlenecking.
