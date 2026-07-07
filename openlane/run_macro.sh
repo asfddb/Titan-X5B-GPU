@@ -18,11 +18,10 @@ rsync -a --exclude runs "$REPO/openlane" "$WORK/"
 cd "$WORK"
 /root/olenv/bin/openlane --dockerized "openlane/${d}/config.json"
 rc=$?
-if [ $rc -eq 0 ]; then
-    last=$(ls -1dt "$WORK/openlane/${d}/runs/"* 2>/dev/null | head -1)
-    if [ -n "$last" ]; then
-        mkdir -p "$REPO/openlane/${d}/runs"
-        rsync -a "$last" "$REPO/openlane/${d}/runs/"
-    fi
+# copy the run back even on failure - the reports are the diagnostics
+last=$(ls -1dt "$WORK/openlane/${d}/runs/"* 2>/dev/null | head -1)
+if [ -n "$last" ]; then
+    mkdir -p "$REPO/openlane/${d}/runs"
+    rsync -a "$last" "$REPO/openlane/${d}/runs/"
 fi
 echo "EXIT=$rc"
