@@ -1,0 +1,32 @@
+
+3. Printing statistics.
+
+=== titan_x5_dma_engine ===
+
+   Number of wires:                583
+   Number of wire bits:           1979
+   Number of public wires:          35
+   Number of public wire bits:     507
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1197
+     BUFG                            1
+     CARRY4                         32
+     DSP48E1                         2
+     FDCE                          328
+     FDPE                            1
+     IBUF                          107
+     INV                           363
+     LUT1                            1
+     LUT2                           46
+     LUT3                           35
+     LUT4                           40
+     LUT5                          100
+     LUT6                           28
+     MUXF7                           5
+     MUXF8                           2
+     OBUF                          106
+
+   Estimated number of LCs:        203
+

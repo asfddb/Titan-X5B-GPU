@@ -1,0 +1,95 @@
+
+4. Printing statistics.
+
+=== $paramod\titan_x5_skid_buffer\DATA_WIDTH=s32'00000000000000000000000000100001 ===
+
+   Number of wires:                117
+   Number of wire bits:            245
+   Number of public wires:          12
+   Number of public wire bits:     140
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                174
+     FDCE                           68
+     INV                            69
+     LUT3                           33
+     LUT4                            4
+
+   Estimated number of LCs:         37
+
+=== $paramod\titan_x5_skid_buffer\DATA_WIDTH=s32'00000000000000000000000001100001 ===
+
+   Number of wires:                309
+   Number of wire bits:            693
+   Number of public wires:          12
+   Number of public wire bits:     396
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                494
+     FDCE                          196
+     INV                           197
+     LUT3                           97
+     LUT4                            4
+
+   Estimated number of LCs:        101
+
+=== titan_x5_sr_engine ===
+
+   Number of wires:                948
+   Number of wire bits:           2347
+   Number of public wires:         114
+   Number of public wire bits:     659
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1591
+     $paramod\titan_x5_skid_buffer\DATA_WIDTH=s32'00000000000000000000000000100001      1
+     $paramod\titan_x5_skid_buffer\DATA_WIDTH=s32'00000000000000000000000001100001      1
+     BUFG                            1
+     FDCE                          390
+     IBUF                          101
+     INV                           391
+     LUT2                          105
+     LUT3                           23
+     LUT4                           39
+     LUT5                           72
+     LUT6                          136
+     MUXF7                         139
+     MUXF8                          69
+     OBUF                           35
+     RAM64M                         88
+
+   Estimated number of LCs:        292
+
+=== design hierarchy ===
+
+   titan_x5_sr_engine                1
+     $paramod\titan_x5_skid_buffer\DATA_WIDTH=s32'00000000000000000000000000100001      1
+     $paramod\titan_x5_skid_buffer\DATA_WIDTH=s32'00000000000000000000000001100001      1
+
+   Number of wires:               1374
+   Number of wire bits:           3285
+   Number of public wires:         138
+   Number of public wire bits:    1195
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               2257
+     BUFG                            1
+     FDCE                          654
+     IBUF                          101
+     INV                           657
+     LUT2                          105
+     LUT3                          153
+     LUT4                           47
+     LUT5                           72
+     LUT6                          136
+     MUXF7                         139
+     MUXF8                          69
+     OBUF                           35
+     RAM64M                         88
+
+   Estimated number of LCs:        408
+

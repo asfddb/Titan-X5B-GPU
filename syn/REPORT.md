@@ -19,3 +19,7 @@ This report contains the synthesis results for the Titan X5-B GPU Top level modu
 | Vortex | ~150K | Open Source (Academic) |
 
 *Note: Due to its size, this GPU will not fit on low-end FPGAs like the Artix-7, but can be scaled for large Virtex Ultrascale+ or Stratix 10 devices.*
+
+> **See also:** [docs/FPGA_PHASE1_REPORT.md](../docs/FPGA_PHASE1_REPORT.md)
+> for measured per-subsystem Xilinx 7-series utilization
+> (`synth_xilinx`, 2026-07-07) and the Basys 3 fit analysis.

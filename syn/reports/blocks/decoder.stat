@@ -1,0 +1,21 @@
+
+43. Printing statistics.
+
+=== titan_x5_decoder ===
+
+   Number of wires:                 32
+   Number of wire bits:            154
+   Number of public wires:          19
+   Number of public wire bits:      90
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                 99
+     IBUF                           32
+     LUT2                            1
+     LUT4                            2
+     LUT5                            6
+     OBUF                           58
+
+   Estimated number of LCs:          8
+

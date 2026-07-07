@@ -1,0 +1,32 @@
+
+43. Printing statistics.
+
+=== titan_x5_coherent_xbar ===
+
+   Number of wires:              12039
+   Number of wire bits:          57211
+   Number of public wires:          71
+   Number of public wire bits:   17950
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              32372
+     BUFG                            1
+     CARRY4                         41
+     FDCE                         4235
+     FDPE                            1
+     FDRE                         4244
+     IBUF                         9372
+     INV                          4246
+     LUT1                            6
+     LUT2                          159
+     LUT3                         1095
+     LUT4                           51
+     LUT5                         2113
+     LUT6                         4511
+     MUXF7                         121
+     MUXF8                          47
+     OBUF                         2129
+
+   Estimated number of LCs:       7770
+

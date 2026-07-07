@@ -1,0 +1,31 @@
+
+3. Printing statistics.
+
+=== titan_x5_vram_ctrl ===
+
+   Number of wires:                515
+   Number of wire bits:          25470
+   Number of public wires:          41
+   Number of public wire bits:    1282
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1537
+     BUFG                            1
+     CARRY4                         10
+     FDCE                           58
+     FDRE                            4
+     IBUF                          682
+     INV                            74
+     LUT2                           71
+     LUT3                            4
+     LUT4                           22
+     LUT5                           21
+     LUT6                           22
+     MUXF7                           4
+     MUXF8                           2
+     OBUF                          530
+     RAMB36E1                       32
+
+   Estimated number of LCs:         92
+

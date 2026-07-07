@@ -1,0 +1,85 @@
+
+4. Printing statistics.
+
+=== $paramod$b9b481b895b787b4710a6b12f8e621d22262626c\titan_x5_async_fifo ===
+
+   Number of wires:                399
+   Number of wire bits:           3475
+   Number of public wires:          85
+   Number of public wire bits:    2222
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               2967
+     CARRY4                          4
+     FDCE                           54
+     FDRE                         2080
+     INV                            56
+     LUT2                           19
+     LUT4                           36
+     LUT5                           37
+     LUT6                          680
+     MUXF7                           1
+
+   Estimated number of LCs:        753
+
+=== titan_x5_display_engine ===
+
+   Number of wires:                415
+   Number of wire bits:           1754
+   Number of public wires:          38
+   Number of public wire bits:     315
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                779
+     $paramod$b9b481b895b787b4710a6b12f8e621d22262626c\titan_x5_async_fifo      1
+     BUFG                            2
+     CARRY4                         56
+     DSP48E1                         1
+     FDCE                           84
+     FDRE                            3
+     IBUF                          133
+     INV                           132
+     LUT2                          100
+     LUT3                            1
+     LUT4                            9
+     LUT5                           34
+     LUT6                          121
+     MUXF7                          36
+     MUXF8                           5
+     OBUF                           61
+
+   Estimated number of LCs:        210
+
+=== design hierarchy ===
+
+   titan_x5_display_engine           1
+     $paramod$b9b481b895b787b4710a6b12f8e621d22262626c\titan_x5_async_fifo      1
+
+   Number of wires:                814
+   Number of wire bits:           5229
+   Number of public wires:         123
+   Number of public wire bits:    2537
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               3745
+     BUFG                            2
+     CARRY4                         60
+     DSP48E1                         1
+     FDCE                          138
+     FDRE                         2083
+     IBUF                          133
+     INV                           188
+     LUT2                          119
+     LUT3                            1
+     LUT4                           45
+     LUT5                           71
+     LUT6                          801
+     MUXF7                          37
+     MUXF8                           5
+     OBUF                           61
+
+   Estimated number of LCs:        955
+

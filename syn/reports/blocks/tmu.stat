@@ -1,0 +1,88 @@
+
+4. Printing statistics.
+
+=== $paramod$c40bba846d195b89cac79df11598322e820654a2\titan_x5_l1_cache ===
+
+   Number of wires:              76296
+   Number of wire bits:         265118
+   Number of public wires:        3372
+   Number of public wire bits:   58369
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:             190696
+     FDCE                         2768
+     FDRE                        55296
+     INV                          2768
+     LUT1                         1952
+     LUT2                         8187
+     LUT3                         5112
+     LUT4                         8503
+     LUT5                         5000
+     LUT6                        71654
+     MUXF7                       22975
+     MUXF8                        6481
+
+   Estimated number of LCs:      90269
+
+=== titan_x5_tmu ===
+
+   Number of wires:               1127
+   Number of wire bits:           6861
+   Number of public wires:          54
+   Number of public wire bits:     858
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               2388
+     $paramod$c40bba846d195b89cac79df11598322e820654a2\titan_x5_l1_cache      1
+     BUFG                            1
+     CARRY4                        222
+     DSP48E1                        26
+     FDCE                          408
+     IBUF                          169
+     INV                           536
+     LUT1                            6
+     LUT2                          249
+     LUT3                          209
+     LUT4                          165
+     LUT5                          128
+     LUT6                          142
+     MUXF7                          18
+     MUXF8                           6
+     OBUF                          102
+
+   Estimated number of LCs:        644
+
+=== design hierarchy ===
+
+   titan_x5_tmu                      1
+     $paramod$c40bba846d195b89cac79df11598322e820654a2\titan_x5_l1_cache      1
+
+   Number of wires:              77423
+   Number of wire bits:         271979
+   Number of public wires:        3426
+   Number of public wire bits:   59227
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:             193083
+     BUFG                            1
+     CARRY4                        222
+     DSP48E1                        26
+     FDCE                         3176
+     FDRE                        55296
+     IBUF                          169
+     INV                          3304
+     LUT1                         1958
+     LUT2                         8436
+     LUT3                         5321
+     LUT4                         8668
+     LUT5                         5128
+     LUT6                        71796
+     MUXF7                       22993
+     MUXF8                        6487
+     OBUF                          102
+
+   Estimated number of LCs:      90913
+

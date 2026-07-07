@@ -1,0 +1,22 @@
+
+3. Printing statistics.
+
+=== titan_x5_gddr7_pam3_phy ===
+
+   Number of wires:                699
+   Number of wire bits:           5140
+   Number of public wires:         351
+   Number of public wire bits:    3595
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               3768
+     BUFG                            1
+     FDRE                          685
+     IBUF                         1200
+     LUT2                          171
+     LUT3                          513
+     OBUF                         1198
+
+   Estimated number of LCs:        513
+

@@ -1,0 +1,33 @@
+
+43. Printing statistics.
+
+=== titan_x5_vertex_transformer ===
+
+   Number of wires:              12350
+   Number of wire bits:          58976
+   Number of public wires:          39
+   Number of public wire bits:    1256
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              18504
+     BUFG                            1
+     CARRY4                       1541
+     DSP48E1                        52
+     FDCE                          412
+     FDRE                          230
+     FDSE                            1
+     IBUF                          516
+     INV                          1705
+     LUT1                         2259
+     LUT2                          978
+     LUT3                         1232
+     LUT4                          122
+     LUT5                          258
+     LUT6                         3952
+     MUXF7                        3584
+     MUXF8                        1563
+     OBUF                           98
+
+   Estimated number of LCs:       6377
+

@@ -1,0 +1,31 @@
+
+3. Printing statistics.
+
+=== titan_x5_command_processor ===
+
+   Number of wires:               3045
+   Number of wire bits:           8132
+   Number of public wires:          20
+   Number of public wire bits:    1297
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               5264
+     BUFG                            1
+     CARRY4                         21
+     FDCE                          526
+     FDRE                          613
+     IBUF                          133
+     INV                           532
+     LUT1                          187
+     LUT2                           56
+     LUT3                          106
+     LUT4                          191
+     LUT5                          380
+     LUT6                          894
+     MUXF7                         724
+     MUXF8                         257
+     OBUF                          643
+
+   Estimated number of LCs:       1571
+

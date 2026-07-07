@@ -1,0 +1,32 @@
+
+43. Printing statistics.
+
+=== titan_x5_rasterizer ===
+
+   Number of wires:              34094
+   Number of wire bits:         184462
+   Number of public wires:         192
+   Number of public wire bits:    9268
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              61622
+     BUFG                            1
+     CARRY4                       5951
+     DSP48E1                        34
+     FDCE                           19
+     FDRE                         3084
+     IBUF                          196
+     INV                          4309
+     LUT1                         3561
+     LUT2                         7190
+     LUT3                         5660
+     LUT4                          495
+     LUT5                         1047
+     LUT6                        11914
+     MUXF7                       11320
+     MUXF8                        4744
+     OBUF                         2097
+
+   Estimated number of LCs:      20891
+

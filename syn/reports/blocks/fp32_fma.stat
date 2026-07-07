@@ -1,0 +1,31 @@
+
+43. Printing statistics.
+
+=== titan_x5_fp32_fma ===
+
+   Number of wires:               1851
+   Number of wire bits:           7890
+   Number of public wires:         109
+   Number of public wire bits:    1848
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               3900
+     BUFG                            1
+     CARRY4                        114
+     DSP48E1                         2
+     FDCE                          740
+     IBUF                          102
+     INV                           883
+     LUT1                           16
+     LUT2                          469
+     LUT3                          606
+     LUT4                           89
+     LUT5                          120
+     LUT6                          591
+     MUXF7                          97
+     MUXF8                          33
+     OBUF                           37
+
+   Estimated number of LCs:       1406
+

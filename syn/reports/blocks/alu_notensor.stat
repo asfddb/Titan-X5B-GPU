@@ -1,0 +1,141 @@
+
+9. Printing statistics.
+
+=== titan_x5_alu ===
+
+   Number of wires:               1483
+   Number of wire bits:           4070
+   Number of public wires:          97
+   Number of public wire bits:    1190
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               2526
+     BUFG                            1
+     CARRY4                         32
+     DSP48E1                         3
+     FDCE                          580
+     FDRE                          192
+     IBUF                          107
+     INV                          1085
+     LUT2                          108
+     LUT3                          115
+     LUT4                           37
+     LUT5                           44
+     LUT6                          146
+     MUXF7                           1
+     OBUF                           72
+     titan_x5_fp32_add               1
+     titan_x5_fp32_fma               1
+     titan_x5_fp32_mul               1
+
+   Estimated number of LCs:        342
+
+=== titan_x5_fp32_add ===
+
+   Number of wires:                611
+   Number of wire bits:           2418
+   Number of public wires:          61
+   Number of public wire bits:     677
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1114
+     CARRY4                         41
+     FDCE                          153
+     INV                           165
+     LUT1                           28
+     LUT2                          124
+     LUT3                          260
+     LUT4                           24
+     LUT5                           46
+     LUT6                          160
+     MUXF7                          80
+     MUXF8                          33
+
+   Estimated number of LCs:        490
+
+=== titan_x5_fp32_fma ===
+
+   Number of wires:               1845
+   Number of wire bits:           7881
+   Number of public wires:         109
+   Number of public wire bits:    1848
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               3760
+     CARRY4                        114
+     DSP48E1                         2
+     FDCE                          740
+     INV                           882
+     LUT1                           16
+     LUT2                          481
+     LUT3                          604
+     LUT4                           80
+     LUT5                          117
+     LUT6                          596
+     MUXF7                          95
+     MUXF8                          33
+
+   Estimated number of LCs:       1397
+
+=== titan_x5_fp32_mul ===
+
+   Number of wires:                603
+   Number of wire bits:           2316
+   Number of public wires:          54
+   Number of public wire bits:     645
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1016
+     CARRY4                         23
+     DSP48E1                         2
+     FDCE                          173
+     INV                           175
+     LUT1                           46
+     LUT2                           80
+     LUT3                          113
+     LUT4                           79
+     LUT5                           65
+     LUT6                          146
+     MUXF7                          81
+     MUXF8                          33
+
+   Estimated number of LCs:        403
+
+=== design hierarchy ===
+
+   titan_x5_alu                      1
+     titan_x5_fp32_add               1
+     titan_x5_fp32_fma               1
+     titan_x5_fp32_mul               1
+
+   Number of wires:               4542
+   Number of wire bits:          16685
+   Number of public wires:         321
+   Number of public wire bits:    4360
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               8413
+     BUFG                            1
+     CARRY4                        210
+     DSP48E1                         7
+     FDCE                         1646
+     FDRE                          192
+     IBUF                          107
+     INV                          2307
+     LUT1                           90
+     LUT2                          793
+     LUT3                         1092
+     LUT4                          220
+     LUT5                          272
+     LUT6                         1048
+     MUXF7                         257
+     MUXF8                          99
+     OBUF                           72
+
+   Estimated number of LCs:       2632
+

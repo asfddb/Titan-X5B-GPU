@@ -1,0 +1,81 @@
+
+43. Printing statistics.
+
+=== titan_x5_decoder ===
+
+   Number of wires:                 19
+   Number of wire bits:             90
+   Number of public wires:          19
+   Number of public wire bits:      90
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:                  9
+     LUT2                            1
+     LUT4                            2
+     LUT5                            6
+
+   Estimated number of LCs:          8
+
+=== titan_x5_pipeline ===
+
+   Number of wires:              15623
+   Number of wire bits:          69234
+   Number of public wires:         118
+   Number of public wire bits:   29953
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              35741
+     BUFG                            1
+     CARRY4                          3
+     FDCE                         1046
+     FDRE                         7217
+     IBUF                         5195
+     INV                          1049
+     LUT1                         3075
+     LUT2                           51
+     LUT3                            4
+     LUT4                           15
+     LUT5                         3076
+     LUT6                         2602
+     MUXF7                        4112
+     MUXF8                           4
+     OBUF                         8283
+     RAM32M                          7
+     titan_x5_decoder                1
+
+   Estimated number of LCs:       5713
+
+=== design hierarchy ===
+
+   titan_x5_pipeline                 1
+     titan_x5_decoder                1
+
+   Number of wires:              15642
+   Number of wire bits:          69324
+   Number of public wires:         137
+   Number of public wire bits:   30043
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              35749
+     BUFG                            1
+     CARRY4                          3
+     FDCE                         1046
+     FDRE                         7217
+     IBUF                         5195
+     INV                          1049
+     LUT1                         3075
+     LUT2                           52
+     LUT3                            4
+     LUT4                           17
+     LUT5                         3082
+     LUT6                         2602
+     MUXF7                        4112
+     MUXF8                           4
+     OBUF                         8283
+     RAM32M                          7
+
+   Estimated number of LCs:       5721
+

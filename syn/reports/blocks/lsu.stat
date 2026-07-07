@@ -1,0 +1,31 @@
+
+3. Printing statistics.
+
+=== titan_x5_lsu ===
+
+   Number of wires:             169150
+   Number of wire bits:         502792
+   Number of public wires:          95
+   Number of public wire bits:    9668
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:             264262
+     BUFG                            1
+     CARRY4                        578
+     FDCE                         4088
+     FDPE                            1
+     IBUF                         3113
+     INV                          4251
+     LUT1                         8451
+     LUT2                        40119
+     LUT3                        43287
+     LUT4                        10059
+     LUT5                        10154
+     LUT6                        66788
+     MUXF7                       50938
+     MUXF8                       20213
+     OBUF                         2221
+
+   Estimated number of LCs:     130288
+

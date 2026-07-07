@@ -1,0 +1,32 @@
+
+43. Printing statistics.
+
+=== titan_x5_warp_scheduler ===
+
+   Number of wires:               3269
+   Number of wire bits:          13911
+   Number of public wires:         213
+   Number of public wire bits:    6341
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:              10738
+     BUFG                            1
+     CARRY4                         48
+     FDCE                          611
+     FDPE                          256
+     FDRE                         4160
+     IBUF                          410
+     INV                           895
+     LUT1                          201
+     LUT2                          267
+     LUT3                          642
+     LUT4                          189
+     LUT5                          574
+     LUT6                         1821
+     MUXF7                         357
+     MUXF8                         157
+     OBUF                          149
+
+   Estimated number of LCs:       3226
+

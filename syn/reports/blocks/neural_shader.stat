@@ -1,0 +1,25 @@
+
+3. Printing statistics.
+
+=== titan_x5_neural_shader_dispatch ===
+
+   Number of wires:                 37
+   Number of wire bits:           1663
+   Number of public wires:          15
+   Number of public wire bits:     842
+   Number of memories:               0
+   Number of memory bits:            0
+   Number of processes:              0
+   Number of cells:               1080
+     BUFG                            1
+     FDCE                            4
+     FDRE                          224
+     IBUF                          229
+     INV                             4
+     LUT2                            2
+     LUT3                            1
+     LUT4                            4
+     OBUF                          611
+
+   Estimated number of LCs:          5
+

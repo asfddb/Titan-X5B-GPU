@@ -28,6 +28,7 @@ syn/fpga_top_synth.json
 syn/titan_x5b_synth.v
 fpga/synth_netlist.v
 fpga/build/
+syn/reports/blocks/round2_progress.txt
 
 # Sim dumps
 fb_dump.txt
