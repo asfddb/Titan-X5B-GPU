@@ -1,0 +1,9 @@
+{
+    "DESIGN_NAME": "titan_x5_rasterizer",
+    "VERILOG_FILES": ["dir::../../rtl/graphics/titan_x5_rasterizer.v"],
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 25,
+    "FP_CORE_UTIL": 35,
+    "PL_TARGET_DENSITY_PCT": 40,
+    "SYNTH_STRATEGY": "AREA 0"
+}

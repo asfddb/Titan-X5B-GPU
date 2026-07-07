@@ -1,0 +1,8 @@
+{
+    "DESIGN_NAME": "titan_x5_fp32_fma",
+    "VERILOG_FILES": ["dir::../../rtl/fpu/titan_x5_fp32_fma.v"],
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 25,
+    "FP_CORE_UTIL": 40,
+    "PL_TARGET_DENSITY_PCT": 45
+}
