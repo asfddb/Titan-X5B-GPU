@@ -72,7 +72,6 @@ module titan_x5_vram_ctrl (
             reading       <= 1'b0;
             r_addr        <= 11'd0;
             r_len_cnt     <= 8'd0;
-            s_axi_rdata   <= 512'd0;
         end else begin
             // Accept new read address
             if (!reading && !s_axi_arready) begin
@@ -88,7 +87,6 @@ module titan_x5_vram_ctrl (
             // Output data
             if (reading && (!s_axi_rvalid || s_axi_rready)) begin
                 s_axi_rvalid <= 1'b1;
-                s_axi_rdata  <= bram[r_addr];
                 s_axi_rid    <= r_id;
                 s_axi_rresp  <= 2'b00;
                 s_axi_rlast  <= (r_len_cnt == 0);
@@ -103,6 +101,15 @@ module titan_x5_vram_ctrl (
                 s_axi_rvalid <= 1'b0;
                 s_axi_rlast  <= 1'b0;
             end
+        end
+    end
+
+    // BRAM read port: no reset — an async clear on the output register
+    // blocks BRAM inference and the array would flatten to 1 Mbit of FFs.
+    // rdata is qualified by rvalid, so a reset value is unnecessary.
+    always @(posedge clk) begin
+        if (reading && (!s_axi_rvalid || s_axi_rready)) begin
+            s_axi_rdata <= bram[r_addr];
         end
     end
 
@@ -137,14 +144,9 @@ module titan_x5_vram_ctrl (
                 s_axi_wready  <= 1'b1;
             end
             
-            // Accept write data
+            // Accept write data (array write itself lives in the
+            // reset-free process below - see BRAM note on the read port)
             if (writing && s_axi_wready && s_axi_wvalid) begin
-                for (i = 0; i < 64; i = i + 1) begin
-                    if (s_axi_wstrb[i]) begin
-                        bram[w_addr][i*8 +: 8] <= s_axi_wdata[i*8 +: 8];
-                    end
-                end
-                
                 if (w_len_cnt == 0 || s_axi_wlast) begin
                     writing       <= 1'b0;
                     s_axi_wready  <= 1'b0;
@@ -160,6 +162,18 @@ module titan_x5_vram_ctrl (
             // Clear bvalid when accepted
             if (s_axi_bvalid && s_axi_bready) begin
                 s_axi_bvalid <= 1'b0;
+            end
+        end
+    end
+
+    // BRAM write port: kept out of the async-reset process for the same
+    // reason as the read port - BRAM ports cannot sit under an async reset.
+    always @(posedge clk) begin
+        if (writing && s_axi_wready && s_axi_wvalid) begin
+            for (i = 0; i < 64; i = i + 1) begin
+                if (s_axi_wstrb[i]) begin
+                    bram[w_addr][i*8 +: 8] <= s_axi_wdata[i*8 +: 8];
+                end
             end
         end
     end
