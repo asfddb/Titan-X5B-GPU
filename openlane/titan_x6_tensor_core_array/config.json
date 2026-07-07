@@ -10,5 +10,6 @@
     "PL_TARGET_DENSITY_PCT": 40,
     "SYNTH_STRATEGY": "AREA 0",
     "SYNTH_SHARE_RESOURCES": false,
-    "_comment": "share disabled: yosys's SAT-based share pass explodes past 32 GB VM on the flattened 16-PE systolic array (OOM-killed twice); the PEs are identical so cross-PE sharing has nothing to find anyway"
+    "SYNTH_HIERARCHY_MODE": "deferred_flatten",
+    "_comment": "yosys's SAT-based share pass explodes past 32 GB VM on the flattened 16-PE systolic array (OOM-killed twice). SYNTH_SHARE_RESOURCES is declared but NOT honored by openlane 2.3.10's pyosys script (run_pass('share') is unconditional); deferred_flatten makes the opt pipeline run per-module (167-cell PEs = trivial SAT) with flattening deferred to the ABC resynthesis step"
 }
