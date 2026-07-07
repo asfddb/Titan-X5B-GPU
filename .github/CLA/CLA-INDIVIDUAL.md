@@ -4,7 +4,7 @@ Thank you for your interest in contributing to Titan X5-B GPU!
 
 This Contributor License Agreement ("CLA") sets out the terms under
 which you ("You" or "Contributor") grant rights to Adhiraj
-("[Your LLP Name]", "Maintainer", "we", or "us") for your
+("Maintainer", "we", or "us") for your
 contributions to the Titan X5-B GPU project (the "Project").
 
 ## 1. Definitions

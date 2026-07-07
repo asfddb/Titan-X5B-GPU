@@ -3,7 +3,7 @@
 This Corporate Contributor License Agreement ("Corporate CLA") sets
 out the terms under which the entity identified below ("You",
 "Contributor", or "Company") grants rights to Adhiraj
-("[Your LLP Name]", "Maintainer", "we", or "us") for contributions
+("Maintainer", "we", or "us") for contributions
 to the Titan X5-B GPU project (the "Project").
 
 ## 1. Definitions
