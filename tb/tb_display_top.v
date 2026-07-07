@@ -127,6 +127,28 @@ module tb_display_top;
         if (errors == 0)
             $display("PASS: full first visible scanline matches XOR pattern");
 
+        // 5. repeat on line 40 (y[8:5]=1) to prove the writer's wr_y
+        //    advance and the vertical component of the pattern
+        wait (dut.u_disp.v_counter == 12'd40);
+        @(posedge dut.clk_pixel);
+        for (i = 0; i < 640; i = i + 1) begin
+            @(negedge dut.clk_pixel);
+            if (dut.u_disp.v_counter == 12'd40 &&
+                dut.u_disp.h_counter >= 12'd2 && dut.u_disp.vga_de) begin
+                if ({vga_r, vga_g, vga_b} !==
+                    pal4(exp_idx(dut.u_disp.h_counter - 12'd2, 9'd40))) begin
+                    if (errors < 10)
+                        $display("FAIL: pixel x=%0d y=40 rgb=%h expected=%h",
+                                 dut.u_disp.h_counter - 12'd2,
+                                 {vga_r, vga_g, vga_b},
+                                 pal4(exp_idx(dut.u_disp.h_counter - 12'd2, 9'd40)));
+                    errors = errors + 1;
+                end
+            end
+        end
+        if (errors == 0)
+            $display("PASS: scanline y=40 matches XOR pattern (wr_y verified)");
+
         if (errors == 0) $display("ALL TESTS PASSED");
         else $display("%0d ERRORS", errors);
         $finish;
