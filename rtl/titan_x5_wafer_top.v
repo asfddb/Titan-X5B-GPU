@@ -78,11 +78,19 @@ module titan_x5_wafer_top (
     titan_x5_rt_core u_rt_core (
         .clk(clk_core),
         .rst_n(rst_n),
-        .start_traversal(rt_start),
-        .root_node_ptr(32'h0000_0000),
-        .traversal_done(rt_done),
-        .hit_triangle_id(rt_hit_id),
-        .hit_valid(rt_hit_valid)
+        .ray_valid(rt_start),
+        .ray_ready(),
+        .ray_id(32'h0),
+        .ray_root_ptr(32'h0000_0000),
+        .ray_o_x(32'h0), .ray_o_y(32'h0), .ray_o_z(32'h0),
+        .ray_d_x(32'h0001_0000), .ray_d_y(32'h0001_0000), .ray_d_z(32'h0001_0000),
+        .ray_inv_d_x(32'h0001_0000), .ray_inv_d_y(32'h0001_0000), .ray_inv_d_z(32'h0001_0000),
+        .node_req_valid(), .node_req_addr(), .node_req_tag(),
+        .node_req_ready(1'b1),
+        .node_rsp_valid(1'b0), .node_rsp_tag(3'd0), .node_rsp_data(384'h0),
+        .res_valid(rt_hit_valid), .res_ray_id(), .res_hit(), .res_tri_id(rt_hit_id),
+        .res_t(), .res_u(), .res_v(),
+        .busy(rt_done)
         // ... Ray vectors and Memory BVH fetch interface ...
     );
 

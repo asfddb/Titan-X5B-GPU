@@ -13,10 +13,13 @@ Usage:
     python run_regression.py lsu mesi   # selected suites
 
 Suites:
-    lsu   - memory-coalescing LSU (optimality, byte enables, lane data)
-    fpu   - IEEE-754 FP32 add/mul + FP16 mul + ALU FP pipeline integration
-    mesi  - MESI coherency across the coherent crossbar (4 x L1)
-    tmu   - bilinear texture filtering (3 formats, wrap/clamp)
+    lsu      - memory-coalescing LSU (optimality, byte enables, lane data)
+    fpu      - IEEE-754 FP32 add/mul + FP16 mul + ALU FP pipeline integration
+    mesi     - MESI coherency across the coherent crossbar (4 x L1)
+    tmu      - bilinear texture filtering (3 formats, wrap/clamp)
+    rt_isect - pipelined Möller-Trumbore ray-triangle unit (II=1, bit-exact)
+    rt_box   - pipelined ray-AABB slab test unit (II=1, bit-exact)
+    rt_core  - multi-ray BVH traversal engine over random scenes
 """
 
 import os
@@ -65,6 +68,25 @@ SUITES = {
         ),
         toplevel="titan_x5_tmu",
         module="test_tmu",
+    ),
+    "rt_isect": dict(
+        sources=rtl_files("raytracing/titan_x5_ray_triangle_isect.v"),
+        toplevel="titan_x5_ray_triangle_isect",
+        module="test_rt_isect",
+    ),
+    "rt_box": dict(
+        sources=rtl_files("raytracing/titan_x5_ray_box_isect.v"),
+        toplevel="titan_x5_ray_box_isect",
+        module="test_rt_box",
+    ),
+    "rt_core": dict(
+        sources=rtl_files(
+            "raytracing/titan_x5_ray_triangle_isect.v",
+            "raytracing/titan_x5_ray_box_isect.v",
+            "raytracing/titan_x5_rt_core.v",
+        ),
+        toplevel="titan_x5_rt_core",
+        module="test_rt_core",
     ),
 }
 

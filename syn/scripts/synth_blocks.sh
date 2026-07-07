@@ -50,6 +50,7 @@ rtl/memory/titan_x5_shared_memory.v
 rtl/memory/titan_x5_vram_ctrl.v
 rtl/power/titan_x5_power_mgmt.v
 rtl/raytracing/titan_x5_ray_triangle_isect.v
+rtl/raytracing/titan_x5_ray_box_isect.v
 rtl/raytracing/titan_x5_rt_core.v
 rtl/sr/titan_x5_hash_fnv64.v
 rtl/sr/titan_x5_sr_engine.v

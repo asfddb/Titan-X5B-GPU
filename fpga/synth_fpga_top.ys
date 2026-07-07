@@ -45,6 +45,7 @@ read_verilog rtl/memory/titan_x5_shared_memory.v
 read_verilog rtl/memory/titan_x5_vram_ctrl.v
 read_verilog rtl/power/titan_x5_power_mgmt.v
 read_verilog rtl/raytracing/titan_x5_ray_triangle_isect.v
+read_verilog rtl/raytracing/titan_x5_ray_box_isect.v
 read_verilog rtl/raytracing/titan_x5_rt_core.v
 read_verilog rtl/sr/titan_x5_hash_fnv64.v
 read_verilog rtl/sr/titan_x5_sr_engine.v

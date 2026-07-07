@@ -571,17 +571,25 @@ module titan_x5_gpu_top #(
     // 6. RT Core & 7. SR Engine & 8. DMA & 9. Power & 10. Perf
     
     wire rt_start = cmd_valid && (cmd_opcode == 8'h03);
-    
+
+    // The multi-ray traversal engine fetches 384-bit BVH nodes; the 32-bit
+    // crossbar port only carries the node address stream for now (ray
+    // submission from the SMs lands with the wide L2 path in Phase 4).
     titan_x5_rt_core u_rt_core (
-        .clk(clk), .rst_n(rst_n), .start_traversal(rt_start), .root_node_ptr(cmd_payload[31:0]),
-        .traversal_done(), .hit_triangle_id(), .hit_valid(), 
-        .bvh_fetch_addr(rt_bvh_fetch_addr), .bvh_fetch_req(rt_bvh_fetch_req),
-        .bvh_fetch_ack(xbar_m_resp_valid[18]), 
-        .bvh_data({352'b0, xbar_m_resp_rdata[18*32 +: 32]}), 
+        .clk(clk), .rst_n(rst_n),
+        .ray_valid(rt_start), .ray_ready(),
+        .ray_id(32'h0), .ray_root_ptr(cmd_payload[31:0]),
         .ray_o_x(32'h0), .ray_o_y(32'h0), .ray_o_z(32'h0),
-        .ray_d_x(32'h0), .ray_d_y(32'h0), .ray_d_z(32'h0),
-        .ray_inv_d_x(32'h0), .ray_inv_d_y(32'h0), .ray_inv_d_z(32'h0),
-        .hit_t(), .hit_u(), .hit_v()
+        .ray_d_x(32'h0001_0000), .ray_d_y(32'h0001_0000), .ray_d_z(32'h0001_0000),
+        .ray_inv_d_x(32'h0001_0000), .ray_inv_d_y(32'h0001_0000), .ray_inv_d_z(32'h0001_0000),
+        .node_req_valid(rt_bvh_fetch_req), .node_req_addr(rt_bvh_fetch_addr),
+        .node_req_tag(), .node_req_ready(xbar_m_req_ready[18]),
+        .node_rsp_valid(xbar_m_resp_valid[18]),
+        .node_rsp_tag(3'd0),
+        .node_rsp_data({352'b0, xbar_m_resp_rdata[18*32 +: 32]}),
+        .res_valid(), .res_ray_id(), .res_hit(), .res_tri_id(),
+        .res_t(), .res_u(), .res_v(),
+        .busy()
     );
 
     // sr engine moved above to sit between tmu and rop
