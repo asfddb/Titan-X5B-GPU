@@ -34,6 +34,10 @@ syn/reports/blocks/round2_progress.txt
 # to openlane/<design>/final/ for archiving instead)
 openlane/*/runs/
 
+# 280 MB - too large for git; regenerate with openlane/run_macro.sh or
+# take it from openlane/titan_x6_tensor_core_array/runs/<latest>/final/gds/
+openlane/titan_x6_tensor_core_array/final/titan_x6_tensor_core_array.gds
+
 # Sim dumps
 fb_dump.txt
 sim_output.txt

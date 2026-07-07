@@ -32,8 +32,8 @@ the GDSII, `metrics.json` the PPA numbers.
 | # | Macro | Why | Status |
 |---|---|---|---|
 | 1 | `titan_x5_fp32_fma` | small (1.4k LUT-eq / 2.3k cells FPGA-measured), single clock, proves the flow end to end | **GDS, DRC/LVS clean** — 12,575 cells, 0.23 mm², setup WS +10.2 ns @ 40 MHz, `final/` |
-| 2 | `titan_x6_tensor_core_array` | the roadmap's headline macro (4×4 FP16 MAC systolic array, ~600k gates generic) | config ready |
-| 3 | `titan_x5_rasterizer` | largest pure-logic graphics block | config ready |
+| 2 | `titan_x6_tensor_core_array` | the roadmap's headline macro (4×4 FP16 MAC systolic array, ~600k gates generic) | **GDS, magic-DRC/LVS clean** — 149,909 cells, 2.70 mm², 65 ns clock; ss corner −4.29 ns + 124 antenna nets, see docs/ASIC_PHASE2_REPORT.md §3 |
+| 3 | `titan_x5_rasterizer` | largest pure-logic graphics block | running |
 | 4 | `titan_x5_sm` / `titan_x5_l2_cache` | **blocked**: their cache arrays must first be rewritten around SRAM macros (OpenRAM/DFFRAM); as written they flatten to registers and yosys exhausts host RAM (see docs/FPGA_PHASE1_REPORT.md §5) | blocked |
 
 ## Host quirks (hard-won)
