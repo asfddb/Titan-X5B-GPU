@@ -8,5 +8,7 @@
     "CLOCK_PERIOD": 25,
     "FP_CORE_UTIL": 35,
     "PL_TARGET_DENSITY_PCT": 40,
-    "SYNTH_STRATEGY": "AREA 0"
+    "SYNTH_STRATEGY": "AREA 0",
+    "SYNTH_SHARE_RESOURCES": false,
+    "_comment": "share disabled: yosys's SAT-based share pass explodes past 32 GB VM on the flattened 16-PE systolic array (OOM-killed twice); the PEs are identical so cross-PE sharing has nothing to find anyway"
 }
