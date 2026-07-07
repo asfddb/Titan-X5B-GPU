@@ -2,10 +2,21 @@
 # Vivado batch build: Titan X5-B GPU -> Digilent Basys 3 (xc7a35tcpg236-1)
 #
 # Usage (from the repository root):
-#   vivado -mode batch -source fpga/vivado_build.tcl
+#   vivado -mode batch -source fpga/vivado_build.tcl -tclargs display
+#   vivado -mode batch -source fpga/vivado_build.tcl -tclargs full
+#
+# Targets:
+#   display (default) - titan_x5_display_top: display path only. This is
+#                       the only target that fits the xc7a35t (1,291
+#                       LUT-eq / 32 BRAM36 / 1 DSP measured, see
+#                       docs/FPGA_PHASE1_REPORT.md).
+#   full              - titan_x5_fpga_top: whole GPU. Kept for larger
+#                       parts; ~2 orders of magnitude over the xc7a35t
+#                       budget, so synthesis on the Basys 3 part will
+#                       fail placement - expect it.
 #
 # Outputs (in fpga/build/):
-#   titan_x5_basys3.bit          - bitstream for the Basys 3
+#   titan_x5_<target>_basys3.bit - bitstream
 #   post_route_timing.rpt        - timing summary (check WNS >= 0)
 #   post_route_util.rpt          - utilization report
 # ============================================================================
@@ -13,11 +24,26 @@
 set repo_root  [file normalize [file join [file dirname [info script]] ..]]
 set build_dir  $repo_root/fpga/build
 set part       xc7a35tcpg236-1
-set top        titan_x5_fpga_top
+
+set target "display"
+if {$argc > 0} { set target [lindex $argv 0] }
+switch -exact $target {
+    display { set top titan_x5_display_top }
+    full    { set top titan_x5_fpga_top }
+    default { puts "ERROR: unknown target '$target' (display|full)"; exit 1 }
+}
 
 file mkdir $build_dir
 
-# --- Sources (keep in sync with fpga/synth_fpga_top.ys) ---------------------
+# --- Sources ---------------------------------------------------------------
+set display_sources {
+    rtl/memory/titan_x5_vram_ctrl.v
+    rtl/display/titan_x5_async_fifo.v
+    rtl/display/titan_x5_display_engine.v
+    fpga/titan_x5_display_top.v
+}
+
+# full-GPU list: keep in sync with fpga/synth_fpga_top.ys
 set rtl_sources {
     rtl/common/titan_x5_skid_buffer.v
     rtl/control/titan_x5_command_processor.v
@@ -62,8 +88,10 @@ set rtl_sources {
     rtl/titan_x5_fpga_top.v
 }
 
-foreach f $rtl_sources {
-    read_verilog $repo_root/$f
+if {$target eq "display"} {
+    foreach f $display_sources { read_verilog $repo_root/$f }
+} else {
+    foreach f $rtl_sources { read_verilog $repo_root/$f }
 }
 read_xdc $repo_root/fpga/titan_x5_basys3.xdc
 
@@ -93,5 +121,5 @@ if {$wns < 0} {
     exit 1
 }
 
-write_bitstream -force $build_dir/titan_x5_basys3.bit
-puts "SUCCESS: bitstream written to $build_dir/titan_x5_basys3.bit"
+write_bitstream -force $build_dir/titan_x5_${target}_basys3.bit
+puts "SUCCESS: bitstream written to $build_dir/titan_x5_${target}_basys3.bit"

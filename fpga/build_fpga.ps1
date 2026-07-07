@@ -12,7 +12,11 @@
 # against the xc7a35t budget - but cannot produce a bitstream.
 # ============================================================================
 param(
-    [switch]$SynthOnly
+    [switch]$SynthOnly,
+    # display (default) = titan_x5_display_top, the only target that fits
+    # the Basys 3; full = whole GPU for larger parts
+    [ValidateSet("display", "full")]
+    [string]$Target = "display"
 )
 
 $ErrorActionPreference = "Stop"
@@ -38,11 +42,12 @@ if (-not $SynthOnly) {
         Push-Location $RepoRoot
         try {
             & $vivado -mode batch -source fpga/vivado_build.tcl `
-                -journal fpga/build/vivado.jou -log fpga/build/vivado.log
+                -journal fpga/build/vivado.jou -log fpga/build/vivado.log `
+                -tclargs $Target
             if ($LASTEXITCODE -ne 0) {
                 Write-Error "Vivado flow failed (exit $LASTEXITCODE). See fpga/build/vivado.log"
             }
-            Write-Host "Bitstream: fpga/build/titan_x5_basys3.bit"
+            Write-Host "Bitstream: fpga/build/titan_x5_${Target}_basys3.bit"
         } finally {
             Pop-Location
         }

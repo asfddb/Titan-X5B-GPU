@@ -66,7 +66,11 @@ module titan_x5_display_engine (
     always @(posedge pclk or negedge rst_n) begin
         if (!rst_n) begin
             h_counter <= 12'd0;
-            v_counter <= 12'd0;
+            // start in blanking (increments past 12'hFFF and wraps to line
+            // 0) so the pixel FIFO prefills before the first visible pixel;
+            // the FIFO is never flushed, so a startup underflow would
+            // permanently shift the image right by the missed pixel count
+            v_counter <= 12'hFFF;
         end else begin
             if (h_counter == h_total - 1) begin
                 h_counter <= 12'd0;
