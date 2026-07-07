@@ -81,6 +81,9 @@ module titan_x6_top #(
         .rst_n      (rst_n),
         .en         (ctrl_en & core_rx_valid), // only compute when we receive a valid flit
         .mode       (ctrl_mode),
+        .fp8_fmt    (1'b0),                    // E4M3 when in FP8 mode
+        .acc_clear  (~ctrl_en),                // idle clears the accumulators
+        .drain      (1'b0),
         .act_in     (tc_act_in),
         .weight_in  (tc_weight_in),
         .acc_out    (tensor_acc_out),

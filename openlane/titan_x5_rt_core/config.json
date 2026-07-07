@@ -1,0 +1,17 @@
+{
+    "DESIGN_NAME": "titan_x5_rt_core",
+    "VERILOG_FILES": [
+        "dir::../../rtl/raytracing/titan_x5_ray_triangle_isect.v",
+        "dir::../../rtl/raytracing/titan_x5_ray_box_isect.v",
+        "dir::../../rtl/raytracing/titan_x5_rt_core.v"
+    ],
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 10,
+    "_clock_note": "every pipeline stage carries at most one 32x32 multiply level; 10 ns targets ~100 MHz on sky130 (a 32x32 signed multiplier alone is ~6-8 ns in sky130_fd_sc_hd), which scales to multi-GHz territory on modern 4/5nm nodes",
+    "ERROR_ON_KLAYOUT_DRC": false,
+    "_klayout_note": "npc.2 around tap rows is a known KLayout deck false positive on this PDK; magic DRC remains the signoff gate",
+    "FP_CORE_UTIL": 30,
+    "PL_TARGET_DENSITY_PCT": 35,
+    "SYNTH_STRATEGY": "DELAY 0",
+    "SYNTH_HIERARCHY_MODE": "deferred_flatten"
+}

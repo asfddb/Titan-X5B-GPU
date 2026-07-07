@@ -399,6 +399,9 @@ module titan_x5_alu #(
                 .rst_n(rst_n),
                 .en(!stall_in), // pipeline runs when not stalled
                 .mode(2'd0), // FP16 mode
+                .fp8_fmt(1'b0),
+                .acc_clear(valid_in && opcode == OP_WMMA), // clear at issue
+                .drain(wmma_v2), // shift a row toward acc_out before readout
                 .act_in({src2, src1}),
                 .weight_in({src3, src2}),
                 .acc_out(wmma_acc_out),

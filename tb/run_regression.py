@@ -20,6 +20,8 @@ Suites:
     rt_isect - pipelined Möller-Trumbore ray-triangle unit (II=1, bit-exact)
     rt_box   - pipelined ray-AABB slab test unit (II=1, bit-exact)
     rt_core  - multi-ray BVH traversal engine over random scenes
+    tensor   - 16x16 output-stationary tensor array via the warp-sync
+               WMMA dispatcher (INT8 SIMD, FP8 E4M3/E5M2, FP16)
 """
 
 import os
@@ -87,6 +89,15 @@ SUITES = {
         ),
         toplevel="titan_x5_rt_core",
         module="test_rt_core",
+    ),
+    "tensor": dict(
+        sources=rtl_files(
+            "tensor/titan_x5_fp16_mul.v",
+            "tensor/titan_x6_tensor_core_array.v",
+            "tensor/titan_x6_wmma_dispatch.v",
+        ),
+        toplevel="titan_x6_wmma_dispatch",
+        module="test_tensor",
     ),
 }
 
