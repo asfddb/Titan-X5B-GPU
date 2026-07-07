@@ -30,6 +30,10 @@ fpga/synth_netlist.v
 fpga/build/
 syn/reports/blocks/round2_progress.txt
 
+# OpenLane run directories (hundreds of MB; final GDS/metrics are copied
+# to openlane/<design>/final/ for archiving instead)
+openlane/*/runs/
+
 # Sim dumps
 fb_dump.txt
 sim_output.txt
