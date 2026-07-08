@@ -99,6 +99,14 @@ SUITES = {
         toplevel="titan_x6_wmma_dispatch",
         module="test_tensor",
     ),
+    "noc": dict(
+        sources=rtl_files(
+            "interconnect/titan_x6_noc_router.v",
+            "interconnect/titan_x6_noc_mesh.v",
+        ),
+        toplevel="titan_x6_noc_mesh",
+        module="test_noc",
+    ),
 }
 
 
