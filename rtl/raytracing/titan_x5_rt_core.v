@@ -178,12 +178,13 @@ module titan_x5_rt_core #(
     // slot selection
     // ------------------------------------------------------------------
     reg [N_RAYS-1:0] idle_mask, ready_mask, done_mask;
-    integer k;
+    integer k_comb;
+    integer k_seq;
     always @* begin
-        for (k = 0; k < N_RAYS; k = k + 1) begin
-            idle_mask[k]  = (rstate[k] == RS_IDLE);
-            ready_mask[k] = (rstate[k] == RS_READY);
-            done_mask[k]  = (rstate[k] == RS_DONE);
+        for (k_comb = 0; k_comb < N_RAYS; k_comb = k_comb + 1) begin
+            idle_mask[k_comb]  = (rstate[k_comb] == RS_IDLE);
+            ready_mask[k_comb] = (rstate[k_comb] == RS_READY);
+            done_mask[k_comb]  = (rstate[k_comb] == RS_DONE);
         end
     end
 
@@ -238,11 +239,11 @@ module titan_x5_rt_core #(
     // ------------------------------------------------------------------
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            for (k = 0; k < N_RAYS; k = k + 1) begin
-                rstate[k] <= RS_IDLE;
-                r_sp[k]   <= {SP_W{1'b0}};
-                r_ct[k]   <= 32'h7FFF_FFFF;
-                r_bhit[k] <= 1'b0;
+            for (k_seq = 0; k_seq < N_RAYS; k_seq = k_seq + 1) begin
+                rstate[k_seq] <= RS_IDLE;
+                r_sp[k_seq]   <= {SP_W{1'b0}};
+                r_ct[k_seq]   <= 32'h7FFF_FFFF;
+                r_bhit[k_seq] <= 1'b0;
             end
             node_req_valid <= 1'b0;
             node_req_addr  <= 32'h0;

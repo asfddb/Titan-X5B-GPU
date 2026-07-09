@@ -1,0 +1,33 @@
+{
+    "DESIGN_NAME": "titan_x6_gpu_top",
+    "VERILOG_FILES": [
+        "dir::../../rtl/core/titan_x6_gpu_top.v",
+        "dir::../../rtl/core/titan_x6_gpc.v",
+        "dir::../../rtl/memory/titan_x6_banked_l2.v",
+        "dir::../../rtl/memory/titan_x6_vram_ctrl.v",
+        "dir::../../rtl/interconnect/titan_x6_noc_mesh.v",
+        "dir::../../rtl/interconnect/titan_x6_noc_router.v"
+    ],
+    "MACROS": {
+        "titan_x5_rt_core": {
+            "instances": ["gen_gpcs[*].gen_tpcs[*].gen_sms[*].rt_core_inst"],
+            "lef": ["dir::../titan_x5_rt_core/runs/*/results/routing/titan_x5_rt_core.lef"],
+            "gds": ["dir::../titan_x5_rt_core/runs/*/results/signoff/titan_x5_rt_core.gds"]
+        },
+        "titan_x6_tensor_core_array": {
+            "instances": ["gen_gpcs[*].gen_tpcs[*].gen_sms[*].tc_array_inst"],
+            "lef": ["dir::../titan_x6_tensor_core_array/runs/*/results/routing/titan_x6_tensor_core_array.lef"],
+            "gds": ["dir::../titan_x6_tensor_core_array/runs/*/results/signoff/titan_x6_tensor_core_array.gds"]
+        }
+    },
+    "CLOCK_PORT": "clk",
+    "CLOCK_PERIOD": 0.66,
+    "FP_PDN_MACRO_HOOKS": [
+        "gen_gpcs[*].gen_tpcs[*].gen_sms[*].rt_core_inst vccd1 vssd1",
+        "gen_gpcs[*].gen_tpcs[*].gen_sms[*].tc_array_inst vccd1 vssd1"
+    ],
+    "FP_CORE_UTIL": 45,
+    "PL_TARGET_DENSITY": 0.50,
+    "ROUTING_CORES": 24,
+    "SYNTH_HIERARCHICAL": 1
+}

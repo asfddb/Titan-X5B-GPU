@@ -7,7 +7,7 @@
 # copy the finished run back into the repo for archiving.
 d="$1"
 [ -z "$d" ] && { echo "usage: run_macro.sh <design>"; exit 2; }
-exec > "/var/log/ol_${d}.log" 2>&1
+#exec
 set -x
 pgrep dockerd || { nohup dockerd > /var/log/dockerd.log 2>&1 & sleep 6; }
 REPO=/mnt/c/Users/singb/Downloads/gpuuhj

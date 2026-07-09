@@ -12,6 +12,9 @@
     "_klayout_note": "npc.2 around tap rows is a known KLayout deck false positive on this PDK; magic DRC remains the signoff gate",
     "FP_CORE_UTIL": 30,
     "PL_TARGET_DENSITY_PCT": 35,
+    "ROUTING_CORES": 4,
+    "DRT_THREADS": 4,
+    "_throttle_note": "cap detailed-router threads to protect host RAM/CPU; DRT_THREADS is the OpenLane-2 lever, ROUTING_CORES kept for OL1 compatibility",
     "SYNTH_STRATEGY": "DELAY 0",
     "SYNTH_HIERARCHY_MODE": "deferred_flatten"
 }
