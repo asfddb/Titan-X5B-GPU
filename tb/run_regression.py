@@ -107,6 +107,22 @@ SUITES = {
         toplevel="titan_x6_noc_mesh",
         module="test_noc",
     ),
+    "vram": dict(
+        sources=[os.path.join(TB, "tb_vram_top.v")] + rtl_files(
+            "titan_x6_vram_ctrl.v",
+        ),
+        toplevel="tb_vram_top",
+        module="test_vram",
+    ),
+    "l2": dict(
+        sources=[os.path.join(TB, "tb_l2_top.v")] + rtl_files(
+            "titan_x6_banked_l2.v",
+            "memory/titan_x5_l2_cache.v",
+            "common/titan_x5_skid_buffer.v",
+        ),
+        toplevel="tb_l2_top",
+        module="test_l2",
+    ),
 }
 
 
