@@ -13,7 +13,7 @@ all: legacy titan_x6
 # ----------------------------------------------------------------------------
 # Titan X6 software stack (Phase 5): driver + runtime + compiled kernels
 # ----------------------------------------------------------------------------
-titan_x6: $(BUILD)/test_driver.elf $(BUILD)/test_matmul.elf kernels
+titan_x6: $(BUILD)/test_driver.elf $(BUILD)/test_runtime.elf $(BUILD)/test_matmul.elf kernels
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -42,9 +42,17 @@ $(BUILD)/test_driver.elf: $(BUILD)/titan_x6_drv.o $(BUILD)/titan_x6_gpu_model.o 
                           $(BUILD)/test_driver.o
 	$(CC) $(CFLAGS) -o $@ $^ -lm
 
+$(BUILD)/test_runtime.o: test_runtime.cpp titan_runtime.h titan_x6_isa.h | $(BUILD)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(BUILD)/test_runtime.elf: $(BUILD)/titan_x6_drv.o $(BUILD)/titan_x6_gpu_model.o \
+                           $(BUILD)/titan_runtime.o $(BUILD)/test_runtime.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
+
 .PHONY: driver-test
-driver-test: $(BUILD)/test_driver.elf
+driver-test: $(BUILD)/test_driver.elf $(BUILD)/test_runtime.elf
 	./$(BUILD)/test_driver.elf
+	./$(BUILD)/test_runtime.elf
 
 # --- kernels compiled by the Titan Compute Compiler -------------------------
 kernels: $(BUILD)/matmul_scalar.tbin $(BUILD)/matmul_wmma_i8.tbin $(BUILD)/matmul_wmma_fp8.tbin
@@ -61,6 +69,7 @@ $(BUILD)/matmul_wmma_fp8.tbin: $(KERNEL) $(TCC) | $(BUILD)
 # --- run --------------------------------------------------------------------
 test: titan_x6
 	./$(BUILD)/test_driver.elf
+	./$(BUILD)/test_runtime.elf
 	$(PYTHON) ../compiler/test_compiler_isa.py
 	$(PYTHON) $(TCC) --selftest
 	./$(BUILD)/test_matmul.elf $(BUILD)
