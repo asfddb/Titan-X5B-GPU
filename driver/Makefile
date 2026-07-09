@@ -61,6 +61,7 @@ $(BUILD)/matmul_wmma_fp8.tbin: $(KERNEL) $(TCC) | $(BUILD)
 # --- run --------------------------------------------------------------------
 test: titan_x6
 	./$(BUILD)/test_driver.elf
+	$(PYTHON) ../compiler/test_compiler_isa.py
 	$(PYTHON) $(TCC) --selftest
 	./$(BUILD)/test_matmul.elf $(BUILD)
 
