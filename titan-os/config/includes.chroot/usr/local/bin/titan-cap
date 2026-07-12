@@ -1,0 +1,119 @@
+#!/bin/sh
+# titan-cap — enforce a hard ceiling on how much RAM the OS is allowed to use.
+#
+# TitanOS runs its system services inside a systemd cgroup (system.slice). This
+# tool sets that slice's MemoryMax, so the OS can never grow past the cap no
+# matter how much RAM the machine has — the rest stays reserved for your games,
+# which run in the user session and are NOT capped.
+#
+# The automatic cap scales with the machine: 20% of total RAM, clamped to
+# [2 GB, 5 GB]. So a 2 GB box lets the OS use up to 2 GB; a 24 GB box caps the
+# OS at ~4.8 GB and leaves ~19 GB for games; a 32 GB box still caps at 5 GB.
+#
+# Usage:
+#   titan-cap compute        Print the auto cap (MB) for this machine. No root.
+#   titan-cap show           Show the configured cap and current OS usage.
+#   titan-cap set <SIZE>     Set an explicit cap, e.g. 4G, 4096M. Needs root.
+#   titan-cap auto           Compute and apply the scaled cap. Needs root.
+#   titan-cap -h|--help      Show this help.
+set -eu
+
+SLICE="system.slice"
+DROPIN_DIR="/etc/systemd/system/${SLICE}.d"
+DROPIN="${DROPIN_DIR}/10-titan-cap.conf"
+
+FLOOR_MB=2048 # never cap the OS below 2 GB
+CEIL_MB=5120  # never let the OS exceed 5 GB, even on a huge machine
+PERCENT=20    # target: OS gets at most this share of total RAM
+
+usage() {
+	sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+need_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		echo "titan-cap: this action needs root; re-run with sudo." >&2
+		exit 1
+	fi
+}
+
+total_mb() {
+	# Overridable for testing via TITAN_TOTAL_MB.
+	if [ -n "${TITAN_TOTAL_MB:-}" ]; then
+		echo "$TITAN_TOTAL_MB"
+		return
+	fi
+	kb="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+	echo $((kb / 1024))
+}
+
+# Pure math: total RAM (MB) -> capped OS budget (MB). No root, deterministic.
+compute_cap_mb() {
+	total="$(total_mb)"
+	cap=$((total * PERCENT / 100))
+	[ "$cap" -lt "$FLOOR_MB" ] && cap="$FLOOR_MB"
+	[ "$cap" -gt "$CEIL_MB" ] && cap="$CEIL_MB"
+	# The cap can never exceed the RAM that physically exists.
+	[ "$cap" -gt "$total" ] && cap="$total"
+	echo "$cap"
+}
+
+write_dropin() {
+	# $1 = cap in MB. Persist across reboots and apply live.
+	cap_mb="$1"
+	need_root
+	mkdir -p "$DROPIN_DIR"
+	cat >"$DROPIN" <<EOF
+# Managed by titan-cap. Hard RAM ceiling for TitanOS system services.
+[Slice]
+MemoryMax=${cap_mb}M
+MemoryHigh=$((cap_mb * 9 / 10))M
+EOF
+	systemctl daemon-reload 2>/dev/null || true
+	# Apply immediately without a reboot (best-effort on non-systemd hosts).
+	systemctl set-property "$SLICE" "MemoryMax=${cap_mb}M" 2>/dev/null || true
+	echo "titan-cap: OS RAM ceiling set to ${cap_mb} MB (${SLICE})."
+	echo "titan-cap: games run in the user session and are NOT capped."
+}
+
+show() {
+	echo "TitanOS RAM ceiling"
+	echo "  machine total    : $(total_mb) MB"
+	echo "  auto cap (scaled): $(compute_cap_mb) MB"
+	if [ -r "$DROPIN" ]; then
+		configured="$(awk -F= '/^MemoryMax=/ {print $2}' "$DROPIN")"
+		echo "  configured cap   : ${configured:-unset}"
+	else
+		echo "  configured cap   : not yet applied (run: sudo titan-cap auto)"
+	fi
+	if [ -r "/sys/fs/cgroup/${SLICE}/memory.current" ]; then
+		cur=$(($(cat "/sys/fs/cgroup/${SLICE}/memory.current") / 1024 / 1024))
+		echo "  OS using now     : ${cur} MB"
+	fi
+}
+
+# Parse a size like 4G / 4096M / 4194304K into MB.
+size_to_mb() {
+	val="$1"
+	num="$(echo "$val" | sed 's/[^0-9].*$//')"
+	[ -n "$num" ] || { echo "titan-cap: bad size '$val'" >&2; exit 2; }
+	case "$val" in
+	*[Gg]) echo $((num * 1024)) ;;
+	*[Mm]) echo "$num" ;;
+	*[Kk]) echo $((num / 1024)) ;;
+	*) echo "$num" ;; # bare number = MB
+	esac
+}
+
+case "${1:-}" in
+compute) compute_cap_mb ;;
+show) show ;;
+auto) write_dropin "$(compute_cap_mb)" ;;
+set)
+	shift
+	[ $# -ge 1 ] || { echo "titan-cap: set needs a size (e.g. 4G)" >&2; exit 2; }
+	write_dropin "$(size_to_mb "$1")"
+	;;
+-h | --help | "") usage ;;
+*) echo "titan-cap: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+esac

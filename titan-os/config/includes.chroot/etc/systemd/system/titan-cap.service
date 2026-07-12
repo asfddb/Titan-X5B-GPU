@@ -1,0 +1,15 @@
+# Applies the scaled OS RAM ceiling on every boot so it always matches the
+# machine TitanOS is currently running on (live USB moves between machines).
+[Unit]
+Description=TitanOS OS RAM ceiling (auto-scale system.slice MemoryMax)
+DefaultDependencies=no
+After=sysinit.target
+Before=basic.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/titan-cap auto
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target

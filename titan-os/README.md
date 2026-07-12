@@ -15,6 +15,31 @@ stays **free for your games and builds**. Minimal base, Openbox instead of
 GNOME/KDE, `zram` compressed swap, per-mode kernel tunables, and an `earlyoom`
 watchdog so a runaway game can never freeze the whole system.
 
+### Hard RAM ceiling for the OS
+
+Beyond just being lean, TitanOS **enforces a hard ceiling** on its own RAM so it
+can never balloon on a big machine — the rest is guaranteed to your games. The
+cap is `20%` of total RAM, clamped to `[2 GB, 5 GB]`, applied to the OS's
+systemd `system.slice`. It re-scales to the real machine on every boot (handy
+for a live USB that moves between PCs):
+
+| Machine RAM | OS ceiling | Left for games |
+|---|---|---|
+| 2 GB  | 2 GB   | the machine is 2 GB — OS idles ~0.5 GB |
+| 8 GB  | 2 GB   | ~6 GB |
+| 24 GB | ~4.9 GB | ~19 GB |
+| 32 GB | 5 GB   | ~27 GB |
+
+```sh
+titan-cap show          # cap + what the OS is using now
+titan-cap compute       # what the auto cap would be on this machine
+sudo titan-cap set 4G   # pin an explicit ceiling
+sudo titan-cap auto     # re-apply the scaled ceiling
+```
+
+Games run in the user session (`user.slice`) and are **not** capped — they get
+everything the ceiling leaves free.
+
 Check the split any time with `titan-mem`:
 
 ```
@@ -111,6 +136,7 @@ titan-os/
 | `zram` swap (lz4) | Compressed swap in RAM keeps builds/games alive under pressure. |
 | Modes don't reinstall | Switching only toggles services/tunables — instant, no disk churn. |
 | Firefox **ESR** | Lighter, long-term-support browser. |
+| OS RAM ceiling (cgroup) | `system.slice` MemoryMax caps the OS at ≤5 GB; games keep the rest. |
 | `earlyoom` watchdog | Stops a runaway game instead of freezing the whole OS. |
 | `titan-mem` report | Shows OS footprint vs. RAM free for games at a glance. |
 | Docker off by default | Heavy on 2 GB; started only in dev mode when you need it. |

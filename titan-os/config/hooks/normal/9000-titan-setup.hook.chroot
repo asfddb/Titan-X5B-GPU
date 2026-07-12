@@ -8,13 +8,17 @@ mkdir -p /var/lib/titan
 echo "dev" >/var/lib/titan/mode
 
 # Make the TitanOS tools executable regardless of how git tracked them.
-chmod +x /usr/local/bin/titan-mode /usr/local/bin/winstall /usr/local/bin/titan-mem 2>/dev/null || true
+chmod +x /usr/local/bin/titan-mode /usr/local/bin/winstall \
+	/usr/local/bin/titan-mem /usr/local/bin/titan-cap 2>/dev/null || true
 
 # Enable the low-RAM zram swap so it is active from the very first boot.
 systemctl enable zramswap.service 2>/dev/null || true
 
 # Enable earlyoom so a runaway game can never freeze the whole OS.
 systemctl enable earlyoom.service 2>/dev/null || true
+
+# Auto-scale the OS RAM ceiling to the real machine on every boot.
+systemctl enable titan-cap.service 2>/dev/null || true
 
 # Do NOT auto-enable docker/gamemode globally — titan-mode starts them only
 # in the mode that needs them, to save RAM.
