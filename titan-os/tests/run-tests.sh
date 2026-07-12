@@ -14,7 +14,7 @@ bad()  { echo "  FAIL $1" >&2; fails=$((fails + 1)); }
 
 echo "== 1. shellcheck (if available) =="
 if command -v shellcheck >/dev/null 2>&1; then
-	for f in build.sh tests/run-tests.sh "$BIN/titan-mode" "$BIN/winstall" \
+	for f in build.sh tests/run-tests.sh "$BIN/titan-mode" "$BIN/winstall" "$BIN/titan-mem" \
 		config/hooks/normal/9000-titan-setup.hook.chroot; do
 		if shellcheck -s sh --severity=warning "$f" >/dev/null 2>&1; then ok "shellcheck $f"; else
 			shellcheck -s sh --severity=warning "$f" || true; bad "shellcheck $f"; fi
@@ -39,6 +39,11 @@ sh "$BIN/winstall" --list | grep -qi "no prefixes" && ok "empty list message" ||
 if sh "$BIN/winstall" /no/such/file.exe >/dev/null 2>&1; then bad "missing file should fail"; else ok "rejects missing file"; fi
 if sh "$BIN/winstall" --bogus >/dev/null 2>&1; then bad "bad option should fail"; else ok "rejects bad option"; fi
 rm -rf "$sandbox"
+
+echo "== 5. titan-mem behaviour =="
+sh "$BIN/titan-mem" | grep -qi "free for games" && ok "reports free-for-games" || bad "titan-mem report"
+TITAN_OS_BUDGET_MB=999999 sh "$BIN/titan-mem" --budget >/dev/null 2>&1 && ok "budget check passes when generous" || bad "titan-mem budget"
+if TITAN_OS_BUDGET_MB=0 sh "$BIN/titan-mem" --budget >/dev/null 2>&1; then bad "budget 0 should fail"; else ok "budget check fails when tiny"; fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$fails TEST(S) FAILED" >&2; exit 1; fi

@@ -35,5 +35,6 @@ rsync
 
 # --- low-RAM helpers ---
 zram-tools
+earlyoom
 htop
 sudo

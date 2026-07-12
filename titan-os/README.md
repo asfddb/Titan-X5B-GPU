@@ -9,8 +9,22 @@ lightweight Openbox desktop and switches, at runtime, between:
 - **Dev mode** — the important tools for coding, proofing, and testing (git,
   Python, Node, GCC/Make, gdb/valgrind, editors, optional Docker).
 
-It is tuned to be usable on a **2 GB RAM** machine: minimal base, Openbox
-instead of GNOME/KDE, `zram` compressed swap, and per-mode kernel tunables.
+It is tuned to be usable on a **2 GB RAM** machine: the **OS keeps its own
+footprint small** (a few hundred MB idle) so the large majority of that 2 GB
+stays **free for your games and builds**. Minimal base, Openbox instead of
+GNOME/KDE, `zram` compressed swap, per-mode kernel tunables, and an `earlyoom`
+watchdog so a runaway game can never freeze the whole system.
+
+Check the split any time with `titan-mem`:
+
+```
+$ titan-mem
+TitanOS memory report
+  total RAM        : 2000 MB
+  in use (OS+apps) : ~450 MB      <- the OS itself, kept lean
+  free for games   : ~1550 MB     <- yours to use
+  status           : lean — plenty of RAM left for games/builds
+```
 
 ---
 
@@ -97,6 +111,8 @@ titan-os/
 | `zram` swap (lz4) | Compressed swap in RAM keeps builds/games alive under pressure. |
 | Modes don't reinstall | Switching only toggles services/tunables — instant, no disk churn. |
 | Firefox **ESR** | Lighter, long-term-support browser. |
+| `earlyoom` watchdog | Stops a runaway game instead of freezing the whole OS. |
+| `titan-mem` report | Shows OS footprint vs. RAM free for games at a glance. |
 | Docker off by default | Heavy on 2 GB; started only in dev mode when you need it. |
 
 ## License

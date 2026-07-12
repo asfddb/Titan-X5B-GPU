@@ -1,0 +1,64 @@
+#!/bin/sh
+# titan-mem — show how much RAM the OS is using versus how much is left for
+# your games/builds. TitanOS is designed to keep its own footprint small so
+# that on a 2 GB machine the large majority of RAM stays available for what
+# you actually run on top of it.
+#
+# Usage:
+#   titan-mem            Human-readable report.
+#   titan-mem --budget   Exit non-zero if the OS baseline exceeds the budget.
+#   titan-mem -h|--help  Show this help.
+set -eu
+
+# Target: the OS (desktop + services, idle) should sit well under this so a
+# 2 GB machine keeps most of its RAM for games. Tunable via env.
+OS_BUDGET_MB="${TITAN_OS_BUDGET_MB:-700}"
+
+usage() {
+	sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# Pull fields from /proc/meminfo in kB. $1 = field name.
+meminfo_kb() {
+	awk -v k="$1:" '$1==k {print $2}' /proc/meminfo
+}
+
+report() {
+	total_kb="$(meminfo_kb MemTotal)"
+	avail_kb="$(meminfo_kb MemAvailable)"
+	total_mb=$((total_kb / 1024))
+	avail_mb=$((avail_kb / 1024))
+	used_mb=$((total_mb - avail_mb)) # OS + everything currently running
+
+	echo "TitanOS memory report"
+	echo "  total RAM        : ${total_mb} MB"
+	echo "  in use (OS+apps) : ${used_mb} MB"
+	echo "  free for games   : ${avail_mb} MB"
+	echo "  OS budget target : ${OS_BUDGET_MB} MB (idle desktop + services)"
+
+	if [ "$used_mb" -le "$OS_BUDGET_MB" ]; then
+		echo "  status           : lean — plenty of RAM left for games/builds"
+	else
+		echo "  status           : busy — apps/games are using RAM (expected under load)"
+	fi
+}
+
+# Exit code contract for the budget check (used by tests/monitoring).
+budget_check() {
+	avail_kb="$(meminfo_kb MemAvailable)"
+	total_kb="$(meminfo_kb MemTotal)"
+	used_mb=$(((total_kb - avail_kb) / 1024))
+	if [ "$used_mb" -le "$OS_BUDGET_MB" ]; then
+		echo "within budget: ${used_mb} MB <= ${OS_BUDGET_MB} MB"
+		return 0
+	fi
+	echo "over budget: ${used_mb} MB > ${OS_BUDGET_MB} MB" >&2
+	return 1
+}
+
+case "${1:-}" in
+-h | --help) usage ;;
+--budget) budget_check ;;
+"") report ;;
+*) echo "titan-mem: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+esac

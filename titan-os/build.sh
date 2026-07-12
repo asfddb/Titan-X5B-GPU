@@ -25,6 +25,7 @@ check_config() {
 		config/package-lists/20-dev.list.chroot \
 		config/includes.chroot/usr/local/bin/titan-mode \
 		config/includes.chroot/usr/local/bin/winstall \
+		config/includes.chroot/usr/local/bin/titan-mem \
 		config/hooks/normal/9000-titan-setup.hook.chroot; do
 		if [ -f "$f" ]; then
 			echo "  ok   $f"

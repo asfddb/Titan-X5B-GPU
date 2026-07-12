@@ -1,0 +1,11 @@
+# TitanOS earlyoom configuration.
+# earlyoom watches free memory and, when it gets critically low, stops the
+# single hungriest process BEFORE the kernel freezes the whole machine. On a
+# 2 GB box this is what keeps the OS responsive when a game or build overruns.
+#
+#  -m 4  : act when available RAM drops below 4%
+#  -s 4  : ...and available swap (zram) below 4%
+#  -r 60 : report memory stats every 60s
+#  --avoid : never kill the desktop/session core, so the OS itself survives
+#  --prefer: prefer to kill the actual heavyweight (games/emulated Windows apps)
+EARLYOOM_ARGS="-m 4 -s 4 -r 60 --avoid '^(openbox|lightdm|Xorg|systemd|tint2)$' --prefer '^(wine.*|steam.*|.*\.exe)$'"
