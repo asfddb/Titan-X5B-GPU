@@ -1,0 +1,39 @@
+# TitanOS — base system (installed in BOTH modes).
+# Kept deliberately small so the OS itself fits comfortably in ~2 GB RAM.
+# The heavy stuff (games, toolchains) is in the mode-specific lists.
+
+# --- boot / init ---
+linux-image-amd64
+live-boot
+live-config
+systemd-sysv
+
+# --- network ---
+network-manager
+iproute2
+ca-certificates
+curl
+wget
+
+# --- lightweight X desktop (Openbox is tiny; no GNOME/KDE bloat) ---
+xserver-xorg-core
+xserver-xorg
+xinit
+openbox
+obconf
+tint2
+lxterminal
+pcmanfm
+lightdm
+
+# --- browser (ESR = lighter, long-term support) ---
+firefox-esr
+
+# --- backup / restore apps ---
+timeshift
+rsync
+
+# --- low-RAM helpers ---
+zram-tools
+htop
+sudo

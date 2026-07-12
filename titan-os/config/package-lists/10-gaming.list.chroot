@@ -1,0 +1,25 @@
+# TitanOS — GAMING mode packages.
+# Wine + Steam(Proton) cover the large majority of Windows games.
+# NOTE: real games still need their own RAM/GPU — a 2 GB machine runs
+# lightweight/older titles only; the OS being small does not change that.
+
+# --- Windows compatibility layer ---
+wine
+wine64
+wine32
+winetricks
+
+# --- Steam (ships Proton) + Lutris launcher ---
+# steam-installer pulls Steam from the non-free repo; enable contrib/non-free
+# and i386 multiarch in the build (see build.sh).
+steam-installer
+lutris
+
+# --- performance / overlay ---
+gamemode
+mangohud
+
+# --- Vulkan / GPU userspace (open-source Mesa drivers) ---
+mesa-vulkan-drivers
+vulkan-tools
+libvulkan1

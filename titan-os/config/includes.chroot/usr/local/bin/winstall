@@ -1,0 +1,92 @@
+#!/bin/sh
+# winstall — run a Windows installer (setup.exe / *.msi) on TitanOS via Wine.
+#
+# Each installed program lives in its own Wine "prefix" (a self-contained fake
+# C: drive) so a broken installer can never damage another program. Prefixes
+# live under ~/.local/share/titan-prefixes/<name>.
+#
+# Usage:
+#   winstall setup.exe                 Install into a prefix named after the file.
+#   winstall --prefix mygame game.exe  Install into a named prefix.
+#   winstall --list                    List existing prefixes.
+#   winstall --run mygame              Re-open a prefix's C: drive folder.
+#   winstall -h|--help                 Show this help.
+set -eu
+
+PREFIX_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/titan-prefixes"
+
+usage() {
+	sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+die() {
+	echo "winstall: $1" >&2
+	exit 1
+}
+
+require_wine() {
+	command -v wine >/dev/null 2>&1 ||
+		die "Wine is not installed. Switch to gaming mode or run: sudo apt install wine"
+}
+
+list_prefixes() {
+	if [ -d "$PREFIX_ROOT" ] && [ -n "$(ls -A "$PREFIX_ROOT" 2>/dev/null)" ]; then
+		echo "Wine prefixes in $PREFIX_ROOT:"
+		ls -1 "$PREFIX_ROOT"
+	else
+		echo "No prefixes yet. Run: winstall setup.exe"
+	fi
+}
+
+open_prefix() {
+	name="$1"
+	target="$PREFIX_ROOT/$name/drive_c"
+	[ -d "$target" ] || die "no prefix named '$name' (see: winstall --list)"
+	if command -v xdg-open >/dev/null 2>&1; then
+		xdg-open "$target" >/dev/null 2>&1 &
+	else
+		echo "$target"
+	fi
+}
+
+install_exe() {
+	prefix_name="$1"
+	installer="$2"
+	require_wine
+	[ -f "$installer" ] || die "file not found: $installer"
+
+	# Default the prefix name to the installer's base filename.
+	if [ -z "$prefix_name" ]; then
+		base="$(basename "$installer")"
+		prefix_name="${base%.*}"
+	fi
+
+	prefix_path="$PREFIX_ROOT/$prefix_name"
+	mkdir -p "$prefix_path"
+	echo "winstall: installing '$installer' into prefix '$prefix_name'..."
+
+	# WINEPREFIX must be absolute. Suppress the Mono/Gecko nag on headless runs.
+	WINEPREFIX="$prefix_path" WINEDLLOVERRIDES="mscoree,mshtml=" \
+		wine "$installer" ||
+		die "installer exited with an error (prefix kept at $prefix_path)"
+
+	echo "winstall: done. Installed files are under:"
+	echo "  $prefix_path/drive_c"
+	echo "Re-open later with: winstall --run $prefix_name"
+}
+
+prefix_name=""
+case "${1:-}" in
+-h | --help | "") usage ;;
+--list) list_prefixes ;;
+--run) shift; [ $# -ge 1 ] || die "--run needs a prefix name"; open_prefix "$1" ;;
+--prefix)
+	shift
+	[ $# -ge 2 ] || die "--prefix needs a name and an installer path"
+	prefix_name="$1"
+	shift
+	install_exe "$prefix_name" "$1"
+	;;
+-*) die "unknown option '$1' (see: winstall --help)" ;;
+*) install_exe "" "$1" ;;
+esac

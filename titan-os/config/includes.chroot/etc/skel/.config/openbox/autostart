@@ -1,0 +1,22 @@
+# TitanOS Openbox autostart — runs once per login for every new user.
+
+# Lightweight panel and a sane background.
+tint2 &
+
+# Read the active mode and launch the matching experience. Default to dev
+# when unset so a first boot lands somewhere useful.
+TITAN_MODE="dev"
+[ -r /var/lib/titan/mode ] && TITAN_MODE="$(cat /var/lib/titan/mode)"
+
+case "$TITAN_MODE" in
+gaming)
+	# Big-picture Steam is the game front-end when it is installed.
+	if command -v steam >/dev/null 2>&1; then
+		steam -bigpicture &
+	fi
+	;;
+*)
+	# Dev: open a terminal so the toolchain is one keystroke away.
+	lxterminal &
+	;;
+esac

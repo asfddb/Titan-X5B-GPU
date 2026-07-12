@@ -1,0 +1,20 @@
+name: TitanOS CI
+
+on:
+  push:
+    paths:
+      - "titan-os/**"
+  pull_request:
+    paths:
+      - "titan-os/**"
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+      - name: Run TitanOS test suite
+        working-directory: titan-os
+        run: sh tests/run-tests.sh

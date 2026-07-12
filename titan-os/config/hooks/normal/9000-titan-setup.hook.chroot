@@ -1,0 +1,20 @@
+#!/bin/sh
+# TitanOS build-time hook — runs inside the chroot while the image is built.
+# Sets sane defaults so the finished ISO boots straight into a working system.
+set -e
+
+# Default to dev mode on first boot (safe, no GPU assumptions).
+mkdir -p /var/lib/titan
+echo "dev" >/var/lib/titan/mode
+
+# Make the TitanOS tools executable regardless of how git tracked them.
+chmod +x /usr/local/bin/titan-mode /usr/local/bin/winstall 2>/dev/null || true
+
+# Enable the low-RAM zram swap so it is active from the very first boot.
+systemctl enable zramswap.service 2>/dev/null || true
+
+# Do NOT auto-enable docker/gamemode globally — titan-mode starts them only
+# in the mode that needs them, to save RAM.
+systemctl disable docker.service 2>/dev/null || true
+
+echo "TitanOS: chroot setup complete."

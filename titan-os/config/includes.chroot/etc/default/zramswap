@@ -1,0 +1,9 @@
+# TitanOS zram configuration (read by the zram-tools service).
+# zram gives compressed swap in RAM — the single biggest win for running a
+# usable system in 2 GB. lz4 is fast with a good ratio.
+ALGO=lz4
+
+# Use up to ~50% of RAM for the compressed swap device. On a 2 GB box this
+# yields roughly 1 GB of zram which typically decompresses to 2-3 GB of
+# effective space thanks to compression.
+PERCENT=50

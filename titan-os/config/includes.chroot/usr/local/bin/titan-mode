@@ -1,0 +1,83 @@
+#!/bin/sh
+# titan-mode — switch TitanOS between "gaming" and "dev" modes.
+#
+# The two modes share one base system. Switching a mode only changes which
+# services run, which kernel tunables are applied, and what the desktop
+# launches — nothing is reinstalled, so switching is instant and cheap on a
+# low-RAM machine.
+#
+# Usage:
+#   titan-mode gaming      Optimise for games (GameMode, low latency, Steam).
+#   titan-mode dev         Optimise for coding (dev services, editors).
+#   titan-mode status      Show the current mode.
+#   titan-mode -h|--help   Show this help.
+set -eu
+
+STATE_FILE="/var/lib/titan/mode"
+GAMING_SYSCTL="/etc/sysctl.d/60-titan-gaming.conf"
+DEV_SYSCTL="/etc/sysctl.d/60-titan-dev.conf"
+
+usage() {
+	sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+need_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		echo "titan-mode: this action needs root; re-run with sudo." >&2
+		exit 1
+	fi
+}
+
+apply_sysctl() {
+	# $1 = path to the sysctl file to (re)load. Best-effort: a live/CI host
+	# may not allow every key, so we never fail the mode switch on it.
+	[ -f "$1" ] || return 0
+	sysctl -p "$1" >/dev/null 2>&1 || true
+}
+
+set_mode() {
+	mode="$1"
+	need_root
+	mkdir -p "$(dirname "$STATE_FILE")"
+	echo "$mode" >"$STATE_FILE"
+
+	case "$mode" in
+	gaming)
+		apply_sysctl "$GAMING_SYSCTL"
+		# GameMode daemon is only useful while gaming.
+		systemctl start gamemoded 2>/dev/null || true
+		echo "TitanOS is now in GAMING mode."
+		echo "  - low-latency kernel tunables applied"
+		echo "  - GameMode active; launch Steam or 'winstall game.exe'"
+		;;
+	dev)
+		apply_sysctl "$DEV_SYSCTL"
+		systemctl stop gamemoded 2>/dev/null || true
+		# Docker is heavy on 2 GB RAM, so it is opt-in and only started in
+		# dev mode when installed.
+		systemctl start docker 2>/dev/null || true
+		echo "TitanOS is now in DEV mode."
+		echo "  - developer services enabled"
+		echo "  - editors and toolchains ready (git, python3, node, gcc)"
+		;;
+	esac
+}
+
+show_status() {
+	if [ -r "$STATE_FILE" ]; then
+		echo "current mode: $(cat "$STATE_FILE")"
+	else
+		echo "current mode: unset (defaulting to dev)"
+	fi
+}
+
+case "${1:-}" in
+gaming | dev) set_mode "$1" ;;
+status) show_status ;;
+-h | --help | "") usage ;;
+*)
+	echo "titan-mode: unknown argument '$1'" >&2
+	usage >&2
+	exit 2
+	;;
+esac
