@@ -111,6 +111,35 @@ winstall --run mygame              # re-open a program's C: drive
 Each program gets its own isolated Wine prefix (a self-contained fake `C:`
 drive) so one bad installer can't break another program.
 
+## Settings, accounts & the RAM cushion
+
+TitanOS has a single control panel and the standard system-management pieces an
+OS is expected to have:
+
+```sh
+titan-settings              # control panel: lists every settings category
+titan-settings memory       # ...and opens the right tool for one
+titan-user list             # accounts: list / add / passwd / admin on|off / delete
+titan-cushion show          # reserved free-RAM cushion (see below)
+```
+
+**The RAM cushion** is the counterpart to the RAM ceiling. Where `titan-cap`
+stops the OS growing too large, `titan-cushion` *guarantees* a slice of RAM
+stays free at all times (kernel `vm.min_free_kbytes` + a `MemoryMin` guarantee
+for your session), so the desktop never locks up when a game grabs everything.
+It scales to the machine — 10% of RAM, clamped to `[128 MB, 1024 MB]`:
+
+| Machine RAM | Ceiling (cap) | Cushion (always free) |
+|---|---|---|
+| 2 GB  | 2 GB   | ~204 MB |
+| 8 GB  | 2 GB   | ~819 MB |
+| 24 GB | ~4.9 GB | 1024 MB |
+
+Both re-apply automatically on every boot (via `titan-cap.service`).
+
+**Accounts** (`titan-user`): create/remove login users, set passwords, and
+grant or revoke admin (sudo) rights — wrapping the standard Debian tools.
+
 ## Built-in apps
 
 TitanOS ships with a small set of working default apps. Each `titan-*` tool

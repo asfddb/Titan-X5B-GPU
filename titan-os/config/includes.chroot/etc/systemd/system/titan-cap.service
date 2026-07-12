@@ -9,6 +9,7 @@ Before=basic.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/titan-cap auto
+ExecStartPost=/usr/local/bin/titan-cushion auto
 RemainAfterExit=yes
 
 [Install]

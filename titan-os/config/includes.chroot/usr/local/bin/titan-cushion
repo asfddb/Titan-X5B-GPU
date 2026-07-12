@@ -1,0 +1,92 @@
+#!/bin/sh
+# titan-cushion — reserve a "cushion" of RAM the system always keeps free.
+#
+# The RAM ceiling (titan-cap) stops the OS growing too big; the cushion is the
+# other side of the coin: it guarantees a slice of memory stays free at all
+# times, so the desktop never becomes unresponsive when a game or build tries
+# to grab everything. It works by setting the kernel's vm.min_free_kbytes (the
+# amount of RAM the kernel keeps in reserve) and a MemoryMin guarantee for the
+# interactive user session.
+#
+# The cushion scales with the machine: 10% of RAM, clamped to [128 MB, 1024 MB].
+#
+# Usage:
+#   titan-cushion compute      Print the cushion size (MB) for this machine.
+#   titan-cushion show         Show the configured cushion and current reserve.
+#   titan-cushion set <MB>     Reserve an explicit cushion. Needs root.
+#   titan-cushion auto         Compute and apply the scaled cushion. Needs root.
+#   titan-cushion -h|--help    Show this help.
+set -eu
+
+SYSCTL="/etc/sysctl.d/61-titan-cushion.conf"
+USLICE_DIR="/etc/systemd/system/user.slice.d"
+USLICE="${USLICE_DIR}/10-titan-cushion.conf"
+
+FLOOR_MB=128
+CEIL_MB=1024
+PERCENT=10
+
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; }
+
+need_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		echo "titan-cushion: this action needs root; use sudo." >&2
+		exit 1
+	fi
+}
+
+total_mb() {
+	if [ -n "${TITAN_TOTAL_MB:-}" ]; then echo "$TITAN_TOTAL_MB"; return; fi
+	echo $(($(awk '/^MemTotal:/ {print $2}' /proc/meminfo) / 1024))
+}
+
+compute_mb() {
+	total="$(total_mb)"
+	c=$((total * PERCENT / 100))
+	[ "$c" -lt "$FLOOR_MB" ] && c="$FLOOR_MB"
+	[ "$c" -gt "$CEIL_MB" ] && c="$CEIL_MB"
+	echo "$c"
+}
+
+apply() {
+	mb="$1"
+	need_root
+	# Kernel-level reserve: keep this many kB free at all times.
+	echo "vm.min_free_kbytes = $((mb * 1024))" >"$SYSCTL"
+	sysctl -p "$SYSCTL" >/dev/null 2>&1 || true
+	# Session-level guarantee: the interactive user session keeps this much.
+	mkdir -p "$USLICE_DIR"
+	printf '[Slice]\nMemoryMin=%sM\n' "$mb" >"$USLICE"
+	systemctl daemon-reload 2>/dev/null || true
+	echo "titan-cushion: reserved a ${mb} MB RAM cushion."
+}
+
+show() {
+	echo "TitanOS RAM cushion"
+	echo "  machine total    : $(total_mb) MB"
+	echo "  auto cushion     : $(compute_mb) MB"
+	if [ -r "$SYSCTL" ]; then
+		kb="$(awk -F= '/vm.min_free_kbytes/ {gsub(/ /,"",$2); print $2}' "$SYSCTL")"
+		echo "  configured       : $((kb / 1024)) MB reserved"
+	else
+		echo "  configured       : not yet applied (run: sudo titan-cushion auto)"
+	fi
+	if [ -r /proc/sys/vm/min_free_kbytes ]; then
+		echo "  kernel reserve   : $(($(cat /proc/sys/vm/min_free_kbytes) / 1024)) MB"
+	fi
+}
+
+size_to_mb() {
+	num="$(echo "$1" | sed 's/[^0-9].*$//')"
+	[ -n "$num" ] || { echo "titan-cushion: bad size '$1'" >&2; exit 2; }
+	case "$1" in *[Gg]) echo $((num * 1024)) ;; *) echo "$num" ;; esac
+}
+
+case "${1:-}" in
+compute) compute_mb ;;
+show) show ;;
+auto) apply "$(compute_mb)" ;;
+set) shift; [ $# -ge 1 ] || { echo "titan-cushion: set needs a size" >&2; exit 2; }; apply "$(size_to_mb "$1")" ;;
+-h | --help | "") usage ;;
+*) echo "titan-cushion: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+esac

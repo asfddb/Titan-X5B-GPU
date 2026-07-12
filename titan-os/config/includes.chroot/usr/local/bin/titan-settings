@@ -1,0 +1,66 @@
+#!/bin/sh
+# titan-settings — the TitanOS control panel.
+# One place that lists every system setting and opens the right tool for it.
+#
+# Usage:
+#   titan-settings                 Show all settings categories.
+#   titan-settings <category>      Open a category (e.g. 'titan-settings memory').
+#   titan-settings -h|--help       Show this help.
+#
+# Categories: mode memory cushion time accounts network display apps about
+set -eu
+
+# category|description|command-to-run
+CATS="
+mode|Gaming / Dev mode|titan-mode status
+memory|RAM ceiling for the OS|titan-mem
+cushion|Reserved free-RAM cushion|titan-cushion show
+time|Time, date & timezone|titan-time show
+accounts|User accounts & admin rights|titan-user list
+network|Network connections|nmtui
+display|Screen resolution & layout|arandr
+apps|Installed built-in apps|titan-apps
+about|About this TitanOS system|titan_about
+"
+
+titan_about() {
+	echo "TitanOS — a lean two-mode Linux for gaming and development."
+	echo "  kernel : $(uname -sr)"
+	echo "  host   : $(uname -n)"
+	[ -r /etc/os-release ] && . /etc/os-release && echo "  base   : ${PRETTY_NAME:-Debian}"
+	command -v titan-mode >/dev/null 2>&1 && echo "  mode   : $(titan-mode status 2>/dev/null)"
+}
+
+show_menu() {
+	echo "TitanOS Settings"
+	printf '  %-10s %-32s %s\n' "CATEGORY" "DESCRIPTION" "OPENS"
+	echo "$CATS" | while IFS='|' read -r cat desc cmd; do
+		[ -n "$cat" ] || continue
+		printf '  %-10s %-32s %s\n' "$cat" "$desc" "$cmd"
+	done
+	echo
+	echo "Open one with:  titan-settings <category>"
+}
+
+open_cat() {
+	want="$1"
+	row="$(echo "$CATS" | awk -F'|' -v c="$want" '$1==c {print; exit}')"
+	[ -n "$row" ] || { echo "titan-settings: unknown category '$want'" >&2; show_menu >&2; exit 2; }
+	cmd="$(echo "$row" | cut -d'|' -f3)"
+	# 'about' is handled internally; everything else runs its tool.
+	if [ "$cmd" = "titan_about" ]; then titan_about; return; fi
+	verb="$(echo "$cmd" | cut -d' ' -f1)"
+	if command -v "$verb" >/dev/null 2>&1; then
+		# shellcheck disable=SC2086
+		$cmd
+	else
+		echo "titan-settings: '$verb' is not installed on this system." >&2
+		exit 1
+	fi
+}
+
+case "${1:-}" in
+-h | --help) sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' ;;
+"" | list | menu) show_menu ;;
+*) open_cat "$1" ;;
+esac

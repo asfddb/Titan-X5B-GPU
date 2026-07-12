@@ -1,0 +1,91 @@
+#!/bin/sh
+# titan-user — TitanOS account system.
+# Create and manage the people who can log in, set passwords, and grant or
+# revoke admin (sudo) rights. Wraps the standard useradd/usermod/passwd tools.
+#
+# Usage:
+#   titan-user list              List the login accounts on this system.
+#   titan-user whoami            Show the current user and whether it's admin.
+#   titan-user add <name>        Create a login account (then set a password).
+#   titan-user passwd <name>     Change an account's password.
+#   titan-user admin <name> on   Grant admin (sudo) rights.
+#   titan-user admin <name> off  Revoke admin (sudo) rights.
+#   titan-user delete <name>     Remove an account and its home folder.
+#   titan-user -h|--help         Show this help.
+set -eu
+
+# Human login accounts live in the 1000..59999 UID range on Debian.
+PASSWD_FILE="${TITAN_PASSWD_FILE:-/etc/passwd}"
+ADMIN_GROUP="sudo"
+
+usage() { sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; }
+
+need_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		echo "titan-user: managing accounts needs root; use sudo." >&2
+		exit 1
+	fi
+}
+
+list_users() {
+	echo "Login accounts:"
+	awk -F: '$3 >= 1000 && $3 < 60000 { printf "  %-16s (uid %s, home %s)\n", $1, $3, $6 }' "$PASSWD_FILE"
+}
+
+who() {
+	u="$(id -un)"
+	echo "current user : $u"
+	echo "groups       : $(id -Gn "$u")"
+	if id -nG "$u" 2>/dev/null | tr ' ' '\n' | grep -qx "$ADMIN_GROUP"; then
+		echo "admin (sudo) : yes"
+	else
+		echo "admin (sudo) : no"
+	fi
+}
+
+add_user() {
+	name="$1"
+	need_root
+	if id "$name" >/dev/null 2>&1; then echo "titan-user: '$name' already exists." >&2; exit 2; fi
+	useradd -m -s /bin/bash "$name"
+	echo "titan-user: created '$name'. Set a password now:"
+	passwd "$name"
+	echo "titan-user: grant admin with: titan-user admin $name on"
+}
+
+set_passwd() {
+	name="$1"
+	need_root
+	id "$name" >/dev/null 2>&1 || { echo "titan-user: no such account '$name'" >&2; exit 2; }
+	passwd "$name"
+}
+
+set_admin() {
+	name="$1"; state="$2"
+	need_root
+	id "$name" >/dev/null 2>&1 || { echo "titan-user: no such account '$name'" >&2; exit 2; }
+	case "$state" in
+	on) usermod -aG "$ADMIN_GROUP" "$name"; echo "titan-user: '$name' is now an admin." ;;
+	off) deluser "$name" "$ADMIN_GROUP" 2>/dev/null || gpasswd -d "$name" "$ADMIN_GROUP"; echo "titan-user: admin removed from '$name'." ;;
+	*) echo "titan-user: admin takes 'on' or 'off'" >&2; exit 2 ;;
+	esac
+}
+
+del_user() {
+	name="$1"
+	need_root
+	id "$name" >/dev/null 2>&1 || { echo "titan-user: no such account '$name'" >&2; exit 2; }
+	userdel -r "$name" 2>/dev/null || userdel "$name"
+	echo "titan-user: removed account '$name'."
+}
+
+case "${1:-}" in
+list) list_users ;;
+whoami) who ;;
+add) shift; [ $# -ge 1 ] || { echo "titan-user: add needs a name" >&2; exit 2; }; add_user "$1" ;;
+passwd) shift; [ $# -ge 1 ] || { echo "titan-user: passwd needs a name" >&2; exit 2; }; set_passwd "$1" ;;
+admin) shift; [ $# -ge 2 ] || { echo "titan-user: admin needs <name> on|off" >&2; exit 2; }; set_admin "$1" "$2" ;;
+delete) shift; [ $# -ge 1 ] || { echo "titan-user: delete needs a name" >&2; exit 2; }; del_user "$1" ;;
+-h | --help | "") usage ;;
+*) echo "titan-user: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+esac

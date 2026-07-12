@@ -31,6 +31,9 @@ check_config() {
 		config/includes.chroot/usr/local/bin/titan-time \
 		config/includes.chroot/usr/local/bin/titan-backup \
 		config/includes.chroot/usr/local/bin/titan-apps \
+		config/includes.chroot/usr/local/bin/titan-cushion \
+		config/includes.chroot/usr/local/bin/titan-user \
+		config/includes.chroot/usr/local/bin/titan-settings \
 		config/includes.chroot/etc/systemd/system/titan-cap.service \
 		config/includes.chroot/etc/xdg/openbox/menu.xml \
 		config/hooks/normal/9000-titan-setup.hook.chroot; do

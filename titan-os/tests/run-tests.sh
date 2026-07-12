@@ -16,7 +16,8 @@ echo "== 1. shellcheck (if available) =="
 if command -v shellcheck >/dev/null 2>&1; then
 	for f in build.sh tests/run-tests.sh "$BIN/titan-mode" "$BIN/winstall" "$BIN/titan-mem" \
 		"$BIN/titan-cap" "$BIN/titan-calc" "$BIN/titan-time" "$BIN/titan-backup" \
-		"$BIN/titan-apps" config/hooks/normal/9000-titan-setup.hook.chroot; do
+		"$BIN/titan-apps" "$BIN/titan-cushion" "$BIN/titan-user" "$BIN/titan-settings" \
+		config/hooks/normal/9000-titan-setup.hook.chroot; do
 		if shellcheck -s sh --severity=warning "$f" >/dev/null 2>&1; then ok "shellcheck $f"; else
 			shellcheck -s sh --severity=warning "$f" || true; bad "shellcheck $f"; fi
 	done
@@ -87,6 +88,33 @@ unset TITAN_BACKUP_DIR
 echo "== 10. titan-apps (launcher) =="
 sh "$BIN/titan-apps" | grep -q "titan-calc" && ok "lists titan-calc" || bad "apps list"
 sh "$BIN/titan-apps" | grep -qi "STATUS"     && ok "shows status column" || bad "apps status"
+
+echo "== 11. titan-cushion (reserved RAM) =="
+check_cushion() { # $1=total_mb $2=expected_mb $3=label
+	got="$(TITAN_TOTAL_MB="$1" sh "$BIN/titan-cushion" compute)"
+	if [ "$got" = "$2" ]; then ok "$3 ($1 MB -> $got MB)"; else bad "$3 expected $2 got $got"; fi
+}
+check_cushion 512   128  "small machine floors at 128 MB"
+check_cushion 2048  204  "2 GB reserves ~204 MB"
+check_cushion 24576 1024 "24 GB ceils at 1024 MB"
+sh "$BIN/titan-cushion" show | grep -qi "cushion" && ok "show prints cushion" || bad "cushion show"
+if sh "$BIN/titan-cushion" set >/dev/null 2>&1; then bad "set needs size"; else ok "set requires size"; fi
+
+echo "== 12. titan-user (account system) =="
+udir="$(mktemp -d)"
+printf 'root:x:0:0::/root:/bin/bash\ndaemon:x:1:1::/:/usr/sbin/nologin\nplayer:x:1000:1000::/home/player:/bin/bash\n' >"$udir/passwd"
+TITAN_PASSWD_FILE="$udir/passwd" sh "$BIN/titan-user" list | grep -q "player" && ok "lists uid>=1000 user" || bad "user list"
+TITAN_PASSWD_FILE="$udir/passwd" sh "$BIN/titan-user" list | grep -q "daemon" && bad "should hide system users" || ok "hides system users"
+sh "$BIN/titan-user" whoami | grep -qi "current user" && ok "whoami works" || bad "user whoami"
+if sh "$BIN/titan-user" add >/dev/null 2>&1; then bad "add needs a name"; else ok "add requires name"; fi
+if sh "$BIN/titan-user" bogus >/dev/null 2>&1; then bad "bad arg should fail"; else ok "rejects bad arg"; fi
+rm -rf "$udir"
+
+echo "== 13. titan-settings (control panel) =="
+sh "$BIN/titan-settings" | grep -qi "CATEGORY" && ok "menu lists categories" || bad "settings menu"
+sh "$BIN/titan-settings" | grep -q "cushion"    && ok "menu includes cushion" || bad "settings cushion row"
+sh "$BIN/titan-settings" about | grep -qi "TitanOS" && ok "about works" || bad "settings about"
+if sh "$BIN/titan-settings" nope >/dev/null 2>&1; then bad "unknown category should fail"; else ok "rejects unknown category"; fi
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$fails TEST(S) FAILED" >&2; exit 1; fi

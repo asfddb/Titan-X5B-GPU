@@ -9,9 +9,12 @@ set -eu
 
 # name|description pairs for every built-in TitanOS command.
 APPS="
+titan-settings|Control panel for all system settings
 titan-mode|Switch between gaming and dev modes
 titan-cap|Set the hard RAM ceiling for the OS
+titan-cushion|Reserve a free-RAM cushion
 titan-mem|Show OS memory usage vs. free RAM for games
+titan-user|Manage user accounts and admin rights
 winstall|Install Windows setup.exe programs (Wine)
 titan-calc|Calculator (command line or GUI)
 titan-time|Time & date settings (timezone, network time)

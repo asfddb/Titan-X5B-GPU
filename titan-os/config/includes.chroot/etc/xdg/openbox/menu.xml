@@ -41,6 +41,21 @@
     <item label="Memory / RAM Cap">
       <action name="Execute"><command>lxterminal -e titan-mem</command></action>
     </item>
+    <item label="RAM Cushion">
+      <action name="Execute"><command>lxterminal -e titan-cushion show</command></action>
+    </item>
+    <item label="User Accounts">
+      <action name="Execute"><command>lxterminal -e titan-user list</command></action>
+    </item>
+    <item label="Network">
+      <action name="Execute"><command>lxterminal -e nmtui</command></action>
+    </item>
+    <item label="Display">
+      <action name="Execute"><command>arandr</command></action>
+    </item>
+    <item label="All Settings">
+      <action name="Execute"><command>lxterminal -e titan-settings</command></action>
+    </item>
   </menu>
 
   <menu id="root-menu" label="TitanOS">
