@@ -1,0 +1,69 @@
+#!/bin/sh
+# titan-backup — TitanOS backup app.
+# Makes timestamped snapshots of your home folder so you can restore files
+# later. Uses rsync when available (fast incremental copies), otherwise cp.
+# For full system snapshots, Timeshift is also installed on the desktop.
+#
+# Usage:
+#   titan-backup now           Snapshot your home folder now.
+#   titan-backup list          List existing snapshots.
+#   titan-backup restore <ID>  Copy a snapshot's files back into place.
+#   titan-backup -h|--help     Show this help.
+#
+# Snapshots live in $TITAN_BACKUP_DIR (default: ~/Backups).
+set -eu
+
+BACKUP_DIR="${TITAN_BACKUP_DIR:-$HOME/Backups}"
+
+usage() {
+	sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+copy_tree() { # $1=src $2=dest
+	if command -v rsync >/dev/null 2>&1; then
+		rsync -a --exclude "Backups" "$1"/ "$2"/
+	else
+		mkdir -p "$2"
+		# cp everything except the Backups dir itself (avoid recursion).
+		for entry in "$1"/* "$1"/.[!.]*; do
+			[ -e "$entry" ] || continue
+			case "$entry" in */Backups) continue ;; esac
+			cp -a "$entry" "$2"/ 2>/dev/null || true
+		done
+	fi
+}
+
+do_now() {
+	stamp="$(date +%Y%m%d-%H%M%S)"
+	dest="$BACKUP_DIR/$stamp"
+	mkdir -p "$dest"
+	echo "titan-backup: snapshotting $HOME -> $dest ..."
+	copy_tree "$HOME" "$dest"
+	echo "titan-backup: done. Snapshot ID: $stamp"
+}
+
+do_list() {
+	if [ -d "$BACKUP_DIR" ] && [ -n "$(ls -A "$BACKUP_DIR" 2>/dev/null)" ]; then
+		echo "Snapshots in $BACKUP_DIR:"
+		ls -1 "$BACKUP_DIR"
+	else
+		echo "No snapshots yet. Run: titan-backup now"
+	fi
+}
+
+do_restore() {
+	id="$1"
+	src="$BACKUP_DIR/$id"
+	[ -d "$src" ] || { echo "titan-backup: no snapshot '$id' (see: titan-backup list)" >&2; exit 2; }
+	echo "titan-backup: restoring $id into $HOME ..."
+	copy_tree "$src" "$HOME"
+	echo "titan-backup: restore complete."
+}
+
+case "${1:-}" in
+now) do_now ;;
+list) do_list ;;
+restore) shift; [ $# -ge 1 ] || { echo "titan-backup: restore needs a snapshot ID" >&2; exit 2; }; do_restore "$1" ;;
+-h | --help | "") usage ;;
+*) echo "titan-backup: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+esac

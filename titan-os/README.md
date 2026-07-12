@@ -111,6 +111,28 @@ winstall --run mygame              # re-open a program's C: drive
 Each program gets its own isolated Wine prefix (a self-contained fake `C:`
 drive) so one bad installer can't break another program.
 
+## Built-in apps
+
+TitanOS ships with a small set of working default apps. Each `titan-*` tool
+runs from the terminal and opens a GUI where relevant; they also appear in the
+Openbox right-click menu (**TitanOS Apps** / **TitanOS System**).
+
+```sh
+titan-apps                 # list every built-in app and whether it's installed
+titan-calc "2 + 2 * 3"     # calculator (=> 8); 'titan-calc gui' opens galculator
+titan-time                 # time & date: show / zones / set-zone / sync on|off
+titan-backup now           # back up your home folder; 'restore <ID>' to bring it back
+```
+
+| App | What it does | GUI backend |
+|---|---|---|
+| `titan-calc` | Calculator (CLI + GUI) | galculator |
+| `titan-time` | Time / date / timezone / network-time | gsimplecal (clock) |
+| `titan-backup` | Snapshot & restore your home folder | Timeshift (full system) |
+| `titan-apps` | List all built-in apps | — |
+| Firefox ESR | Web browser | firefox-esr |
+| Files / Editor / Archives | Everyday desktop apps | pcmanfm / mousepad / xarchiver |
+
 ## What's inside
 
 ```

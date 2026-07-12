@@ -1,0 +1,86 @@
+#!/bin/sh
+# titan-time — TitanOS time & date settings.
+# View the clock, change the timezone, and turn automatic network time
+# (NTP) on or off. Wraps timedatectl, falling back to `date` where needed.
+#
+# Usage:
+#   titan-time                 Show current date, time, timezone, NTP state.
+#   titan-time zones [FILTER]  List available timezones (optionally filtered).
+#   titan-time set-zone <TZ>   Set the timezone, e.g. Europe/London. (root)
+#   titan-time sync on|off     Enable/disable automatic network time.  (root)
+#   titan-time -h|--help       Show this help.
+set -eu
+
+usage() {
+	sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+need_root() {
+	if [ "$(id -u)" -ne 0 ]; then
+		echo "titan-time: changing the clock needs root; use sudo." >&2
+		exit 1
+	fi
+}
+
+# timedatectl must both exist AND actually work (it fails when systemd is not
+# the running init, e.g. inside a container), otherwise we fall back to `date`.
+have_tdctl() { command -v timedatectl >/dev/null 2>&1 && timedatectl >/dev/null 2>&1; }
+
+show() {
+	if have_tdctl; then
+		timedatectl
+	else
+		echo "Local time : $(date)"
+		echo "Timezone   : $(cat /etc/timezone 2>/dev/null || echo unknown)"
+		echo "Network time: use 'titan-time sync on' (needs systemd)"
+	fi
+}
+
+zones() {
+	filter="${1:-}"
+	if have_tdctl; then
+		if [ -n "$filter" ]; then
+			timedatectl list-timezones | grep -i "$filter" || echo "no timezone matches '$filter'"
+		else
+			timedatectl list-timezones
+		fi
+	else
+		# Fallback: enumerate the zoneinfo database.
+		base="/usr/share/zoneinfo"
+		find "$base" -type f 2>/dev/null | sed "s#$base/##" |
+			{ [ -n "$filter" ] && grep -i "$filter" || cat; }
+	fi
+}
+
+set_zone() {
+	tz="$1"
+	need_root
+	[ -f "/usr/share/zoneinfo/$tz" ] || { echo "titan-time: unknown timezone '$tz' (see: titan-time zones)" >&2; exit 2; }
+	if have_tdctl; then
+		timedatectl set-timezone "$tz"
+	else
+		ln -sf "/usr/share/zoneinfo/$tz" /etc/localtime
+		echo "$tz" >/etc/timezone
+	fi
+	echo "titan-time: timezone set to $tz."
+}
+
+sync() {
+	state="$1"
+	need_root
+	have_tdctl || { echo "titan-time: NTP control needs timedatectl." >&2; exit 1; }
+	case "$state" in
+	on) timedatectl set-ntp true; echo "titan-time: automatic network time ON." ;;
+	off) timedatectl set-ntp false; echo "titan-time: automatic network time OFF." ;;
+	*) echo "titan-time: sync takes 'on' or 'off'" >&2; exit 2 ;;
+	esac
+}
+
+case "${1:-show}" in
+show | "") show ;;
+zones) shift; zones "${1:-}" ;;
+set-zone) shift; [ $# -ge 1 ] || { echo "titan-time: set-zone needs a timezone" >&2; exit 2; }; set_zone "$1" ;;
+sync) shift; [ $# -ge 1 ] || { echo "titan-time: sync needs on|off" >&2; exit 2; }; sync "$1" ;;
+-h | --help) usage ;;
+*) echo "titan-time: unknown argument '$1'" >&2; usage >&2; exit 2 ;;
+esac

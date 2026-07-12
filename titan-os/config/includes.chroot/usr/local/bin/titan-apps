@@ -1,0 +1,39 @@
+#!/bin/sh
+# titan-apps — list the built-in TitanOS apps and tools, and show which are
+# available on this system.
+#
+# Usage:
+#   titan-apps            List all TitanOS apps with a one-line description.
+#   titan-apps -h|--help  Show this help.
+set -eu
+
+# name|description pairs for every built-in TitanOS command.
+APPS="
+titan-mode|Switch between gaming and dev modes
+titan-cap|Set the hard RAM ceiling for the OS
+titan-mem|Show OS memory usage vs. free RAM for games
+winstall|Install Windows setup.exe programs (Wine)
+titan-calc|Calculator (command line or GUI)
+titan-time|Time & date settings (timezone, network time)
+titan-backup|Back up and restore your home folder
+firefox-esr|Web browser
+timeshift|Full system snapshot/restore
+"
+
+case "${1:-}" in
+-h | --help)
+	echo "titan-apps — list the built-in TitanOS apps."
+	echo "Usage: titan-apps"
+	exit 0
+	;;
+"") : ;;
+*) echo "titan-apps: unknown argument '$1'" >&2; exit 2 ;;
+esac
+
+echo "TitanOS built-in apps:"
+printf '  %-14s %-45s %s\n' "APP" "DESCRIPTION" "STATUS"
+echo "$APPS" | while IFS='|' read -r name desc; do
+	[ -n "$name" ] || continue
+	if command -v "$name" >/dev/null 2>&1; then status="installed"; else status="not installed"; fi
+	printf '  %-14s %-45s %s\n' "$name" "$desc" "$status"
+done

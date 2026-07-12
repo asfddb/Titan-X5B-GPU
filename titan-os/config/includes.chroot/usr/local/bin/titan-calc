@@ -1,0 +1,57 @@
+#!/bin/sh
+# titan-calc — TitanOS calculator.
+# Evaluates a math expression on the command line, or opens the graphical
+# calculator (galculator) when run with `gui` on a desktop.
+#
+# Usage:
+#   titan-calc "2 + 2 * 3"     Print the result (=> 8).
+#   titan-calc 10 / 4          Bare expressions work too (=> 2.5).
+#   titan-calc gui             Open the graphical calculator.
+#   titan-calc -h|--help       Show this help.
+set -eu
+
+usage() {
+	sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+open_gui() {
+	if command -v galculator >/dev/null 2>&1; then
+		galculator >/dev/null 2>&1 &
+		echo "titan-calc: opened graphical calculator."
+	else
+		echo "titan-calc: galculator not installed; use 'titan-calc \"1+1\"'." >&2
+		exit 1
+	fi
+}
+
+calc() {
+	expr="$*"
+	[ -n "$expr" ] || { echo "titan-calc: nothing to calculate" >&2; exit 2; }
+
+	# Only allow arithmetic characters — this is what makes it safe to hand
+	# the expression to awk for evaluation. Strip every allowed character; if
+	# anything is left over, the input contains something we won't evaluate.
+	# (tr is used instead of a case-glob because ( ) inside a case bracket
+	# pattern is mis-parsed by dash.)
+	leftover="$(printf '%s' "$expr" | tr -d '0-9.+*/%^() -')"
+	if [ -n "$leftover" ]; then
+		echo "titan-calc: only numbers and + - * / % ^ ( ) are allowed" >&2
+		exit 2
+	fi
+
+	# awk does the floating-point math; %g trims trailing zeros.
+	result="$(awk "BEGIN { printf \"%g\", ($expr) }" 2>/dev/null || true)"
+	case "$result" in
+	"" | inf | -inf | nan)
+		echo "titan-calc: could not evaluate '$expr' (division by zero?)" >&2
+		exit 1
+		;;
+	esac
+	echo "$result"
+}
+
+case "${1:-}" in
+-h | --help | "") usage ;;
+gui) open_gui ;;
+*) calc "$@" ;;
+esac

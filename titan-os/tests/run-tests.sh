@@ -15,7 +15,8 @@ bad()  { echo "  FAIL $1" >&2; fails=$((fails + 1)); }
 echo "== 1. shellcheck (if available) =="
 if command -v shellcheck >/dev/null 2>&1; then
 	for f in build.sh tests/run-tests.sh "$BIN/titan-mode" "$BIN/winstall" "$BIN/titan-mem" \
-		"$BIN/titan-cap" config/hooks/normal/9000-titan-setup.hook.chroot; do
+		"$BIN/titan-cap" "$BIN/titan-calc" "$BIN/titan-time" "$BIN/titan-backup" \
+		"$BIN/titan-apps" config/hooks/normal/9000-titan-setup.hook.chroot; do
 		if shellcheck -s sh --severity=warning "$f" >/dev/null 2>&1; then ok "shellcheck $f"; else
 			shellcheck -s sh --severity=warning "$f" || true; bad "shellcheck $f"; fi
 	done
@@ -57,6 +58,35 @@ check_cap 24576 4915 "24 GB machine ~4.8 GB"
 check_cap 32768 5120 "32 GB machine ceils at 5 GB"
 sh "$BIN/titan-cap" show | grep -qi "ceiling" && ok "show prints ceiling" || bad "titan-cap show"
 if sh "$BIN/titan-cap" set >/dev/null 2>&1; then bad "set without size should fail"; else ok "set requires size"; fi
+
+echo "== 7. titan-calc (calculator) =="
+[ "$(sh "$BIN/titan-calc" '2 + 2 * 3')" = "8" ]  && ok "2+2*3 = 8"      || bad "calc precedence"
+[ "$(sh "$BIN/titan-calc" 10 / 4)" = "2.5" ]     && ok "10/4 = 2.5"     || bad "calc division"
+[ "$(sh "$BIN/titan-calc" '2 ^ 10')" = "1024" ]  && ok "2^10 = 1024"    || bad "calc power"
+if sh "$BIN/titan-calc" '2; rm -rf /' >/dev/null 2>&1; then bad "must reject non-math"; else ok "rejects unsafe input"; fi
+if sh "$BIN/titan-calc" '1 / 0' >/dev/null 2>&1; then bad "div-by-zero should fail"; else ok "handles div-by-zero"; fi
+
+echo "== 8. titan-time (time & date) =="
+sh "$BIN/titan-time" show | grep -qi "time\|zone" && ok "show prints clock/zone" || bad "time show"
+sh "$BIN/titan-time" --help | grep -qi "timezone" && ok "help mentions timezone" || bad "time help"
+if sh "$BIN/titan-time" bogus >/dev/null 2>&1; then bad "bad arg should fail"; else ok "rejects bad arg"; fi
+
+echo "== 9. titan-backup (backup app, sandboxed) =="
+bdir="$(mktemp -d)"
+export HOME="$bdir/home" TITAN_BACKUP_DIR="$bdir/home/Backups"
+mkdir -p "$HOME"; echo "hello" >"$HOME/notes.txt"
+sh "$BIN/titan-backup" now >/dev/null 2>&1 && ok "snapshot runs" || bad "backup now"
+snap="$(ls -1 "$TITAN_BACKUP_DIR" 2>/dev/null | head -1)"
+[ -n "$snap" ] && [ -f "$TITAN_BACKUP_DIR/$snap/notes.txt" ] && ok "snapshot contains files" || bad "snapshot contents"
+rm -f "$HOME/notes.txt"
+sh "$BIN/titan-backup" restore "$snap" >/dev/null 2>&1 && [ -f "$HOME/notes.txt" ] && ok "restore brings files back" || bad "backup restore"
+sh "$BIN/titan-backup" list | grep -q "$snap" && ok "list shows snapshot" || bad "backup list"
+rm -rf "$bdir"
+unset TITAN_BACKUP_DIR
+
+echo "== 10. titan-apps (launcher) =="
+sh "$BIN/titan-apps" | grep -q "titan-calc" && ok "lists titan-calc" || bad "apps list"
+sh "$BIN/titan-apps" | grep -qi "STATUS"     && ok "shows status column" || bad "apps status"
 
 echo
 if [ "$fails" -eq 0 ]; then echo "ALL TESTS PASSED"; else echo "$fails TEST(S) FAILED" >&2; exit 1; fi

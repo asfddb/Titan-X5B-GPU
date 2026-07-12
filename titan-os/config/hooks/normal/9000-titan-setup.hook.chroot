@@ -8,8 +8,7 @@ mkdir -p /var/lib/titan
 echo "dev" >/var/lib/titan/mode
 
 # Make the TitanOS tools executable regardless of how git tracked them.
-chmod +x /usr/local/bin/titan-mode /usr/local/bin/winstall \
-	/usr/local/bin/titan-mem /usr/local/bin/titan-cap 2>/dev/null || true
+chmod +x /usr/local/bin/titan-* /usr/local/bin/winstall 2>/dev/null || true
 
 # Enable the low-RAM zram swap so it is active from the very first boot.
 systemctl enable zramswap.service 2>/dev/null || true

@@ -29,6 +29,12 @@ lightdm
 # --- browser (ESR = lighter, long-term support) ---
 firefox-esr
 
+# --- lightweight built-in GUI apps (backends for the titan-* tools) ---
+galculator
+gsimplecal
+xarchiver
+mousepad
+
 # --- backup / restore apps ---
 timeshift
 rsync

@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TitanOS Openbox menu — right-click the desktop to reach the built-in apps. -->
+<openbox_menu xmlns="http://openbox.org/3.4/menu">
+  <menu id="titan-apps-menu" label="TitanOS Apps">
+    <item label="Web Browser">
+      <action name="Execute"><command>firefox-esr</command></action>
+    </item>
+    <item label="Calculator">
+      <action name="Execute"><command>titan-calc gui</command></action>
+    </item>
+    <item label="Clock / Calendar">
+      <action name="Execute"><command>gsimplecal</command></action>
+    </item>
+    <item label="Text Editor">
+      <action name="Execute"><command>mousepad</command></action>
+    </item>
+    <item label="Files">
+      <action name="Execute"><command>pcmanfm</command></action>
+    </item>
+    <item label="Archive Manager">
+      <action name="Execute"><command>xarchiver</command></action>
+    </item>
+    <item label="Backups (Home)">
+      <action name="Execute"><command>lxterminal -e titan-backup list</command></action>
+    </item>
+    <item label="System Snapshots (Timeshift)">
+      <action name="Execute"><command>timeshift-gtk</command></action>
+    </item>
+  </menu>
+
+  <menu id="titan-system-menu" label="TitanOS System">
+    <item label="Gaming Mode">
+      <action name="Execute"><command>lxterminal -e sudo titan-mode gaming</command></action>
+    </item>
+    <item label="Dev Mode">
+      <action name="Execute"><command>lxterminal -e sudo titan-mode dev</command></action>
+    </item>
+    <item label="Time &amp; Date Settings">
+      <action name="Execute"><command>lxterminal -e titan-time</command></action>
+    </item>
+    <item label="Memory / RAM Cap">
+      <action name="Execute"><command>lxterminal -e titan-mem</command></action>
+    </item>
+  </menu>
+
+  <menu id="root-menu" label="TitanOS">
+    <menu id="titan-apps-menu"/>
+    <menu id="titan-system-menu"/>
+    <separator/>
+    <item label="Terminal">
+      <action name="Execute"><command>lxterminal</command></action>
+    </item>
+    <separator/>
+    <item label="Reconfigure Openbox">
+      <action name="Reconfigure"/>
+    </item>
+    <item label="Log Out">
+      <action name="Exit"><prompt>yes</prompt></action>
+    </item>
+  </menu>
+</openbox_menu>
