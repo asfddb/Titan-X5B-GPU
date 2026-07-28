@@ -15,7 +15,11 @@
 module titan_x5_gpu_top #(
     parameter VGA_H_VISIBLE = 12'd1920,
     parameter VGA_V_VISIBLE = 12'd1080,
-    parameter ENABLE_TENSOR = 1 // 0 strips per-lane WMMA arrays (FPGA fit)
+    parameter ENABLE_TENSOR = 1, // 0 strips per-lane WMMA arrays (FPGA fit)
+    // Kernel entry. KERNEL_ENTRY_PC is an instruction *index*; the fetch
+    // byte address is KERNEL_CODE_BASE + pc*4 (see titan_x5_pc_unit).
+    parameter [31:0] KERNEL_CODE_BASE = 32'h0000_0000,
+    parameter [31:0] KERNEL_ENTRY_PC  = 32'h0000_0000
 ) (
     input  wire        clk,
     input  wire        mem_clk,
@@ -100,6 +104,29 @@ module titan_x5_gpu_top #(
     // helper wires for modules
     wire [31:0] sm_icache_addr [0:3];
     wire [3:0]  sm_icache_req;
+
+    // ---- kernel launch ----------------------------------------------------
+    // One-shot launch pulse the cycle after reset is released: every warp of
+    // every SM starts at KERNEL_ENTRY_PC. A real command processor would
+    // drive this per dispatch; this keeps the existing boot behaviour (SMs
+    // run as soon as the chip comes out of reset) while giving the warps
+    // genuine PCs instead of a hardwired zero.
+    reg  sm_launch_valid;
+    reg  launch_done;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            sm_launch_valid <= 1'b0;
+            launch_done     <= 1'b0;
+        end else begin
+            sm_launch_valid <= !launch_done;
+            launch_done     <= 1'b1;
+        end
+    end
+
+    wire [7:0] sm_warp_active [0:3];
+    wire [3:0] sm_all_retired;
+    // Kernel is complete when every SM has retired all of its warps.
+    wire       kernel_complete = &sm_all_retired;
 
     // SM L1 D-cache coherent fabric (MESI): 4 SM L1s <-> coherent xbar <-> L2
     localparam CXB_LINE = 128;
@@ -334,7 +361,19 @@ module titan_x5_gpu_top #(
                 .shader_wb_valid(sm_shader_wb_valid[gi]),
                 .shader_wb_reg(sm_shader_wb_reg[gi]),
                 .shader_wb_data(sm_shader_wb_data[gi]),
-                .warp_active      (8'hFF), .warp_pc_in(256'h0)
+                // Kernel launch. Previously this read
+                //   .warp_active(8'hFF), .warp_pc_in(256'h0)
+                // which hardwired every warp's PC to zero from outside the
+                // SM: no warp could advance past instruction 0, branches
+                // were decoded and discarded, and a kernel could not
+                // terminate. The SM now owns its PCs (titan_x5_pc_unit) and
+                // is launched once, out of reset, at the kernel entry point.
+                .launch_valid     (sm_launch_valid),
+                .launch_mask      (8'hFF),
+                .launch_pc        (KERNEL_ENTRY_PC),
+                .code_base        (KERNEL_CODE_BASE),
+                .warp_active      (sm_warp_active[gi]),
+                .all_retired      (sm_all_retired[gi])
             );
         end
     endgenerate

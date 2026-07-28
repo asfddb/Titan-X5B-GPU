@@ -73,7 +73,18 @@ module tb_titan_x5_gpu_top();
     wire        vga_de;
 
     // DUT
-    titan_x5_gpu_top #(.VGA_H_VISIBLE(FB_STRIDE)) dut (
+    // Kernel code lives 2 MiB into VRAM. It used to sit at address 0, where
+    // it aliased framebuffer pixel (0,0) and forced the checker to special-
+    // case that pixel. A multi-instruction program would have aliased
+    // (1,0)..(3,0) as well -- all outside the triangle's bounding box, so
+    // they would have been miscounted as "rasterizer drew out of bounds".
+    // Relocating the code removes the aliasing entirely and lets the check
+    // cover the whole framebuffer.
+    localparam [31:0] CODE_BASE = 32'h0020_0000;
+
+    titan_x5_gpu_top #(.VGA_H_VISIBLE(FB_STRIDE),
+                       .KERNEL_CODE_BASE(CODE_BASE),
+                       .KERNEL_ENTRY_PC(32'd0)) dut (
         .clk           (clk),
         .mem_clk       (mem_clk),
         .pclk          (pclk),
@@ -294,10 +305,30 @@ module tb_titan_x5_gpu_top();
         host_ring_base = RING_BASE;
         host_ring_wptr = 32'h0;
 
-        // Initialize Shader instruction at PC=0x0
-        // ADD R63, R2, 0 (32'h07E10001)
-        write_vram_word(32'h0000_0000, 32'h07E10001);
-        
+        // ---- shader program ------------------------------------------------
+        // This used to be a SINGLE instruction that every warp re-executed
+        // forever, because titan_x5_gpu_top hardwired every PC to zero. The
+        // SM now owns its program counters (titan_x5_pc_unit), so this is a
+        // real program with real control flow that terminates:
+        //
+        //   0: ADD  R63, R2, #0     export the per-thread gradient colour
+        //   1: BRANCH #3            unconditional jump over instruction 2
+        //   2: ADD  R63, R4, #0     POISON - must never execute
+        //   3: BARRIER #0xFFF       EXIT - retire the warp
+        //
+        // Instruction 2 is a deliberate trap. R4 holds 0x0000FF00 in every
+        // lane, so if the branch at 1 is not taken -- or if the wrong-path
+        // squash fails to kill an instruction already fetched behind it --
+        // the exported colour becomes a uniform 0x0000FF00 instead of the
+        // per-thread gradient. The framebuffer check below detects exactly
+        // that, so "the branch worked" is verified by the rendered image
+        // rather than merely asserted.
+        write_vram_word(CODE_BASE + 32'd0,  32'h07E10001); // ADD R63,R2,#0
+        write_vram_word(CODE_BASE + 32'd4,  32'hC0000019); // BRANCH #3
+        write_vram_word(CODE_BASE + 32'd8,  32'h07E20001); // ADD R63,R4,#0 (poison)
+        write_vram_word(CODE_BASE + 32'd12, 32'hC8007FF9); // BARRIER #0xFFF (EXIT)
+
+
         // Prepare per-thread gradient colors for R2 (deposited into the RF
         // after reset below — the register file zeroes itself while rst_n
         // is low, so a time-0 deposit would be wiped at the first clk edge)
@@ -395,24 +426,42 @@ module tb_titan_x5_gpu_top();
             reg [31:0] pixel;
             integer pixels_drawn;
             integer oob_pixels;
+            integer poison_pixels;
+            reg [31:0] first_color;
+            integer distinct_colors_seen;
 
             pixels_drawn = 0;
             oob_pixels = 0;
+            poison_pixels = 0;
+            first_color = 32'h0;
+            distinct_colors_seen = 0;
 
+            // The whole 64x64 region is now checked. Pixel (0,0) no longer
+            // needs an exemption: the kernel was relocated to CODE_BASE
+            // (2 MiB in), so no instruction aliases the framebuffer.
             for (px_y = 0; px_y < 64; px_y = px_y + 1) begin
                 for (px_x = 0; px_x < 64; px_x = px_x + 1) begin
-                    // Pixel (0,0) shares VRAM bytes 0-3 with the shader
-                    // instruction at PC=0 (the SMs boot from address 0);
-                    // it is code, not rasterizer output, so skip it.
-                    if (px_x != 0 || px_y != 0) begin
-                        pixel = get_pixel(px_x, px_y);
-                        if (pixel != 0) begin
-                            pixels_drawn = pixels_drawn + 1;
-                            // Bounding box of triangle is X: 16-36, Y: 16-32
-                            if (px_x < 16 || px_x > 36 || px_y < 16 || px_y > 32) begin
-                                oob_pixels = oob_pixels + 1;
-                                $display("  OOB pixel at (%0d,%0d) = %08x", px_x, px_y, pixel);
-                            end
+                    pixel = get_pixel(px_x, px_y);
+                    if (pixel != 0) begin
+                        pixels_drawn = pixels_drawn + 1;
+                        // Bounding box of triangle is X: 16-36, Y: 16-32
+                        if (px_x < 16 || px_x > 36 || px_y < 16 || px_y > 32) begin
+                            oob_pixels = oob_pixels + 1;
+                            $display("  OOB pixel at (%0d,%0d) = %08x", px_x, px_y, pixel);
+                        end
+                        // Control-flow proof: R4 (0x0000FF00) is only ever
+                        // exported by the wrong-path instruction at index 2.
+                        // The gradient always has alpha 0xFF, so it can never
+                        // collide with this value.
+                        if (pixel == 32'h0000_FF00) begin
+                            poison_pixels = poison_pixels + 1;
+                        end
+                        if (first_color == 32'h0) begin
+                            first_color = pixel;
+                            distinct_colors_seen = 1;
+                        end else if (pixel != first_color &&
+                                     distinct_colors_seen < 2) begin
+                            distinct_colors_seen = 2;
                         end
                     end
                 end
@@ -429,7 +478,28 @@ module tb_titan_x5_gpu_top();
             $display("Coverage Metrics:");
             $display("  Pixels Drawn inside Bounding Box: %0d", pixels_drawn - oob_pixels);
             $display("  Pixels Drawn OUTSIDE Bounding Box: %0d", oob_pixels);
-            
+            $display("Control-flow proof:");
+            $display("  Wrong-path (poison) pixels: %0d", poison_pixels);
+            $display("  Distinct shader colours:    %0d", distinct_colors_seen);
+            $display("  All warps retired (SM0):    %0b",
+                     dut.sm_gen[0].u_sm.all_retired);
+
+            if (poison_pixels > 0) begin
+                $display("==================================================");
+                $fatal(1, "  FATAL: wrong-path instruction executed -- the BRANCH at index 1 did not take, or the squash failed.");
+                $display("==================================================");
+            end
+            if (pixels_drawn > 0 && distinct_colors_seen < 2) begin
+                $display("==================================================");
+                $fatal(1, "  FATAL: shader exported a uniform colour -- expected a per-thread gradient.");
+                $display("==================================================");
+            end
+            if (!dut.sm_gen[0].u_sm.all_retired) begin
+                $display("==================================================");
+                $fatal(1, "  FATAL: warps never retired -- EXIT (BARRIER #0xFFF) did not terminate the kernel.");
+                $display("==================================================");
+            end
+
             if (pixels_drawn == 0) begin
                 $display("==================================================");
                 $fatal(1, "  FATAL ERROR: Framebuffer is completely empty!   ");

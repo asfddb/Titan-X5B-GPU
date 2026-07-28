@@ -8,21 +8,40 @@
 // ============================================================================
 `timescale 1ns/1ps
 
-module titan_x5_pipeline (
+module titan_x5_pipeline #(
+    parameter NUM_WARPS = 8
+)(
     input  wire clk,
     input  wire rst_n,
     
     // interface with warp scheduler
     input wire [2:0] sched_warp_id,
     input  wire        sched_valid,
-    input wire [31:0] sched_pc,
-    
+    input wire [31:0] sched_pc,   // instruction INDEX of the selected warp
+
     // instruction cache / memory interface
+    // Base byte address of the kernel's code segment. sched_pc is an
+    // instruction index (see titan_x5_pc_unit), so the fetch address is
+    // code_base + pc*4 -- the same mapping the functional model uses
+    // (`vram_rd32(gpu, code_addr + pc * 4)`).
+    input wire [31:0] code_base,
     output wire [31:0] if_pc,
     output wire        if_req,
     input  wire        if_gnt,   // fetch accepted by the interconnect
     input wire [31:0] if_inst,
     input  wire        if_inst_valid,
+
+    // ---- control flow, back to titan_x5_pc_unit -------------------------
+    // A fetch was accepted: the PC unit advances that warp (pc + 1).
+    output wire        pc_fetch_accept,
+    output wire [2:0]  pc_fetch_warp,
+    // Taken branch: redirect the warp to an absolute instruction index.
+    output wire        pc_redirect_valid,
+    output wire [2:0]  pc_redirect_warp,
+    output wire [31:0] pc_redirect_pc,
+    // EXIT (BARRIER with use_imm && imm == 0xFFF): retire the warp.
+    output wire        pc_retire_valid,
+    output wire [2:0]  pc_retire_warp,
     
     // register file interface
     output wire [5:0] rf_rd_addr1,
@@ -73,22 +92,56 @@ module titan_x5_pipeline (
 
     // if stage
     reg [2:0]  if_warp;
+    reg        if_epoch;   // control-flow epoch of the in-flight fetch
     reg        if_pending; // fetch accepted, response not yet returned
 
-    assign if_pc = sched_pc;
+    // sched_pc is an instruction index; the memory sees a byte address.
+    assign if_pc = code_base + {sched_pc[29:0], 2'b00};
     // Allow only one outstanding fetch. Without this the request line is
     // held high and the crossbar re-accepts it every cycle, flooding the
     // memory controller with duplicate reads and starving every other
     // master (command processor, ROP) of the shared memory port.
     assign if_req = sched_valid && !if_pending;
 
+    // Every accepted fetch advances that warp's PC by one instruction.
+    assign pc_fetch_accept = if_req && if_gnt;
+    assign pc_fetch_warp   = sched_warp_id;
+
+    // ---- control-flow epochs (wrong-path squash) --------------------------
+    // A taken branch is resolved in ID, by which time instructions fetched
+    // sequentially *after* the branch are already in flight or sitting in the
+    // instruction FIFO. Those are wrong-path and must not execute.
+    //
+    // Rather than surgically removing entries from the middle of a circular
+    // FIFO, each warp carries a 1-bit epoch that toggles on redirect. A fetch
+    // is tagged with its warp's epoch at accept; on pop, an entry whose epoch
+    // no longer matches its warp's current epoch is discarded.
+    //
+    // One bit suffices *only because there is a single outstanding fetch per
+    // SM*, which keeps FIFO push order equal to fetch-accept order. All stale
+    // entries of a warp therefore precede its first fresh entry and are
+    // discarded before a second redirect can occur, so the epoch cannot
+    // alias (ABA). Widening to multiple outstanding fetches (roadmap Phase 2)
+    // requires widening this counter too.
+    reg [NUM_WARPS-1:0] warp_epoch;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            warp_epoch <= {NUM_WARPS{1'b0}};
+        end else if (pc_redirect_valid) begin
+            warp_epoch[pc_redirect_warp] <= ~warp_epoch[pc_redirect_warp];
+        end
+    end
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             if_warp <= 0;
+            if_epoch <= 1'b0;
             if_pending <= 0;
         end else begin
             if (if_req && if_gnt) begin
                 if_warp <= sched_warp_id; // tag the in-flight fetch's warp
+                if_epoch <= warp_epoch[sched_warp_id];
                 if_pending <= 1'b1;
             end else if (if_inst_valid) begin
                 if_pending <= 1'b0;
@@ -99,10 +152,11 @@ module titan_x5_pipeline (
     // instruction fifo (8 entries)
     reg [2:0]  fifo_warp [0:7];
     reg [31:0] fifo_inst [0:7];
+    reg        fifo_epoch [0:7];
     reg [3:0]  fifo_wp;
     reg [3:0]  fifo_rp;
     reg [3:0]  fifo_count;
-    
+
     wire id_ready;
     assign fifo_full = (fifo_count == 8);
     wire fifo_empty = (fifo_count == 0);
@@ -113,6 +167,7 @@ module titan_x5_pipeline (
         if (fifo_push) begin
             fifo_warp[fifo_wp[2:0]] <= if_warp;
             fifo_inst[fifo_wp[2:0]] <= if_inst;
+            fifo_epoch[fifo_wp[2:0]] <= if_epoch;
         end
     end
 
@@ -140,7 +195,13 @@ module titan_x5_pipeline (
     // happens to clear it).
     wire [31:0] id_inst_raw = fifo_empty ? 32'd0 : fifo_inst[fifo_rp[2:0]];
     wire [2:0]  id_warp_raw = fifo_warp[fifo_rp[2:0]];
-    wire        id_inst_valid_raw = !fifo_empty;
+
+    // Wrong-path: the entry was fetched under a control-flow epoch its warp
+    // has since left. It is popped (to free the slot) but never executed and
+    // never allowed to redirect or retire.
+    wire        id_stale = !fifo_empty &&
+                           (fifo_epoch[fifo_rp[2:0]] != warp_epoch[id_warp_raw]);
+    wire        id_inst_valid_raw = !fifo_empty && !id_stale;
 
     // id stage
     wire [4:0]  dec_opcode;
@@ -148,7 +209,7 @@ module titan_x5_pipeline (
     wire [15:0] dec_imm;
     wire        dec_use_imm, dec_is_branch, dec_is_load, dec_is_store, dec_is_alu, dec_is_valid;
     
-    wire        dec_is_wmma;
+    wire        dec_is_wmma, dec_is_barrier;
     titan_x5_decoder decoder_inst (
         .inst(id_inst_raw),
         .opcode(dec_opcode),
@@ -163,8 +224,34 @@ module titan_x5_pipeline (
         .is_mem_store(dec_is_store),
         .is_alu(dec_is_alu),
         .is_valid(dec_is_valid),
-        .is_wmma(dec_is_wmma)
+        .is_wmma(dec_is_wmma),
+        .is_barrier(dec_is_barrier)
     );
+
+    // ---- control-flow resolution (ID stage) -------------------------------
+    // BRANCH and BARRIER are neither ALU nor memory ops (is_alu covers
+    // opcodes <= 21), so they never launch into EX; they retire here, at the
+    // point the instruction is popped from the FIFO.
+    //
+    // Only a non-stale pop may steer control flow -- a wrong-path branch must
+    // not redirect the warp that already branched away from it.
+    wire id_commit = fifo_pop && id_inst_valid_raw;
+
+    // TX6_OP_BRANCH: pc = imm (absolute instruction index).
+    // Predicated branches (pred != 0) additionally require SETP and the
+    // predicate registers, which the pipeline does not implement yet; the
+    // decoder exposes is_predicated/pred_reg but nothing consumes them.
+    // Until then every branch is unconditional, matching P0 = "always".
+    assign pc_redirect_valid = id_commit && dec_is_branch;
+    assign pc_redirect_warp  = id_warp_raw;
+    assign pc_redirect_pc    = {16'd0, dec_imm};
+
+    // TX6_OP_BARRIER with use_imm && imm == 0xFFF is EXIT (TX6_EXIT_IMM):
+    // the warp retires and stops being scheduled. A plain BARRIER (without
+    // that immediate) is thread synchronisation, not termination.
+    assign pc_retire_valid = id_commit && dec_is_barrier && dec_use_imm &&
+                             (dec_imm == 16'h0FFF);
+    assign pc_retire_warp  = id_warp_raw;
 
     assign rf_rd_addr1 = dec_rs1;
     assign rf_rd_addr2 = dec_rs2;
@@ -229,7 +316,26 @@ module titan_x5_pipeline (
         end
     end
 
-    assign id_valid_out = id_valid_reg;
+    // Scoreboard *set* must match scoreboard *clear*, or a warp deadlocks.
+    //
+    // The scheduler sets scoreboard[warp][id_dest_reg_out] whenever
+    // id_valid_out is high, and clears it on writeback. Only instructions
+    // that reach EX ever produce a writeback (see ex_launch below), so
+    // asserting this for a non-executing instruction sets a scoreboard bit
+    // that is never cleared.
+    //
+    // BRANCH and BARRIER are exactly such instructions, and both carry
+    // rd == 0. Once control flow became real, every warp executed a BRANCH,
+    // permanently setting scoreboard[warp][0]. The hazard check reads
+    // scoreboard[warp][id_src_reg1], and an *empty* instruction FIFO decodes
+    // as all-zeros -> src1 = 0 -> a permanent hazard on every warp. The SM
+    // stalled forever with warp_stalled = 8'hFF and stopped fetching.
+    //
+    // rd == 0 is additionally excluded: the forwarding network already
+    // treats register 0 as carrying no dependency (every fwd_* term has a
+    // `!= 0` guard), so tracking a hazard on it would be inconsistent.
+    assign id_valid_out = id_valid_reg && (id_rd != 6'd0) &&
+                          (id_is_alu || id_is_load || id_is_store || id_is_wmma);
     assign id_warp_out = id_warp_reg;
     assign id_dest_reg_out = id_rd;
 

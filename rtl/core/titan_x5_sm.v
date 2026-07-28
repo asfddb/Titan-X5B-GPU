@@ -58,9 +58,16 @@ module titan_x5_sm #(
     output wire [1023:0] shader_wb_data,
 
 
-    // thread/warp control
-    input wire [NUM_WARPS-1:0] warp_active,
-    input wire [NUM_WARPS*32-1:0] warp_pc_in
+    // ---- kernel launch --------------------------------------------------
+    // The SM owns its program counters (titan_x5_pc_unit). Launch activates
+    // the selected warps at launch_pc; from then on control flow is driven
+    // by the pipeline's branch/EXIT resolution, not from outside.
+    input  wire                   launch_valid,
+    input  wire [NUM_WARPS-1:0]   launch_mask,
+    input  wire [31:0]            launch_pc,     // instruction index
+    input  wire [31:0]            code_base,     // byte address of code segment
+    output wire [NUM_WARPS-1:0]   warp_active,
+    output wire                   all_retired
 );
 
     wire [2:0]  sched_warp_id;
@@ -87,13 +94,44 @@ module titan_x5_sm #(
     wire [2:0]  lsu_mask_query_id;
     wire [31:0] lsu_mask_query_mask;
 
+    // ---- program counters -------------------------------------------------
+    wire [NUM_WARPS*32-1:0] warp_pc_bus;
+    wire                    pc_fetch_accept;
+    wire [2:0]              pc_fetch_warp;
+    wire                    pc_redirect_valid;
+    wire [2:0]              pc_redirect_warp;
+    wire [31:0]             pc_redirect_pc;
+    wire                    pc_retire_valid;
+    wire [2:0]              pc_retire_warp;
+
+    titan_x5_pc_unit #(
+        .NUM_WARPS(NUM_WARPS),
+        .WARP_ID_W(3)
+    ) pc_unit (
+        .clk(clk),
+        .rst_n(rst_n),
+        .launch_valid(launch_valid),
+        .launch_mask(launch_mask),
+        .launch_pc(launch_pc),
+        .fetch_accept(pc_fetch_accept),
+        .fetch_warp(pc_fetch_warp),
+        .redirect_valid(pc_redirect_valid),
+        .redirect_warp(pc_redirect_warp),
+        .redirect_pc(pc_redirect_pc),
+        .retire_valid(pc_retire_valid),
+        .retire_warp(pc_retire_warp),
+        .warp_pc(warp_pc_bus),
+        .warp_active(warp_active),
+        .all_retired(all_retired)
+    );
+
     titan_x5_warp_scheduler #(
         .NUM_WARPS(NUM_WARPS)
     ) warp_sched (
         .clk(clk),
         .rst_n(rst_n),
         .warp_active(warp_active),
-        .warp_pc(warp_pc_in),
+        .warp_pc(warp_pc_bus),
         .wb_valid(wb_valid),
         .wb_warp_id(wb_warp_id),
         .wb_reg(wb_dest_reg),
@@ -234,12 +272,22 @@ module titan_x5_sm #(
         .dbg_mesi(dbg_mesi_state)
     );
 
-    titan_x5_pipeline pipeline_inst (
+    titan_x5_pipeline #(
+        .NUM_WARPS(NUM_WARPS)
+    ) pipeline_inst (
         .clk(clk),
         .rst_n(rst_n),
         .sched_warp_id(sched_warp_id),
         .sched_valid(sched_valid),
         .sched_pc(sched_pc),
+        .code_base(code_base),
+        .pc_fetch_accept(pc_fetch_accept),
+        .pc_fetch_warp(pc_fetch_warp),
+        .pc_redirect_valid(pc_redirect_valid),
+        .pc_redirect_warp(pc_redirect_warp),
+        .pc_redirect_pc(pc_redirect_pc),
+        .pc_retire_valid(pc_retire_valid),
+        .pc_retire_warp(pc_retire_warp),
         .if_pc(l1_icache_addr),
         .if_req(l1_icache_req),
         .if_gnt(l1_icache_gnt),

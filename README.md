@@ -44,6 +44,10 @@ By the numbers (all countable from this repo):
 
 **Compute**
 - SIMT streaming multiprocessor (`rtl/core/`) — ALU, decoder, pipeline with forwarding, register file, warp scheduler
+- Per-warp program counters (`rtl/core/titan_x5_pc_unit.v`) — sequencing, absolute-index
+  branches with wrong-path squash, and `EXIT` warp retire. The full-chip test runs a real
+  multi-instruction program, not a single instruction on repeat
+  (see [roadmap](docs/ROADMAP_REAL_HARDWARE.md))
 - IEEE-754 floating point (`rtl/fpu/`) — FP32 add / multiply / fused-multiply-add
 - Scaled top (`rtl/titan_x6_gpu_top.v`) parameterized up to 64 SMs
 
@@ -164,6 +168,10 @@ I want this to be judged as real engineering, so here's the straight story:
 - **Each "SM" is a simplified core** compared to a real GPU SM. The 64-SM figure is the parameterized
   top-level configuration, not silicon.
 - **The full GPU has not been placed & routed as one chip** — individual blocks have (FMA, tensor array).
+- **No instruction cache, and one outstanding fetch per SM.** Control flow works, but
+  instruction supply is slow; this is the next bottleneck (roadmap Phase 2).
+- **Branches are unconditional only.** Predicated branches need `SETP` and predicate
+  registers, which the pipeline does not implement yet.
 - Parts of this were built with AI assistance; the goal was to understand GPU architecture end-to-end.
 
 Its honest peer group is open-source research GPUs like **MIAOW**, **Vortex**, and **Nyuzi** —

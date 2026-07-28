@@ -97,7 +97,7 @@ tractable than what has already been built.
 Each phase states its exit gate as a runnable command. Effort estimates assume
 one person working part-time and are deliberately conservative.
 
-### Phase 0 — Make the baseline reproducible *(small)*
+### Phase 0 — Make the baseline reproducible ✅ *(done)*
 
 The verification story is only worth as much as its reproducibility.
 
@@ -136,7 +136,7 @@ Neither is suppressed here. Labelling the generate blocks and resolving the
 reset-domain inconsistency should land before the CI lint job is moved to a
 Verilator 5 image.
 
-### Phase 1 — Program execution: per-warp PC, branches, EXIT *(the unlock)*
+### Phase 1 — Program execution: per-warp PC, branches, EXIT ✅ *(done)*
 
 Move the PC **into** the SM and make control flow real.
 
@@ -184,28 +184,58 @@ Also fixed en route: `sched_pc`/`sched_active_mask` in
 while being addressed with warp B's PC. Unobservable while every PC was the
 same constant; fatal the moment per-warp PCs differ. Now combinational.
 
-**Step 2 of 2 — remaining: integration.** Wiring the PC unit into
-`titan_x5_sm.v` / `titan_x5_gpu_top.v` requires the full-chip testbench to
-change at the same time, and that is why it is deliberately a separate step:
+**Step 2 of 2 — done. The GPU now runs a real program.**
 
-`tb/tb_titan_x5_gpu_top.v:299` installs exactly **one** instruction
-(`write_vram_word(32'h0000_0000, 32'h07E10001)`) and the render test depends on
-all 32 lanes re-executing it forever. Once PCs advance, warps walk off into
-zero-filled VRAM. So integration means:
+`titan_x5_pc_unit` is wired into `titan_x5_sm.v`; `titan_x5_gpu_top.v` no
+longer contains `.warp_pc_in(256'h0)`. The pipeline consumes `dec_is_branch`
+to redirect, detects `BARRIER`+`use_imm`+`0xFFF` to retire, forms the fetch
+address as `code_base + pc*4`, and squashes wrong-path instructions with a
+per-warp control-flow **epoch**: each fetch is tagged with its warp's epoch,
+the epoch toggles on redirect, and an entry whose epoch no longer matches is
+popped but never executed. One bit suffices only because there is a single
+outstanding fetch per SM (Phase 2 must widen it).
 
-1. consume `dec_is_branch` in `titan_x5_pipeline.v` and drive `redirect_*`;
-2. detect `TX6_OP_BARRIER` + `use_imm` + `imm == 0xFFF` and drive `retire_*`;
-3. flush the in-flight fetch and any FIFO entries of a redirected warp, so a
-   wrong-path instruction cannot reach EX;
-4. form the fetch byte address as `code_base + pc*4` (index → address);
-5. **rewrite the TB shader as a real program that ends in EXIT**, reproducing
-   the same 181-pixel gradient triangle — which then becomes a far stronger
-   result than the current one, because it proves real control flow.
+The full-chip testbench now runs a genuine program instead of one instruction:
 
-Predicated branches (`pred != 0`) additionally need `SETP` and predicate
-registers, which the pipeline does not implement yet — the decoder exposes
-`is_predicated`/`pred_reg` but `titan_x5_pipeline.v` does not connect them.
-That is Phase 4 work; Phase 1 covers unconditional branch and EXIT.
+```
+0: ADD    R63, R2, #0     export the per-thread gradient colour
+1: BRANCH #3              unconditional jump over instruction 2
+2: ADD    R63, R4, #0     POISON - must never execute
+3: BARRIER #0xFFF         EXIT - retire the warp
+```
+
+Instruction 2 is a trap: R4 holds `0x0000FF00` in every lane, so if the branch
+does not take — or the squash fails — the rendered triangle turns a uniform
+colour instead of a gradient. **Control flow is therefore verified by the
+rendered image, not merely asserted.** The kernel was also relocated to 2 MiB
+(`KERNEL_CODE_BASE`), which removes the old aliasing between code at address 0
+and framebuffer pixel (0,0); the checker no longer needs to exempt that pixel
+and now covers the whole 64×64 region.
+
+Result: same 181 pixels, 0 out of bounds, 0 poison pixels, all warps retired,
+in **9,009 cycles instead of 14,009** — 36% fewer, because warps now terminate
+instead of spinning on instruction 0 forever.
+
+Mutation-tested end to end; each injected defect is caught by the image:
+
+| Injected defect | Detected as |
+|:--|:--|
+| branch redirect disabled | 181/181 poison pixels, 1 distinct colour → FATAL |
+| EXIT retire disabled | render still passes, but `all_retired == 0` → FATAL |
+
+One more latent bug had to be fixed to get here. The scheduler sets
+`scoreboard[warp][id_dest_reg]` for *any* valid instruction but clears it only
+on writeback, and only instructions reaching EX ever write back. BRANCH and
+BARRIER do neither, and both carry `rd == 0`. The moment control flow became
+real, every warp executed a BRANCH, permanently setting `scoreboard[warp][0]`;
+an empty instruction FIFO decodes as all-zeros, so `src1 = 0` then matched that
+stuck bit and **every warp stalled forever** (`warp_stalled = 8'hFF`, fetch
+dead). `id_valid_out` in `titan_x5_pipeline.v` is now gated on the instruction
+actually reaching EX and on `rd != 0`, so set and clear are balanced.
+
+Predicated branches (`pred != 0`) still need `SETP` and predicate registers —
+the decoder exposes `is_predicated`/`pred_reg` but the pipeline does not
+connect them. That is Phase 4; Phase 1 covers unconditional branch and EXIT.
 
 ### Phase 2 — Instruction supply *(medium)*
 
