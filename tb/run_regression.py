@@ -132,6 +132,25 @@ SUITES = {
         toplevel="tb_pc_unit_top",
         module="test_pc_unit",
     ),
+    # Same DUT and same test at both memory-path beat widths. 32 bits is the
+    # current design (32 beats per 128-byte line); 512 bits is the wide path
+    # (2 beats). Running both proves the module is genuinely width-generic.
+    "l2adapt32": dict(
+        sources=[os.path.join(TB, "tb_l2_adapter_top.v")] + rtl_files(
+            "memory/titan_x5_l2_mem_adapter.v",
+        ),
+        toplevel="tb_l2_adapter_top",
+        module="test_l2_adapter",
+        parameters={"DW": 32},
+    ),
+    "l2adapt512": dict(
+        sources=[os.path.join(TB, "tb_l2_adapter_top.v")] + rtl_files(
+            "memory/titan_x5_l2_mem_adapter.v",
+        ),
+        toplevel="tb_l2_adapter_top",
+        module="test_l2_adapter",
+        parameters={"DW": 512},
+    ),
 }
 
 
@@ -181,6 +200,7 @@ def run_suite(name, cfg):
         build_args=["-g2012"],
         build_dir=build_dir,
         always=True,
+        parameters=cfg.get("parameters", {}),
     )
     runner.test(
         hdl_toplevel=cfg["toplevel"],

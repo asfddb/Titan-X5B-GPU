@@ -94,6 +94,83 @@ tag array is a small fraction of a cache dominated by data storage.
 
 ---
 
+## 2b. The 512-bit memory path
+
+Widths across the design, as declared:
+
+| Already ≥512-bit | Narrow |
+|:--|:--|
+| `titan_x6_vram_ctrl` AXI 512 | **`titan_x5_crossbar` DATA_WIDTH = 32** |
+| L1/L2/coherent-xbar lines: `LINE_BYTES=128` (1024-bit) | `titan_x5_mem_controller` core side hardcoded `[31:0]` |
+| `titan_x5_hbm3_controller` 1024 (512 per pseudo-channel) | `titan_x6_noc_router` FLIT_WIDTH = 64 |
+
+The bottleneck is `titan_x5_l2_mem_adapter`, which bridges 1024-bit L2 lines
+onto the **32-bit** legacy word crossbar:
+
+```
+WORDS = LINE_BYTES*8 / DATA_WIDTH = 1024 / 32 = 32
+```
+
+Every cache-line fill or writeback is **32 separate transactions**, and reads
+are issued *one beat in flight at a time* — 32 sequential round trips through
+the crossbar to fill one line.
+
+### A real bug found by trying it
+
+The module is parameterised on `DATA_WIDTH`, but the beat address was:
+
+```verilog
+assign xbar_req_addr = base_addr + {{(ADDR_WIDTH-CNT_W-2){1'b0}}, word_cnt, 2'b00};
+```
+
+`2'b00` is a hardcoded **×4 byte stride**. That is correct only at
+`DATA_WIDTH == 32`. At any other width the adapter emitted beats 4 bytes apart
+while each carried `DATA_WIDTH/8` bytes, so beats overlapped and corrupted the
+line — at 512 bits the whole 128-byte line collapsed into the first 8 bytes.
+**The module was declared width-generic but was not.** The stride is now
+`DATA_WIDTH/8`.
+
+### Verified at both widths
+
+New suites `l2adapt32` and `l2adapt512` run the *same* test against the same
+DUT at both widths, checking beat count, per-beat data, and that beats tile
+`[base, base+LINE_BYTES)` exactly — no gap, no overlap — including under 50%
+random backpressure.
+
+**Control** (proves the bug was real and the fix necessary): restoring the
+original hardcoded stride leaves `l2adapt32` passing 4/4 while `l2adapt512`
+fails 3/4 with `stride should be 64 bytes for a 512-bit beat`.
+
+### Measured
+
+Yosys, `titan_x5_l2_mem_adapter` (`ADDR_WIDTH=37`, `LINE_BYTES=128`):
+
+| `DATA_WIDTH` | Beats per line | Cells |
+|--:|--:|--:|
+| 32 | 32 | 9,657 |
+| 512 | 2 | **4,791** |
+
+**16× fewer transactions for 50% fewer cells.** Not a paradox: the adapter's
+only job is serialisation, so the narrow version needs a 32:1 mux across the
+1024-bit line buffer and a 5-bit counter, while the wide version needs a 2:1
+mux and a 1-bit counter.
+
+**What this does *not* say.** This measures the adapter alone. Actually running
+a 512-bit path end to end still requires:
+
+- `titan_x5_crossbar` widened from 32 to 512 bits — it *is* fully parameterised
+  (11 uses of `DATA_WIDTH`, 0 hardcoded), but it has 20 masters, and most of
+  them (icache fetch, ROP pixel writes, command processor) genuinely only need
+  32 bits. Widening the shared word crossbar would waste substantial area.
+- `titan_x5_mem_controller`'s core interface, where `req_wdata`/`resp_rdata`
+  are **hardcoded `[31:0]`** and must be parameterised first.
+
+The right architecture is a **dedicated 512-bit L2↔memory port** alongside the
+narrow word crossbar, not one wide crossbar for everything. No end-to-end
+bandwidth number is claimed here, because none has been measured.
+
+---
+
 ## 3. The limit this exposes: 32-bit registers
 
 Widening the *physical* path is necessary but not sufficient. Titan's
@@ -199,6 +276,10 @@ Until this step, the design has no defensible TFLOPS or watts.
 |:--|:--|
 | L2 hierarchy addresses 128 GiB | **Verified in simulation**, control-tested, cost measured |
 | Widening costs ~3.2% cells in the L2 slice | **Measured** (Yosys, both configs) |
+| L2 adapter is genuinely 512-bit capable | **Verified** at 32 and 512 bits; the hardcoded 4-byte stride that broke every non-32 width is fixed and control-tested |
+| 512-bit beat = 2 transactions/line, 4,791 cells | **Measured** (vs 32 transactions, 9,657 cells at 32-bit) |
+| Full 512-bit path end to end | **Not yet** — crossbar still 32-bit, mem_controller core side hardcoded `[31:0]` |
+| Achieved memory bandwidth | **Unknown and unmeasured** — no end-to-end wide path exists yet to measure |
 | Full GPU addresses 128 GB | **Not yet** — LSU/L1/crossbar/top still 32-bit (Step 1) |
 | A thread can address >4 GiB | **No** — 32-bit registers; needs aperture or 64-bit ISA |
 | 128 GB of physical VRAM exists | **No** — requires HBM3e + CoWoS interposer |

@@ -59,8 +59,20 @@ module titan_x5_l2_mem_adapter #(
     reg [LINE_BYTES*8-1:0] line_buf;
     reg [CNT_W-1:0]        word_cnt;
 
+    // Byte stride between consecutive beats. This used to be hardcoded as
+    // `{..., word_cnt, 2'b00}` -- a fixed x4 shift, i.e. 4 bytes per beat.
+    // That is only correct for DATA_WIDTH == 32, so despite the module being
+    // parameterised on DATA_WIDTH, any wider configuration issued every beat
+    // 4 bytes apart while carrying DATA_WIDTH/8 bytes of payload, overlapping
+    // the previous beat and corrupting the line. At DATA_WIDTH = 512 the
+    // whole 128-byte line would land inside the first 8 bytes.
+    localparam BYTES_PER_BEAT = DATA_WIDTH / 8;
+
+    wire [ADDR_WIDTH-1:0] beat_offset =
+        {{(ADDR_WIDTH-CNT_W){1'b0}}, word_cnt} * BYTES_PER_BEAT;
+
     assign l2m_req_ready = (state == A_IDLE);
-    assign xbar_req_addr  = base_addr + {{(ADDR_WIDTH-CNT_W-2){1'b0}}, word_cnt, 2'b00};
+    assign xbar_req_addr  = base_addr + beat_offset;
     assign xbar_req_wdata = line_buf[word_cnt*DATA_WIDTH +: DATA_WIDTH];
 
     always @(posedge clk or negedge rst_n) begin
