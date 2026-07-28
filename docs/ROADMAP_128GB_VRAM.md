@@ -155,8 +155,81 @@ only job is serialisation, so the narrow version needs a 32:1 mux across the
 1024-bit line buffer and a 5-bit counter, while the wide version needs a 2:1
 mux and a 1-bit counter.
 
-**What this does *not* say.** This measures the adapter alone. Actually running
-a 512-bit path end to end still requires:
+### The dedicated 512-bit port — built, working, measured end to end
+
+`titan_x5_mem_controller` now has a **second, wide request port**
+(`wreq_*`/`wresp_*`) alongside the existing 32-bit one, round-robin arbitrated
+onto the shared AXI master. The L2 adapter is instantiated at `DATA_WIDTH=512`
+and connected to it through its own CDC FIFOs, so L2 line traffic no longer
+touches the word crossbar at all (master 13 is now free). The narrow crossbar
+is untouched for the masters that genuinely need 32 bits.
+
+Measured in the **full-chip render test**, with a kernel that stores each
+lane's colour to VRAM and reads it back before exporting it:
+
+```
+l2_lines=2  wide_beats=4  ->  2 beats/line
+                              (the 32-bit path would have needed 64)
+```
+
+The rendered triangle is the proof: its colours are the values that went out
+to VRAM and came back over the 512-bit path. Test result — 181 pixels, 0 out
+of bounds, 0 wrong-path pixels, per-lane gradient intact, all warps retired,
+**8,009 cycles** (from 14,009 before control flow existed).
+
+#### Bugs this uncovered
+
+Getting it working end to end surfaced four real defects, three pre-existing:
+
+1. **Arbitration dropped requests** (introduced here, fixed here). Asserting
+   both `req_ready` and `wreq_ready` and then picking a winner destroyed the
+   loser's request — the narrow side is a CDC FIFO that pops on
+   `valid && ready`. Instruction fetches vanished and the SM hung with
+   `if_pending` stuck high. Only one `ready` may be granted per cycle.
+
+2. **STORE wrote the wrong operand** (pre-existing). The ISA, the functional
+   model (`vram_wr32(gpu, a + b, r[rd])`) and the compiler all agree that
+   STORE's data comes from `rd`, but the register file's three read ports are
+   wired to rs1/rs2/rs3 and `rd` was never read — so store data was taken from
+   `id_data2`, the *address offset*. `STORE [r6+0], r2` stored 0. STORE now
+   reads `rd` through the otherwise-unused rs3 port.
+
+3. **The register file has no warp dimension** (pre-existing). It is 64
+   registers shared by all 8 warps, not 64 per warp, so warps cannot hold
+   independent state — 8 warps running `ADD r6, r6, r3` accumulate 8×. This
+   was invisible while the SM executed one idempotent instruction.
+   `LAUNCH_WARP_MASK` now defaults to a single warp; a per-warp register file
+   is the prerequisite for launching more.
+
+4. **The ALU implements a different opcode map than the ISA** (pre-existing,
+   and the most serious). `titan_x5_alu.v` disagrees with the ISA header, the
+   decoder, the compiler and the functional model:
+
+   | Opcode | ISA / decoder / model / compiler | `titan_x5_alu.v` |
+   |--:|:--|:--|
+   | 3 | MULHI | DIV |
+   | 4 | DIV | *unimplemented* |
+   | 8 | **SHL** | **CMP** |
+   | 9 | SHR | SLT |
+   | 10 | SRA | BRANCH |
+   | 11 | SLT | JUMP |
+   | 12-15 | SLTU / MIN / MAX / FMA | *unimplemented* |
+   | 18-20 | FMIN / FMAX / CVT | *unimplemented* |
+   | 21 | SETP | FMA |
+
+   Only 0,1,2,5,6,7,16,17,26 agree. `compiler/test_compiler_isa.py` checks the
+   compiler against the **decoder**, never against the ALU, which is why this
+   survived. A `SHL` executes as a compare and silently returns 0. **Any
+   compiled kernel using a shift, a divide, a min/max, a comparison or a
+   predicate currently computes wrong answers.** Reconciling the ALU with the
+   ISA — and extending the ISA test to cover it — should rank above further
+   memory work.
+
+**What this does *not* say.** The 2-beats-per-line figure is measured, but
+total cycle count is not a bandwidth result: this kernel issues only two L2
+lines, so the wide path is proven correct rather than proven fast. A real
+bandwidth number needs a memory-bound kernel, which needs item 4 above fixed
+first. Widening the *shared* crossbar was deliberately not done:
 
 - `titan_x5_crossbar` widened from 32 to 512 bits — it *is* fully parameterised
   (11 uses of `DATA_WIDTH`, 0 hardcoded), but it has 20 masters, and most of
@@ -278,8 +351,11 @@ Until this step, the design has no defensible TFLOPS or watts.
 | Widening costs ~3.2% cells in the L2 slice | **Measured** (Yosys, both configs) |
 | L2 adapter is genuinely 512-bit capable | **Verified** at 32 and 512 bits; the hardcoded 4-byte stride that broke every non-32 width is fixed and control-tested |
 | 512-bit beat = 2 transactions/line, 4,791 cells | **Measured** (vs 32 transactions, 9,657 cells at 32-bit) |
-| Full 512-bit path end to end | **Not yet** — crossbar still 32-bit, mem_controller core side hardcoded `[31:0]` |
-| Achieved memory bandwidth | **Unknown and unmeasured** — no end-to-end wide path exists yet to measure |
+| Dedicated 512-bit L2↔memory port | **Built and working** — 2 beats/line measured in the full-chip render test (32-bit path needed 64) |
+| Colours round-trip through VRAM on the wide path | **Verified** — the rendered triangle's per-lane gradient comes back from memory |
+| Achieved memory bandwidth | **Unknown and unmeasured** — the kernel issues only 2 L2 lines; a memory-bound kernel needs the ALU/ISA mismatch fixed first |
+| ALU matches the ISA | **No** — opcodes 3, 8, 9, 10, 11, 21 differ and 4, 12-15, 18-20 are unimplemented; shifts/compares/predicates silently compute wrong answers |
+| Warps can hold independent register state | **No** — the register file has no warp dimension; only one warp is launched by default |
 | Full GPU addresses 128 GB | **Not yet** — LSU/L1/crossbar/top still 32-bit (Step 1) |
 | A thread can address >4 GiB | **No** — 32-bit registers; needs aperture or 64-bit ISA |
 | 128 GB of physical VRAM exists | **No** — requires HBM3e + CoWoS interposer |

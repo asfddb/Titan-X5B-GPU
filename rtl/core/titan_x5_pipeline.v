@@ -253,9 +253,21 @@ module titan_x5_pipeline #(
                              (dec_imm == 16'h0FFF);
     assign pc_retire_warp  = id_warp_raw;
 
+    // STORE sources its data from the *rd* field:
+    //   ISA / functional model: mem32[rs1 + (imm|rs2)] = rd
+    //   (driver/titan_x6_gpu_model.c: `vram_wr32(gpu, a + b, r[rd])`)
+    // but the register file's three read ports are wired to rs1/rs2/rs3 and
+    // rd is never read, so the store data was taken from id_data2 -- the same
+    // operand as the address offset. A store could therefore only ever write
+    // the value that happened to equal its own offset; with an immediate
+    // offset it wrote the immediate. STORE [r6+0], r2 stored 0.
+    //
+    // STORE does not use rs3, so its read port is repurposed to fetch rd.
+    wire [5:0] dec_src3 = dec_is_store ? dec_rd : dec_rs3;
+
     assign rf_rd_addr1 = dec_rs1;
     assign rf_rd_addr2 = dec_rs2;
-    assign rf_rd_addr3 = dec_rs3;
+    assign rf_rd_addr3 = dec_src3;
 
     wire [1023:0] id_imm_ext = {32{{16'd0, dec_imm}}};
 
@@ -274,9 +286,10 @@ module titan_x5_pipeline #(
     wire fwd_rs2_mem = mem_valid && (mem_warp == id_warp_raw) && (mem_rd == dec_rs2) && (dec_rs2 != 0);
     wire fwd_rs2_wb  = wb_valid && (wb_warp == id_warp_raw) && (wb_rd == dec_rs2) && (dec_rs2 != 0);
 
-    wire fwd_rs3_ex  = ex_valid && (ex_warp == id_warp_raw) && (ex_rd == dec_rs3) && (dec_rs3 != 0);
-    wire fwd_rs3_mem = mem_valid && (mem_warp == id_warp_raw) && (mem_rd == dec_rs3) && (dec_rs3 != 0);
-    wire fwd_rs3_wb  = wb_valid && (wb_warp == id_warp_raw) && (wb_rd == dec_rs3) && (dec_rs3 != 0);
+    // compares dec_src3, which is dec_rd for stores (see rf_rd_addr3 above)
+    wire fwd_rs3_ex  = ex_valid && (ex_warp == id_warp_raw) && (ex_rd == dec_src3) && (dec_src3 != 0);
+    wire fwd_rs3_mem = mem_valid && (mem_warp == id_warp_raw) && (mem_rd == dec_src3) && (dec_src3 != 0);
+    wire fwd_rs3_wb  = wb_valid && (wb_warp == id_warp_raw) && (wb_rd == dec_src3) && (dec_src3 != 0);
 
     wire ex_busy;
     wire hazard_rs1 = fwd_rs1_ex && (ex_is_load || ex_busy);
@@ -377,7 +390,8 @@ module titan_x5_pipeline #(
                 ex_is_load_reg <= id_is_load;
                 ex_is_store_reg <= id_is_store;
                 ex_is_wmma_reg <= id_is_wmma;
-                ex_mem_wdata_reg <= id_data2;
+                // stores take their data from rd (read via port 3)
+                ex_mem_wdata_reg <= id_is_store ? id_data3 : id_data2;
                 ex_wmma_a_reg <= id_data1;
                 ex_wmma_b_reg <= id_data2;
             end else if (ex_busy_reg) begin

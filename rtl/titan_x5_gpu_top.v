@@ -19,7 +19,20 @@ module titan_x5_gpu_top #(
     // Kernel entry. KERNEL_ENTRY_PC is an instruction *index*; the fetch
     // byte address is KERNEL_CODE_BASE + pc*4 (see titan_x5_pc_unit).
     parameter [31:0] KERNEL_CODE_BASE = 32'h0000_0000,
-    parameter [31:0] KERNEL_ENTRY_PC  = 32'h0000_0000
+    parameter [31:0] KERNEL_ENTRY_PC  = 32'h0000_0000,
+    // Which warps to launch.
+    //
+    // Defaults to ONE warp because titan_x5_register_file has no warp
+    // dimension: it is 64 registers shared by all NUM_WARPS warps, not 64
+    // per warp. Warps therefore cannot hold independent register state --
+    // several warps running the same kernel overwrite each other's scratch
+    // registers (an `ADD r6, r6, r3` executed by 8 warps accumulates 8x).
+    //
+    // This was invisible while the SM executed a single idempotent
+    // instruction, and only surfaced once real kernels with live registers
+    // could run. Launching all 8 warps is safe again once the register file
+    // is partitioned per warp, which is the natural companion to this work.
+    parameter [7:0]  LAUNCH_WARP_MASK = 8'h01
 ) (
     input  wire        clk,
     input  wire        mem_clk,
@@ -150,10 +163,6 @@ module titan_x5_gpu_top #(
     wire [31:0]             l2m_req_addr;
     wire [CXB_LINE*8-1:0]   l2m_req_wdata, l2m_resp_rdata;
 
-    wire                    l2a_xbar_req_valid, l2a_xbar_req_write;
-    wire [31:0]             l2a_xbar_req_addr;
-    wire [31:0]             l2a_xbar_req_wdata;
-    
     wire [31:0] tmu_mem_addr [0:3];
     wire [3:0]  tmu_mem_req;
     
@@ -206,12 +215,14 @@ module titan_x5_gpu_top #(
         end
     endgenerate
 
-    // master 13: L2 backing-store adapter (SM D-cache traffic now flows
-    // SM L1 -> coherent xbar -> L2 -> this adapter -> memory controller)
-    assign xbar_m_req_valid[13]          = l2a_xbar_req_valid;
-    assign xbar_m_req_addr[13*32 +: 32]  = l2a_xbar_req_addr;
-    assign xbar_m_req_wdata[13*32 +: 32] = l2a_xbar_req_wdata;
-    assign xbar_m_req_write[13]          = l2a_xbar_req_write;
+    // master 13: now free. L2 backing-store traffic used to be serialised into
+    // 32-bit words and pushed through this port; it now uses the dedicated
+    // 512-bit memory-controller port instead (see wmc_* below), so the shared
+    // word crossbar carries only the masters that genuinely need 32 bits.
+    assign xbar_m_req_valid[13]          = 1'b0;
+    assign xbar_m_req_addr[13*32 +: 32]  = 32'd0;
+    assign xbar_m_req_wdata[13*32 +: 32] = 32'd0;
+    assign xbar_m_req_write[13]          = 1'b0;
 
     // masters 14-16: reserved (previously per-SM scalar D-cache ports)
     generate
@@ -369,7 +380,7 @@ module titan_x5_gpu_top #(
                 // terminate. The SM now owns its PCs (titan_x5_pc_unit) and
                 // is launched once, out of reset, at the kernel entry point.
                 .launch_valid     (sm_launch_valid),
-                .launch_mask      (8'hFF),
+                .launch_mask      (LAUNCH_WARP_MASK),
                 .launch_pc        (KERNEL_ENTRY_PC),
                 .code_base        (KERNEL_CODE_BASE),
                 .warp_active      (sm_warp_active[gi]),
@@ -438,10 +449,13 @@ module titan_x5_gpu_top #(
     );
 
     // L2 line traffic -> 32-bit legacy crossbar master 13
+    // L2 line traffic now goes out on the dedicated 512-bit memory port, not
+    // through the shared 32-bit word crossbar: 2 beats per 128-byte line
+    // instead of 32.
     titan_x5_l2_mem_adapter #(
         .ADDR_WIDTH(32),
         .LINE_BYTES(CXB_LINE),
-        .DATA_WIDTH(32)
+        .DATA_WIDTH(WIDE_W)
     ) u_l2_mem_adapter (
         .clk(clk),
         .rst_n(rst_n),
@@ -452,13 +466,13 @@ module titan_x5_gpu_top #(
         .l2m_req_ready(l2m_req_ready),
         .l2m_resp_valid(l2m_resp_valid),
         .l2m_resp_rdata(l2m_resp_rdata),
-        .xbar_req_valid(l2a_xbar_req_valid),
-        .xbar_req_addr(l2a_xbar_req_addr),
-        .xbar_req_wdata(l2a_xbar_req_wdata),
-        .xbar_req_write(l2a_xbar_req_write),
-        .xbar_req_ready(xbar_m_req_ready[13]),
-        .xbar_resp_valid(xbar_m_resp_valid[13]),
-        .xbar_resp_rdata(xbar_m_resp_rdata[13*32 +: 32])
+        .xbar_req_valid(wmc_req_valid),
+        .xbar_req_addr(wmc_req_addr),
+        .xbar_req_wdata(wmc_req_wdata),
+        .xbar_req_write(wmc_req_write),
+        .xbar_req_ready(wmc_req_ready),
+        .xbar_resp_valid(wmc_resp_valid),
+        .xbar_resp_rdata(wmc_resp_rdata)
     );
 
     // 3. Rasterizer
@@ -704,23 +718,96 @@ module titan_x5_gpu_top #(
     assign xbar_s_resp_id[0*5 +: 5] = mc_resp_fifo_rdata[36:32];
     assign xbar_s_resp_rdata[0*32 +: 32] = mc_resp_fifo_rdata[31:0];
 
+    // ---- dedicated wide (512-bit) L2 <-> memory path ----------------------
+    // The L2's line traffic used to be serialised into 32-bit words and pushed
+    // through the shared legacy crossbar (master 13): 32 transactions per
+    // 128-byte line, each AXI beat carrying 4 useful bytes out of 64.
+    //
+    // It now has its own port on the memory controller, so a line is 2
+    // full-width beats. The narrow crossbar is left alone for the masters that
+    // genuinely only need 32 bits (instruction fetch, ROP, command processor),
+    // which is why this is a second port rather than a wider crossbar.
+    localparam WIDE_W = 512;
+
+    wire                  wmc_req_valid;
+    wire [31:0]           wmc_req_addr;
+    wire                  wmc_req_write;
+    wire [WIDE_W-1:0]     wmc_req_wdata;
+    wire                  wmc_req_ready;
+    wire                  wmc_resp_valid;
+    wire [WIDE_W-1:0]     wmc_resp_rdata;
+
+    // request CDC: core clk -> mem clk  ({addr, wdata, write})
+    wire                    wmc_req_fifo_full, wmc_req_fifo_empty;
+    wire [32+WIDE_W+1-1:0]  wmc_req_fifo_rdata;
+
+    titan_x5_async_fifo #(.DATA_WIDTH(32+WIDE_W+1), .DEPTH_LOG2(3)) wreq_cdc_fifo (
+        .wclk(clk), .wrst_n(rst_n),
+        .winc(wmc_req_valid && !wmc_req_fifo_full),
+        .wdata({wmc_req_addr, wmc_req_wdata, wmc_req_write}),
+        .wfull(wmc_req_fifo_full),
+        .rclk(mem_clk), .rrst_n(rst_n),
+        .rinc(wmc_cdc_req_ready && !wmc_req_fifo_empty),
+        .rdata(wmc_req_fifo_rdata),
+        .rempty(wmc_req_fifo_empty)
+    );
+    assign wmc_req_ready = !wmc_req_fifo_full;
+
+    wire              wmc_cdc_req_valid = !wmc_req_fifo_empty;
+    wire              wmc_cdc_req_ready;
+    wire [31:0]       wmc_cdc_req_addr  = wmc_req_fifo_rdata[32+WIDE_W : WIDE_W+1];
+    wire [WIDE_W-1:0] wmc_cdc_req_wdata = wmc_req_fifo_rdata[WIDE_W : 1];
+    wire              wmc_cdc_req_write = wmc_req_fifo_rdata[0];
+
+    wire              wmc_cdc_resp_valid;
+    wire [WIDE_W-1:0] wmc_cdc_resp_rdata;
+
+    // response CDC: mem clk -> core clk
+    wire              wmc_resp_fifo_full, wmc_resp_fifo_empty;
+    wire [WIDE_W-1:0] wmc_resp_fifo_rdata;
+
+    titan_x5_async_fifo #(.DATA_WIDTH(WIDE_W), .DEPTH_LOG2(3)) wresp_cdc_fifo (
+        .wclk(mem_clk), .wrst_n(rst_n),
+        .winc(wmc_cdc_resp_valid && !wmc_resp_fifo_full),
+        .wdata(wmc_cdc_resp_rdata),
+        .wfull(wmc_resp_fifo_full),
+        .rclk(clk), .rrst_n(rst_n),
+        .rinc(!wmc_resp_fifo_empty),
+        .rdata(wmc_resp_fifo_rdata),
+        .rempty(wmc_resp_fifo_empty)
+    );
+
+    assign wmc_resp_valid = !wmc_resp_fifo_empty;
+    assign wmc_resp_rdata = wmc_resp_fifo_rdata;
+
     titan_x5_mem_controller #(
         .AXI_ADDR_WIDTH(32),
         .AXI_DATA_WIDTH(512),
         .AXI_ID_WIDTH  (4),
-        .ID_WIDTH      (5)
+        .ID_WIDTH      (5),
+        .WIDE_DATA_WIDTH(WIDE_W)
     ) u_mem_ctrl (
         .clk           (mem_clk), .rst_n(rst_n),
-        .req_valid     (mc_cdc_req_valid), 
+        .req_valid     (mc_cdc_req_valid),
         .req_addr      (mc_cdc_req_addr),
-        .req_write     (mc_cdc_req_write), 
+        .req_write     (mc_cdc_req_write),
         .req_wdata     (mc_cdc_req_wdata),
         .req_len       (mc_cdc_req_len),
         .req_id        (mc_cdc_req_id),
-        .req_ready     (mc_cdc_req_ready), 
-        .resp_valid    (mc_cdc_resp_valid), 
+        .req_ready     (mc_cdc_req_ready),
+        .resp_valid    (mc_cdc_resp_valid),
         .resp_id       (mc_cdc_resp_id),
         .resp_rdata    (mc_cdc_resp_rdata),
+        // dedicated wide L2 port
+        .wreq_valid    (wmc_cdc_req_valid),
+        .wreq_addr     (wmc_cdc_req_addr),
+        .wreq_write    (wmc_cdc_req_write),
+        .wreq_wdata    (wmc_cdc_req_wdata),
+        .wreq_id       (5'd13),           // retains the old master-13 identity
+        .wreq_ready    (wmc_cdc_req_ready),
+        .wresp_valid   (wmc_cdc_resp_valid),
+        .wresp_id      (),
+        .wresp_rdata   (wmc_cdc_resp_rdata),
         .m_axi_arid    (vram_arid),
         .m_axi_araddr  (vram_araddr),
         .m_axi_arlen   (vram_arlen),

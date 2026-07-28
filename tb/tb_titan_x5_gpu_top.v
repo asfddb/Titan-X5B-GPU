@@ -298,7 +298,8 @@ module tb_titan_x5_gpu_top();
 
     integer tid;
     reg [31:0] r_val, g_val, b_val, a_val;
-    reg [1023:0] temp_r2, temp_r3, temp_r4;
+    reg [1023:0] temp_r2, temp_r3, temp_r4, temp_r62;
+    localparam [31:0] DATA_BASE = 32'h0040_0000;   // 4 MiB scratch buffer
     // Test sequence
     initial begin
         rst_n          = 0;
@@ -323,10 +324,26 @@ module tb_titan_x5_gpu_top();
         // per-thread gradient. The framebuffer check below detects exactly
         // that, so "the branch worked" is verified by the rendered image
         // rather than merely asserted.
-        write_vram_word(CODE_BASE + 32'd0,  32'h07E10001); // ADD R63,R2,#0
-        write_vram_word(CODE_BASE + 32'd4,  32'hC0000019); // BRANCH #3
-        write_vram_word(CODE_BASE + 32'd8,  32'h07E20001); // ADD R63,R4,#0 (poison)
-        write_vram_word(CODE_BASE + 32'd12, 32'hC8007FF9); // BARRIER #0xFFF (EXIT)
+        // The colour is now round-tripped through VRAM rather than exported
+        // straight from a register: each lane stores its gradient colour,
+        // reads it back, and exports what memory returned. That drags the
+        // whole data path in -- LSU coalescing, L1, the coherent crossbar,
+        // the L2, and the dedicated 512-bit memory port -- so a rendered
+        // triangle proves the wide path actually carries data, not just that
+        // it fails to break anything.
+        // NB: MUL (opcode 2), not SHL. Opcode 8 is SHL in the ISA header, the
+        // decoder, the compiler and the functional model, but titan_x5_alu.v
+        // maps opcode 8 to OP_CMP -- the ALU implements a different opcode map
+        // than the rest of the stack (see docs/ROADMAP_128GB_VRAM.md). MUL is
+        // one of the opcodes where the two agree.
+        write_vram_word(CODE_BASE + 32'd0,  32'h10DF0021); // MUL   R6, R62, #4   (tid*4)
+        write_vram_word(CODE_BASE + 32'd4,  32'h00C30600); // ADD   R6, R6, R3    (base + tid*4)
+        write_vram_word(CODE_BASE + 32'd8,  32'hB8430001); // STORE [R6+0], R2
+        write_vram_word(CODE_BASE + 32'd12, 32'hB0A30001); // LOAD  R5, [R6+0]
+        write_vram_word(CODE_BASE + 32'd16, 32'h07E28001); // ADD   R63, R5, #0
+        write_vram_word(CODE_BASE + 32'd20, 32'hC0000039); // BRANCH #7 (skip poison)
+        write_vram_word(CODE_BASE + 32'd24, 32'h07E20001); // ADD   R63, R4, #0 (poison)
+        write_vram_word(CODE_BASE + 32'd28, 32'hC8007FF9); // BARRIER #0xFFF (EXIT)
 
 
         // Prepare per-thread gradient colors for R2 (deposited into the RF
@@ -338,8 +355,13 @@ module tb_titan_x5_gpu_top();
             b_val = 128;
             a_val = 255;
             temp_r2[tid*32 +: 32] = {a_val[7:0], b_val[7:0], g_val[7:0], r_val[7:0]};
-            temp_r3[tid*32 +: 32] = 32'h1000_0000;
+            // Scratch buffer for the store/load round trip. 4 MiB is clear of
+            // the framebuffer (<1 MiB), the ring buffer (1 MiB) and the kernel
+            // code (2 MiB). The old value 0x1000_0000 aliased to VRAM offset 0
+            // under the model's 8 MiB wrap, i.e. straight onto the framebuffer.
+            temp_r3[tid*32 +: 32] = DATA_BASE;
             temp_r4[tid*32 +: 32] = 32'h0000_FF00;
+            temp_r62[tid*32 +: 32] = tid;   // R62 = TX6_REG_TID (lane id)
         end
 
         // Pre-initialize VRAM with DRAW command (17 words)
@@ -386,6 +408,8 @@ module tb_titan_x5_gpu_top();
         dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[0] = temp_r2;
         dut.sm_gen[0].u_sm.rf_inst.bank_gen[3].bank_mem[0] = temp_r3;
         dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[1] = temp_r4;
+        // R62 = TX6_REG_TID: bank = 62%4 = 2, entry = 62/4 = 15
+        dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[15] = temp_r62;
 
         $display("[%0t] Reset done. Queuing CMD_DRAW into ring buffer...", $time);
 
