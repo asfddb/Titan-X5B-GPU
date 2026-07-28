@@ -126,12 +126,23 @@ SUITES = {
 }
 
 
+class SuiteInfraError(RuntimeError):
+    """The suite never produced a verdict.
+
+    Distinct from a test failure: this means the simulation did not run to
+    completion (missing tool, failed import, crashed elaboration). Reporting
+    it as FAIL makes a broken environment look identical to a design
+    regression, which previously hid the lsu/fpu/mesi/tmu suites entirely
+    when cocotb-coverage was not installed.
+    """
+
+
 def check_results(xml_path):
     """Hard gate: the results file must exist, contain at least one test,
     and report zero failures/errors (a crashed sim must not pass)."""
     import xml.etree.ElementTree as ET
     if not os.path.exists(xml_path):
-        raise RuntimeError(f"no results file produced ({xml_path})")
+        raise SuiteInfraError(f"no results file produced ({xml_path})")
     root = ET.parse(xml_path).getroot()
     cases = root.iter("testcase")
     n, bad = 0, 0
@@ -140,7 +151,7 @@ def check_results(xml_path):
         if tc.find("failure") is not None or tc.find("error") is not None:
             bad += 1
     if n == 0:
-        raise RuntimeError("results file contains no testcases")
+        raise SuiteInfraError("results file contains no testcases")
     if bad:
         raise RuntimeError(f"{bad}/{n} testcases failed")
     print(f"    results: {n} testcase(s), all passed")
@@ -179,16 +190,31 @@ def main():
         print(f"unknown suite(s): {unknown}; available: {list(SUITES)}")
         return 2
     failures = []
+    infra_errors = []
     for name in wanted:
         try:
             run_suite(name, SUITES[name])
+        except SuiteInfraError as exc:
+            # the suite produced no verdict at all - environment problem
+            print(f"[{name}] ERROR (suite did not run): {exc}")
+            infra_errors.append(name)
         except Exception as exc:  # runner raises on any test failure
             print(f"[{name}] FAILED: {exc}")
             failures.append(name)
     print("\n=== regression summary ===")
     for name in wanted:
-        print(f"  {name:6s} : {'FAIL' if name in failures else 'PASS'}")
-    return 1 if failures else 0
+        if name in infra_errors:
+            verdict = "ERROR"
+        elif name in failures:
+            verdict = "FAIL"
+        else:
+            verdict = "PASS"
+        print(f"  {name:6s} : {verdict}")
+    if infra_errors:
+        print(f"\n{len(infra_errors)} suite(s) never ran: {infra_errors}")
+        print("This is an ENVIRONMENT problem, not a design regression.")
+        print("Check the toolchain: pip install -r tb/requirements.txt")
+    return 1 if (failures or infra_errors) else 0
 
 
 if __name__ == "__main__":

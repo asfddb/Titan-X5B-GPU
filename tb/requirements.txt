@@ -1,0 +1,21 @@
+# Verification environment for the Titan X5 regression suites.
+#
+#   pip install -r tb/requirements.txt
+#   python tb/run_regression.py
+#
+# Requires Icarus Verilog 12 on PATH (apt install iverilog).
+#
+# NOTE: cocotb-coverage pulls in python-constraint, which fails to build on
+# distro images whose setuptools is patched (Debian/Ubuntu system Python).
+# If that happens, either use a clean virtualenv:
+#
+#   python3 -m venv .venv && . .venv/bin/activate
+#   pip install -U pip setuptools wheel
+#   pip install -r tb/requirements.txt
+#
+# ...or simply omit cocotb-coverage: the suites detect its absence and run
+# without functional coverage rather than failing to import.
+
+cocotb==2.0.1
+pytest
+cocotb-coverage

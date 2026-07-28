@@ -28,7 +28,37 @@ regression runner surfaces the per-suite percentages.
 import atexit
 import os
 
-from cocotb_coverage.coverage import CoverPoint, CoverCross, coverage_db
+# cocotb-coverage is an *optional* dependency. It is not always installable:
+# on distro images whose setuptools is patched (Debian/Ubuntu), its
+# `python-constraint` dependency fails to build a wheel.
+#
+# The decorators below are applied at import time, so a missing package used
+# to raise ImportError while this module was being imported -- which silently
+# took the lsu/fpu/mesi/tmu suites out of the regression entirely. The runner
+# then reported "7 passed" and an environment problem was indistinguishable
+# from a design regression.
+#
+# Degrade to no-op shims instead: the suites still run and still check
+# correctness, they just do not collect functional coverage.
+try:
+    from cocotb_coverage.coverage import CoverPoint, CoverCross, coverage_db
+    COVERAGE_ENABLED = True
+except ImportError:  # pragma: no cover - exercised only without the package
+    COVERAGE_ENABLED = False
+
+    def CoverPoint(*_args, **_kwargs):
+        """No-op stand-in for cocotb_coverage.coverage.CoverPoint."""
+        def _decorate(func):
+            return func
+        return _decorate
+
+    def CoverCross(*_args, **_kwargs):
+        """No-op stand-in for cocotb_coverage.coverage.CoverCross."""
+        def _decorate(func):
+            return func
+        return _decorate
+
+    coverage_db = {}
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -200,6 +230,11 @@ def export_on_exit(suite):
     if suite in _registered:
         return
     _registered.append(suite)
+
+    if not COVERAGE_ENABLED:
+        print(f"[coverage] cocotb-coverage not installed - functional "
+              f"coverage disabled for '{suite}' (checks still run)")
+        return
 
     def _export():
         path = os.path.join(HERE, f"{suite}_coverage.yml")
