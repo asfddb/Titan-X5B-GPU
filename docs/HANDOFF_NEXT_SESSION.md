@@ -123,6 +123,90 @@ real opcode is an ISA decision that needs a human call.
 
 Measured cost: ALU grew 24,226 -> 31,650 cells (+30.6%, `ENABLE_TENSOR=0`).
 
+## 4b. THE PLAN: v2.0 release work (do these in order)
+
+Target: a release whose claim is **"runs real compiled kernels with real
+control flow, verified against a reference model."** Three steps, ordered so
+each unblocks the next.
+
+### CONSTRAINT: no large downloads
+
+Do **not** install OpenLane, Docker images, or any PDK (sky130 etc.). Those are
+multi-GB and are out of scope for this work. The entire plan below runs on:
+
+```bash
+apt-get install -y -qq iverilog verilator yosys   # tens of MB
+pip install cocotb==2.0.1 pytest                  # small
+```
+
+Yosys is used only for `stat` cell counts, never for a full physical flow.
+If a step seems to need a PDK, it is the wrong step — skip it and say so.
+
+### Step 1 — per-warp register file *(smallest, unblocks the rest)*
+
+`rtl/core/titan_x5_register_file.v` has **no warp dimension**: 64 registers
+shared by all `NUM_WARPS` warps. Warps cannot hold independent state, so
+`LAUNCH_WARP_MASK` in `titan_x5_gpu_top.v` is pinned to `8'h01` (one warp).
+Eight warps running `ADD r6, r6, r3` accumulate 8x.
+
+- Give the register file a warp index (64 regs x NUM_WARPS x 32 lanes).
+- Thread the warp id from the pipeline stages into the read and write ports
+  (ID reads with `id_warp_raw`, WB writes with `wb_warp_reg`).
+- Restore `LAUNCH_WARP_MASK` to `8'hFF`.
+- The testbench backdoor deposits in `tb/tb_titan_x5_gpu_top.v` write
+  `bank_gen[b].bank_mem[e]` and will need the warp index too.
+
+**Gate:** the full-chip render test passes with all 8 warps launched, still
+181 pixels / 0 out of bounds / per-lane gradient intact. Add a cocotb test
+proving two warps can hold different values in the same register number.
+
+### Step 2 — SETP + predicate registers -> conditional branches
+
+Today every branch is unconditional, so a loop cannot have an exit condition.
+`titan_x5_decoder.v` already exposes `is_predicated` and `pred_reg`; nothing
+consumes them.
+
+- Add per-warp predicate registers (P0 hardwired true, P1-P3 writable).
+- Implement `SETP` (opcode 21) per the ISA: the `rd` field carries
+  `{cond[2:0], pdst[1:0]}`, comparison per `TX6_CMP_*`. Semantics are in
+  `driver/titan_x6_gpu_model.c`.
+- Gate instruction execution on the predicate in the pipeline.
+- Make `BRANCH` honour its predicate, so it becomes conditional.
+- **This also resolves the opcode-21 question**: once SETP needs 21, the FP
+  fused multiply-add unit must move. The ISA has no FP-FMA opcode and slots
+  0-31 are all assigned, so this needs an explicit ISA decision -- ask the
+  user rather than choosing unilaterally. Options: retire the FP FMA unit,
+  or add an ISA opcode and update the header, compiler, model and decoder
+  together.
+
+**Gate:** a kernel with a real counted loop (`SETP` + conditional `BRANCH`)
+runs to completion with the right trip count, checked against the functional
+model.
+
+### Step 3 — matmul end to end, bit-exact
+
+`compiler/kernels/matmul.py` compiles to Titan ISA today but has never been
+executed by the RTL.
+
+- Compile it, load the resulting program into the full-chip testbench,
+  run it, and compare the output matrix against a NumPy reference.
+
+**Gate:** compiler -> ISA -> RTL produces a bit-exact matmul result. This is
+the headline claim for v2.0.
+
+### After the three steps
+
+Merge to `master`, tag **`v2.0`**, write release notes. Do **not** create a new
+repository -- the commit history documenting bugs found and fixed is the
+project's credibility, and a fresh repo throws it away. A rename plus a tagged
+release gives the same "new version" identity with none of the loss.
+
+Keep the honest-scope discipline in `README.md`. Do not drop caveats at release
+time; real verified results next to honest limitations read far better than a
+version number with the limitations quietly removed.
+
+---
+
 ## 5. Other known-open items (do not lose these)
 
 - **Register file has no warp dimension.** 64 registers shared by all 8 warps,
