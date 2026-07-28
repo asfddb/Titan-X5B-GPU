@@ -44,14 +44,20 @@ module titan_x5_pipeline #(
     output wire [2:0]  pc_retire_warp,
     
     // register file interface
+    // The register file is per-warp, so every access carries a warp index.
+    // Reads are combinational and happen in ID, so they use the ID-stage warp;
+    // writes are synchronous from WB, so they use the WB-stage warp. Getting
+    // these two crossed would let one warp read another's registers.
     output wire [5:0] rf_rd_addr1,
     output wire [5:0] rf_rd_addr2,
     output wire [5:0] rf_rd_addr3,
+    output wire [2:0] rf_rd_warp,
     input wire [1023:0] rf_rd_data1,
     input wire [1023:0] rf_rd_data2,
     input wire [1023:0] rf_rd_data3,
-    
+
     output wire [5:0] rf_wr_addr,
+    output wire [2:0] rf_wr_warp,
     output wire [1023:0] rf_wr_data,
     output wire        rf_wr_en,
     
@@ -268,6 +274,9 @@ module titan_x5_pipeline #(
     assign rf_rd_addr1 = dec_rs1;
     assign rf_rd_addr2 = dec_rs2;
     assign rf_rd_addr3 = dec_src3;
+    // All three operands belong to the instruction currently at the FIFO head,
+    // so they share that entry's warp.
+    assign rf_rd_warp  = id_warp_raw;
 
     wire [1023:0] id_imm_ext = {32{{16'd0, dec_imm}}};
 
@@ -495,6 +504,7 @@ module titan_x5_pipeline #(
     
     assign rf_wr_en   = wb_valid_reg;
     assign rf_wr_addr = wb_rd_reg;
+    assign rf_wr_warp = wb_warp_reg;
     assign rf_wr_data = wb_data_reg;
     
     assign wb_valid_out = wb_valid_reg;

@@ -77,17 +77,37 @@ module titan_x5_rop #(
 
     reg [511:0] latched_shader_color;
 
+    // Has the shader produced a colour yet?
+    //
+    // latched_shader_color resets to 0 and is only written when the shader
+    // exports R63. The rasterizer runs as an independent engine, so any stamp
+    // it emits before that first export would be painted with the reset value
+    // -- transparent black, indistinguishable from "never drawn".
+    //
+    // That made the rendered image depend on a race between two engines. With
+    // a single warp the shader exported ~4.3us ahead of the first stamp and
+    // the race was invisible; with eight warps sharing the SM's single
+    // outstanding instruction fetch the first export lands ~0.7us *after*
+    // rasterization starts, and the leading fragments came out black (measured
+    // 117 of 181 pixels surviving instead of 181).
+    //
+    // The ROP already has working backpressure and the rasterizer honours it,
+    // so the fix is to simply not claim readiness until there is a colour to
+    // paint with. Sticky once set: the shader only re-exports, never invalidates.
+    reg shader_color_valid;
+
     reg [8:0] flush_idx;
     reg [2:0] flush_state;
-    
+
     localparam FLUSH_IDLE = 0;
     localparam FLUSH_WRITE_C = 1;
     localparam FLUSH_WAIT_C = 2;
     localparam FLUSH_WRITE_Z = 3;
     localparam FLUSH_WAIT_Z = 4;
-    
-    // We are ready to accept stamps as long as we are not flushing, AND the current stamp doesn't trigger a flush
-    assign i_ready = (flush_state == FLUSH_IDLE) && 
+
+    // We are ready to accept stamps once the shader has produced a colour, as
+    // long as we are not flushing, AND the current stamp doesn't trigger a flush
+    assign i_ready = shader_color_valid && (flush_state == FLUSH_IDLE) &&
                      !(tile_active && ((i_x[15:4] != current_tile_x[15:4]) || (i_y[15:4] != current_tile_y[15:4])) && |tile_dirty);
 
     reg [3:0] idle_timeout;
@@ -97,6 +117,7 @@ module titan_x5_rop #(
         if (!rst_n) begin
             tile_dirty <= 0;
             latched_shader_color <= 0;
+            shader_color_valid <= 1'b0;
             flush_idx <= 0;
             flush_state <= FLUSH_IDLE;
             mem_req <= 0;
@@ -107,6 +128,7 @@ module titan_x5_rop #(
             idle_timeout <= 0;
         end else begin
             if (shader_wb_valid && shader_wb_reg == 6'd63) begin
+                shader_color_valid <= 1'b1;
                 latched_shader_color <= {
                     shader_wb_data[15*32 +: 32], shader_wb_data[14*32 +: 32], shader_wb_data[13*32 +: 32], shader_wb_data[12*32 +: 32],
                     shader_wb_data[11*32 +: 32], shader_wb_data[10*32 +: 32], shader_wb_data[9*32 +: 32],  shader_wb_data[8*32 +: 32],
@@ -116,7 +138,11 @@ module titan_x5_rop #(
             end
             case (flush_state)
                 FLUSH_IDLE: begin
-                    if (i_valid != 16'd0) begin
+                    // shader_color_valid must gate the accept as well as
+                    // i_ready: consuming a stamp here while telling the
+                    // rasterizer we are not ready would paint it black and
+                    // then let the rasterizer present it a second time.
+                    if (i_valid != 16'd0 && shader_color_valid) begin
                         idle_timeout <= 0;
                         // If moving to a new 16x16 tile and current tile is dirty, flush it
                         if (tile_active && ((i_x[15:4] != current_tile_x[15:4]) || (i_y[15:4] != current_tile_y[15:4])) && |tile_dirty) begin

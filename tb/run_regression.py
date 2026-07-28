@@ -24,6 +24,8 @@ Suites:
                WMMA dispatcher (INT8 SIMD, FP8 E4M3/E5M2, FP16)
     pc_unit  - per-warp program counter file: sequencing, absolute-index
                branches, backward loops, EXIT retire, same-cycle priority
+    regfile  - per-warp vector register file: two warps holding different
+               values in the same register number, cross-warp isolation
 """
 
 import os
@@ -143,6 +145,20 @@ SUITES = {
         ),
         toplevel="tb_pc_unit_top",
         module="test_pc_unit",
+    ),
+    # Built with the exact geometry titan_x5_sm instantiates, so the suite
+    # exercises the configuration that actually ships rather than a
+    # convenient small one.
+    "regfile": dict(
+        sources=rtl_files("core/titan_x5_register_file.v"),
+        toplevel="titan_x5_register_file",
+        module="test_regfile_warps",
+        parameters={
+            "DATA_WIDTH": 1024,
+            "NUM_REGS": 64,
+            "NUM_BANKS": 4,
+            "NUM_WARPS": 8,
+        },
     ),
     # Same DUT and same test at both memory-path beat widths. 32 bits is the
     # current design (32 beats per 128-byte line); 512 bits is the wide path

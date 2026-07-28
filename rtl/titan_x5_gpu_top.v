@@ -20,19 +20,19 @@ module titan_x5_gpu_top #(
     // byte address is KERNEL_CODE_BASE + pc*4 (see titan_x5_pc_unit).
     parameter [31:0] KERNEL_CODE_BASE = 32'h0000_0000,
     parameter [31:0] KERNEL_ENTRY_PC  = 32'h0000_0000,
-    // Which warps to launch.
+    // Which warps to launch. All eight.
     //
-    // Defaults to ONE warp because titan_x5_register_file has no warp
-    // dimension: it is 64 registers shared by all NUM_WARPS warps, not 64
-    // per warp. Warps therefore cannot hold independent register state --
-    // several warps running the same kernel overwrite each other's scratch
-    // registers (an `ADD r6, r6, r3` executed by 8 warps accumulates 8x).
+    // This was pinned to 8'h01 (one warp) because titan_x5_register_file had
+    // no warp dimension: 64 registers shared by all NUM_WARPS warps rather
+    // than 64 per warp. Warps could not hold independent register state --
+    // several warps running the same kernel overwrote each other's scratch
+    // registers (an `ADD r6, r6, r3` executed by 8 warps accumulated 8x).
     //
-    // This was invisible while the SM executed a single idempotent
-    // instruction, and only surfaced once real kernels with live registers
-    // could run. Launching all 8 warps is safe again once the register file
-    // is partitioned per warp, which is the natural companion to this work.
-    parameter [7:0]  LAUNCH_WARP_MASK = 8'h01
+    // The register file is now partitioned per warp (64 regs x NUM_WARPS x 32
+    // lanes), with the ID-stage warp driving the read ports and the WB-stage
+    // warp driving the write port, so all eight warps hold independent state
+    // and the full mask is safe again.
+    parameter [7:0]  LAUNCH_WARP_MASK = 8'hFF
 ) (
     input  wire        clk,
     input  wire        mem_clk,

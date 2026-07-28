@@ -297,6 +297,7 @@ module tb_titan_x5_gpu_top();
     endtask
 
     integer tid;
+    integer w;      // warp index for the per-warp register-file deposits
     reg [31:0] r_val, g_val, b_val, a_val;
     reg [1023:0] temp_r2, temp_r3, temp_r4, temp_r62;
     localparam [31:0] DATA_BASE = 32'h0040_0000;   // 4 MiB scratch buffer
@@ -402,13 +403,28 @@ module tb_titan_x5_gpu_top();
 
         #20; rst_n = 1; #20;
 
-        // Backdoor-initialize SM0's register file now that reset is done:
-        // R2 = per-thread gradient colors (bank = reg%4, entry = reg/4)
-        dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[0] = temp_r2;
-        dut.sm_gen[0].u_sm.rf_inst.bank_gen[3].bank_mem[0] = temp_r3;
-        dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[1] = temp_r4;
-        // R62 = TX6_REG_TID: bank = 62%4 = 2, entry = 62/4 = 15
-        dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[15] = temp_r62;
+        // Backdoor-initialize SM0's register file now that reset is done.
+        // The register file is per-warp, laid out warp-major as
+        // bank_mem[warp*REGS_PER_BANK + entry] with REGS_PER_BANK = 64/4 = 16,
+        // so every launched warp needs its own copy of the inputs. Depositing
+        // only warp 0 would leave warps 1-7 reading zeroes -- they would all
+        // compute address 0 and scribble over the framebuffer, which the
+        // out-of-bounds check below would catch.
+        //
+        // All eight warps get identical inputs on purpose. They therefore
+        // compute identical addresses and store identical colours, so the
+        // rendered image is warp-count-independent and stays at 181 pixels.
+        // What changes is that eight independent register sets are now live at
+        // once: with the old shared file, eight warps stepping through
+        // `ADD R6, R6, R3` accumulated into one R6 and walked out of bounds.
+        for (w = 0; w < 8; w = w + 1) begin
+            // R2 = per-thread gradient colours (bank = reg%4, entry = reg/4)
+            dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[w*16 + 0]  = temp_r2;
+            dut.sm_gen[0].u_sm.rf_inst.bank_gen[3].bank_mem[w*16 + 0]  = temp_r3;
+            dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[w*16 + 1]  = temp_r4;
+            // R62 = TX6_REG_TID: bank = 62%4 = 2, entry = 62/4 = 15
+            dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[w*16 + 15] = temp_r62;
+        end
 
         $display("[%0t] Reset done. Queuing CMD_DRAW into ring buffer...", $time);
 

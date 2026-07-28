@@ -209,11 +209,17 @@ version number with the limitations quietly removed.
 
 ## 5. Other known-open items (do not lose these)
 
-- **Register file has no warp dimension.** 64 registers shared by all 8 warps,
-  not 64 per warp, so warps cannot hold independent state. `LAUNCH_WARP_MASK`
-  in `titan_x5_gpu_top` defaults to `8'h01` (one warp) because of this. A
-  per-warp register file is required before launching more.
+- ~~**Register file has no warp dimension.**~~ **DONE** (step 1). The file is
+  now 64 regs x NUM_WARPS x 32 lanes, warp-major
+  (`bank_mem[warp*REGS_PER_BANK + entry]`), with the ID-stage warp driving the
+  three read ports and the WB-stage warp driving the write port.
+  `LAUNCH_WARP_MASK` is back to `8'hFF` and the render test passes with all 8
+  warps at 181 pixels / 0 out of bounds. Suite: `regfile`.
 - **No instruction cache; one outstanding fetch per SM.** Roadmap Phase 2.
+  Now measurably the dominant cost: 8 warps sharing the single outstanding
+  fetch pushed the render from 8,009 to 10,009 cycles, and delayed the
+  shader's first export past the start of rasterization (see the ROP note
+  below).
   Note: the wrong-path epoch in `titan_x5_pipeline.v` is 1 bit and is only
   sound because a single fetch is outstanding — widening fetch requires
   widening the epoch.
@@ -230,3 +236,12 @@ version number with the limitations quietly removed.
   interface for this structural top-level"). The working GPU is
   `titan_x5_gpu_top`. Do not benchmark or harden the x6 top believing it runs.
 - **`titan_x5_hbm3_controller.v` is not instantiated anywhere.**
+- **The ROP has no per-fragment shader dispatch.** `titan_x5_rop` latches the
+  shader's last R63 export into `latched_shader_color` and paints whatever the
+  rasterizer hands it; the two engines are otherwise independent. Fragments are
+  no longer painted with a colour that does not exist yet (the ROP now holds
+  `i_ready` low until the first export — found when 8 warps delayed that export
+  past the start of rasterization and 64 of 181 pixels came out black), but the
+  colour a given fragment receives is still "the most recent export", not "the
+  shader result for that fragment". A real fragment pipeline would dispatch per
+  quad and carry the result back with the fragment.

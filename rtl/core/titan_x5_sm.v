@@ -83,6 +83,9 @@ module titan_x5_sm #(
     wire [5:0]  rf_rd_addr1, rf_rd_addr2, rf_rd_addr3, rf_wr_addr;
     wire [1023:0] rf_rd_data1, rf_rd_data2, rf_rd_data3, rf_wr_data;
     wire        rf_wr_en;
+    // Which warp's register set each side of the file is touching: ID for the
+    // combinational reads, WB for the synchronous write.
+    wire [2:0]  rf_rd_warp, rf_wr_warp;
     
     wire        alu_valid_in;
     wire [4:0]  alu_opcode;
@@ -296,10 +299,12 @@ module titan_x5_sm #(
         .rf_rd_addr1(rf_rd_addr1),
         .rf_rd_addr2(rf_rd_addr2),
         .rf_rd_addr3(rf_rd_addr3),
+        .rf_rd_warp(rf_rd_warp),
         .rf_rd_data1(rf_rd_data1),
         .rf_rd_data2(rf_rd_data2),
         .rf_rd_data3(rf_rd_data3),
         .rf_wr_addr(rf_wr_addr),
+        .rf_wr_warp(rf_wr_warp),
         .rf_wr_data(rf_wr_data),
         .rf_wr_en(rf_wr_en),
         .alu_valid_in(alu_valid_in),
@@ -343,8 +348,9 @@ module titan_x5_sm #(
     
     titan_x5_register_file #(
         .DATA_WIDTH(1024), // 32 threads * 32 bits
-        .NUM_REGS(64),
-        .NUM_BANKS(4)
+        .NUM_REGS(64),     // per warp
+        .NUM_BANKS(4),
+        .NUM_WARPS(NUM_WARPS)
     ) rf_inst (
         .clk(clk),
         .rst_n(rst_n),
@@ -354,11 +360,15 @@ module titan_x5_sm #(
         .rd_addr_0({4{rf_rd_addr1[5:2]}}),
         .rd_addr_1({4{rf_rd_addr2[5:2]}}),
         .rd_addr_2({4{rf_rd_addr3[5:2]}}),
+        .rd_warp_0(rf_rd_warp),
+        .rd_warp_1(rf_rd_warp),
+        .rd_warp_2(rf_rd_warp),
         .rd_data_0(rf_rd_data_0_flat),
         .rd_data_1(rf_rd_data_1_flat),
         .rd_data_2(rf_rd_data_2_flat),
         .wr_en(bank_wr_en),
         .wr_addr({4{rf_wr_addr[5:2]}}),
+        .wr_warp(rf_wr_warp),
         .wr_data({4{rf_wr_data}})
     );
     
