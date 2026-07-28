@@ -96,97 +96,27 @@ Background: `docs/ROADMAP_REAL_HARDWARE.md` (phases 0-7 to FPGA and silicon),
 
 ---
 
-## 4. THE TASK: reconcile the ALU with the ISA
+## 4. ALU/ISA reconciliation — DONE
 
-**`rtl/core/titan_x5_alu.v` implements a different opcode map than the rest of
-the stack.** The ISA header (`driver/titan_x6_isa.h`), the decoder
-(`rtl/core/titan_x5_decoder.v`), the compiler (`compiler/titan_compiler.py`)
-and the functional model (`driver/titan_x6_gpu_model.c`) all agree with each
-other. The ALU does not.
+`titan_x5_alu.v` used to implement a private opcode map while the decoder
+handed it ISA opcodes (opcode 8 = SHL executed as a compare; 3, 9, 10, 11 wrong;
+4, 12-15, 18-20 unimplemented and silently returning 0). It now matches the ISA,
+with the missing opcodes implemented: MULHI, signed DIV with both defined
+special cases, SHL/SHR/SRA, SLT/SLTU, MIN/MAX, integer FMA, FMIN/FMAX, CVT.
 
-| Opcode | ISA / decoder / compiler / model | `titan_x5_alu.v` |
-|--:|:--|:--|
-| 0 | ADD | ADD ✅ |
-| 1 | SUB | SUB ✅ |
-| 2 | MUL | MUL ✅ |
-| 3 | MULHI | **DIV** ❌ |
-| 4 | DIV | *unimplemented* ❌ |
-| 5 | AND | AND ✅ |
-| 6 | OR | OR ✅ |
-| 7 | XOR | XOR ✅ |
-| 8 | **SHL** | **CMP** ❌ |
-| 9 | SHR | **SLT** ❌ |
-| 10 | SRA | **BRANCH** ❌ |
-| 11 | SLT | **JUMP** ❌ |
-| 12 | SLTU | *unimplemented* ❌ |
-| 13 | MIN | *unimplemented* ❌ |
-| 14 | MAX | *unimplemented* ❌ |
-| 15 | FMA (integer) | *unimplemented* ❌ |
-| 16 | FADD | FADD ✅ |
-| 17 | FMUL | FMUL ✅ |
-| 18 | FMIN | *unimplemented* ❌ |
-| 19 | FMAX | *unimplemented* ❌ |
-| 20 | CVT | *unimplemented* ❌ |
-| 21 | SETP | **FMA** ❌ |
-| 26 | WMMA | WMMA ✅ |
+Guards added so it cannot regress:
+- `tb/uvm/test_alu_isa.py` (suite `alu_isa`) — every integer opcode against a
+  reference model transcribed from `driver/titan_x6_gpu_model.c`.
+- `compiler/test_compiler_isa.py` now parses the ALU's opcode localparams and
+  asserts they match the header, and that every ISA opcode <= 21 is implemented.
 
-Only **0, 1, 2, 5, 6, 7, 16, 17, 26** agree.
+**Known, documented exception:** opcode 21 is SETP in the ISA but still drives
+the verified FP fused multiply-add unit, because the ISA has *no FP FMA
+opcode* (15 is integer FMA) and slots 0-31 are all assigned. SETP is inert
+anyway — predicate registers do not exist in the pipeline. Assigning FP FMA a
+real opcode is an ISA decision that needs a human call.
 
-**Why it survived:** `compiler/test_compiler_isa.py` checks that the compiler's
-encoding matches the driver header and the **decoder**. It never checks the
-**ALU**. So the decoder correctly identifies opcode 8 as SHL, hands it to the
-ALU, and the ALU computes a comparison. It fails silently — a `SHL` returns 0
-rather than erroring.
-
-**Impact:** any compiled kernel using a shift, divide, min/max, comparison,
-integer FMA, conversion or predicate computes wrong answers today. This blocks
-running real kernels (including `compiler/kernels/matmul.py`) and blocks any
-meaningful memory-bandwidth measurement.
-
-### What to do
-
-1. **Make the ALU match the ISA.** Renumber its opcodes to the ISA map and
-   implement the missing ones: MULHI, DIV, SHL, SHR, SRA, SLT, SLTU, MIN, MAX,
-   integer FMA, FMIN, FMAX, CVT, SETP. Keep the existing verified FP units
-   (`rtl/fpu/`) wired where they already are — FADD/FMUL/FMA are correct and
-   IEEE-754-verified, do not disturb them.
-2. **Decide SETP properly.** Predicate registers do not exist in the pipeline
-   yet (`titan_x5_decoder.v` exposes `is_predicated`/`pred_reg`; nothing
-   consumes them). Either implement predicate registers, or implement SETP's
-   datapath and document predication as still absent. Say which you did.
-3. **Extend `compiler/test_compiler_isa.py` to cover the ALU**, not just the
-   decoder. This is the part that prevents regression — without it the same
-   class of bug returns.
-4. **Add a cocotb ALU suite** in `tb/uvm/` checking every ISA opcode against a
-   Python reference model, and register it in `tb/run_regression.py`. Model the
-   integer semantics on `driver/titan_x6_gpu_model.c`, which is the
-   authoritative reference (e.g. `MULHI` is signed high-word, `SRA` is
-   arithmetic).
-5. **Prove it end to end.** Once shifts work, switch the testbench kernel's
-   instruction 0 back from `MUL R6, R62, #4` to `SHL R6, R62, #2`
-   (`0x40DF0011`) and confirm the render test still passes. That is a direct
-   demonstration the divergence is closed.
-
-### Working rules that produced good results so far
-
-- **No invented numbers.** Every figure must come from a command that was
-  actually run. If something is unmeasured, say "unknown and unmeasured"
-  rather than estimating. This has been an explicit instruction from the user.
-- **Mutation-test new tests.** Inject a defect, confirm the test fails, restore,
-  confirm it passes. A test that has not been shown to fail proves nothing.
-  Every suite added on this branch was validated this way.
-- **Control-experiment every fix.** Revert the fix with the new test in place
-  and show the failure, so the bug is demonstrated rather than asserted.
-- Keep the honest-scope discipline in `README.md` — extend the limitations
-  section as capability grows; never quietly drop a caveat.
-- Commit with detailed messages explaining the *why*, and end with:
-  ```
-  Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
-  ```
-- Push with `git push -u origin claude/titan-x5-gpu-conversion-lf6udk`.
-  Do not open a PR unless asked.
-
----
+Measured cost: ALU grew 24,226 -> 31,650 cells (+30.6%, `ENABLE_TENSOR=0`).
 
 ## 5. Other known-open items (do not lose these)
 

@@ -208,11 +208,85 @@ def test_kernels():
             os.unlink(path)
 
 
+
+
+# ---------------------------------------------------------------------------
+# [4] ALU opcode map
+# ---------------------------------------------------------------------------
+ALU_V = os.path.join(os.path.dirname(__file__), "..", "rtl", "core",
+                     "titan_x5_alu.v")
+
+# titan_x5_alu.v local names -> ISA opcode names. The ALU implements the
+# arithmetic subset; LOAD/STORE/BRANCH/BARRIER are handled by the LSU and the
+# pipeline, and SIN/COS/RSQRT/ATOM_* are not ALU ops.
+ALU_TO_ISA = {
+    "OP_ADD": "ADD",   "OP_SUB": "SUB",   "OP_MUL": "MUL",
+    "OP_MULHI": "MULHI", "OP_DIV": "DIV", "OP_AND": "AND",
+    "OP_OR": "OR",     "OP_XOR": "XOR",   "OP_SHL": "SHL",
+    "OP_SHR": "SHR",   "OP_SRA": "SRA",   "OP_SLT": "SLT",
+    "OP_SLTU": "SLTU", "OP_MIN": "MIN",   "OP_MAX": "MAX",
+    "OP_IFMA": "FMA",  "OP_FADD": "FADD", "OP_FMUL": "FMUL",
+    "OP_FMIN": "FMIN", "OP_FMAX": "FMAX", "OP_CVT": "CVT",
+    "OP_WMMA": "WMMA",
+}
+
+
+def _parse_alu_opcodes():
+    with open(ALU_V, "r", encoding="utf-8") as f:
+        text = f.read()
+    return {m.group(1): int(m.group(2))
+            for m in re.finditer(r"localparam\s+(OP_\w+)\s*=\s*5'd(\d+)\s*;",
+                                 text)}
+
+
+def test_alu_opcode_map():
+    """The ALU must agree with the ISA, not just the decoder.
+
+    This check exists because it did not before. titan_x5_alu.v carried a
+    private opcode set (OP_CMP=8, OP_SLT=9, OP_BRANCH=10, OP_JUMP=11,
+    OP_DIV=3, OP_FMA=21) while the decoder handed it ISA opcodes, so opcode 8
+    -- SHL everywhere else -- executed as an equality compare and returned 0.
+    Opcodes 4, 12-15 and 18-20 were unimplemented and silently returned 0 too.
+    Only the decoder was ever checked, so nothing caught it.
+    """
+    print("[4] titan_x5_alu.v opcode map matches the ISA")
+    ops, _ = _parse_isa_header()
+    alu = _parse_alu_opcodes()
+
+    check(bool(alu), "parsed opcode localparams out of titan_x5_alu.v")
+
+    for alu_name, isa_name in sorted(ALU_TO_ISA.items()):
+        if alu_name not in alu:
+            check(False, f"{alu_name} is declared in titan_x5_alu.v")
+            continue
+        check(alu[alu_name] == ops[isa_name],
+              f"{alu_name} == TX6_OP_{isa_name} "
+              f"({alu[alu_name]} vs {ops[isa_name]})")
+
+    # Every arithmetic opcode the decoder routes to the ALU (is_alu is
+    # opcode <= 21) must be implemented by it. LOAD/STORE reuse ADD for
+    # address arithmetic, so they are not ALU opcodes themselves.
+    implemented = set(alu.values())
+    for isa_name, val in sorted(ops.items(), key=lambda kv: kv[1]):
+        if val > 21 or isa_name in ("LOAD", "STORE"):
+            continue
+        if isa_name == "SETP":
+            # Opcode 21 is knowingly still the FP fused unit: the ISA has no
+            # FP-FMA opcode and predicate registers do not exist yet. See the
+            # comment in titan_x5_alu.v. Flagged, not silently accepted.
+            check("OP_FPFMA" in alu and alu["OP_FPFMA"] == 21,
+                  "SETP (21) is documented as still mapped to the FP FMA unit")
+            continue
+        check(val in implemented,
+              f"TX6_OP_{isa_name} ({val}) is implemented by the ALU")
+
+
 def main():
     print("== Titan Compute Compiler: ISA encoding unit tests ==")
     test_encoding()
     test_spec_sync()
     test_kernels()
+    test_alu_opcode_map()
     print(f"\n{'COMPILER TEST FAILED' if _failures else 'COMPILER TEST PASSED'} "
           f"({_checks - _failures}/{_checks} checks passed)")
     return 1 if _failures else 0

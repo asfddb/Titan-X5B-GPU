@@ -201,29 +201,67 @@ Getting it working end to end surfaced four real defects, three pre-existing:
    `LAUNCH_WARP_MASK` now defaults to a single warp; a per-warp register file
    is the prerequisite for launching more.
 
-4. **The ALU implements a different opcode map than the ISA** (pre-existing,
-   and the most serious). `titan_x5_alu.v` disagrees with the ISA header, the
-   decoder, the compiler and the functional model:
+4. **The ALU implemented a different opcode map than the ISA** (pre-existing;
+   **fixed**, see below).
 
-   | Opcode | ISA / decoder / model / compiler | `titan_x5_alu.v` |
-   |--:|:--|:--|
-   | 3 | MULHI | DIV |
-   | 4 | DIV | *unimplemented* |
-   | 8 | **SHL** | **CMP** |
-   | 9 | SHR | SLT |
-   | 10 | SRA | BRANCH |
-   | 11 | SLT | JUMP |
-   | 12-15 | SLTU / MIN / MAX / FMA | *unimplemented* |
-   | 18-20 | FMIN / FMAX / CVT | *unimplemented* |
-   | 21 | SETP | FMA |
+#### The ALU/ISA divergence — fixed
 
-   Only 0,1,2,5,6,7,16,17,26 agree. `compiler/test_compiler_isa.py` checks the
-   compiler against the **decoder**, never against the ALU, which is why this
-   survived. A `SHL` executes as a compare and silently returns 0. **Any
-   compiled kernel using a shift, a divide, a min/max, a comparison or a
-   predicate currently computes wrong answers.** Reconciling the ALU with the
-   ISA — and extending the ISA test to cover it — should rank above further
-   memory work.
+`titan_x5_alu.v` carried a private opcode set while the decoder handed it ISA
+opcodes. Opcode 8 is `SHL` in the ISA header, the decoder, the compiler and the
+functional model; the ALU executed it as an equality compare. Opcodes 3, 9, 10,
+11 were likewise wrong, and 4, 12-15, 18-20 were not implemented at all — they
+fell through to `default` and returned 0. Every case failed **silently**.
+
+`compiler/test_compiler_isa.py` checked the compiler against the **decoder** and
+never against the ALU, which is why it survived.
+
+The ALU now implements the ISA map, including the previously missing `MULHI`
+(signed high word), signed `DIV` with its two defined special cases
+(`b == 0 -> 0xFFFFFFFF`, `INT32_MIN / -1 -> INT32_MIN`), `SHL`/`SHR`/`SRA`,
+`SLT`/`SLTU`, `MIN`/`MAX`, integer `FMA`, `FMIN`/`FMAX` and `CVT` in both
+directions. The stale `OP_BRANCH`/`OP_JUMP` (opcodes 10 and 11, which are `SRA`
+and `SLT` in the ISA) are gone — control flow lives in `titan_x5_pipeline.v`
+against `titan_x5_pc_unit` now — and the ALU's branch outputs are tied off.
+
+**One deliberate exception.** Opcode 21 is `SETP` in the ISA but remains mapped
+to the verified IEEE fused multiply-add unit, because **the ISA has no opcode
+for an FP FMA** — opcode 15 is documented and modelled as *integer* FMA — while
+`rtl/fpu/titan_x5_fp32_fma.v` is a real single-rounding fused unit that is
+bit-exact against an integer oracle. Slots 0-31 are all assigned, so there is
+nowhere to move it without an ISA change, and `SETP` is architecturally inert
+anyway (predicate registers do not exist in the pipeline). Assigning FP FMA a
+real opcode is an ISA decision, flagged rather than made unilaterally. The
+conformance test asserts this exception explicitly rather than ignoring it.
+
+**Verification added:**
+
+- `tb/uvm/test_alu_isa.py` (suite `alu_isa`) — every integer opcode against a
+  Python reference model transcribed from `driver/titan_x6_gpu_model.c`:
+  2,704 directed corner cases, 640 randomised ops, plus targeted tests for
+  shifts, signed division edge cases, `MULHI`, `FMIN`/`FMAX` and `CVT`.
+- `compiler/test_compiler_isa.py` now parses `titan_x5_alu.v` and asserts its
+  opcode map matches the header, and that every ISA opcode `<= 21` routed to
+  the ALU is actually implemented. 75/75 checks pass.
+
+**Control experiment:** reintroducing the divergence (moving `OP_SHL` off 8)
+fails the static check with `OP_SHL == TX6_OP_SHL (9 vs 8)` and fails 3/6
+tests in the dynamic suite.
+
+**End-to-end proof:** the full-chip kernel's first instruction is now
+`SHL R6, R62, #2` — the exact instruction that used to execute as a compare and
+make every lane compute address 0. The render test passes with the per-lane
+gradient intact.
+
+**Measured cost** (Yosys, `titan_x5_alu`, `ENABLE_TENSOR=0`):
+
+| ALU | Cells |
+|:--|--:|
+| before (private opcode map, most of the ISA unimplemented) | 24,226 |
+| after (full ISA map) | 31,650 |
+| delta | **+7,424 (+30.6%)** |
+
+Expected: the old unit was smaller because it did not implement shifts, a
+64-bit signed multiply, signed division, min/max, or the two converters.
 
 **What this does *not* say.** The 2-beats-per-line figure is measured, but
 total cycle count is not a bandwidth result: this kernel issues only two L2
@@ -354,7 +392,7 @@ Until this step, the design has no defensible TFLOPS or watts.
 | Dedicated 512-bit L2↔memory port | **Built and working** — 2 beats/line measured in the full-chip render test (32-bit path needed 64) |
 | Colours round-trip through VRAM on the wide path | **Verified** — the rendered triangle's per-lane gradient comes back from memory |
 | Achieved memory bandwidth | **Unknown and unmeasured** — the kernel issues only 2 L2 lines; a memory-bound kernel needs the ALU/ISA mismatch fixed first |
-| ALU matches the ISA | **No** — opcodes 3, 8, 9, 10, 11, 21 differ and 4, 12-15, 18-20 are unimplemented; shifts/compares/predicates silently compute wrong answers |
+| ALU matches the ISA | **Yes** — fixed, control-tested, +30.6% cells measured. Sole documented exception: opcode 21 (SETP) still drives the FP FMA unit because the ISA has no FP-FMA opcode |
 | Warps can hold independent register state | **No** — the register file has no warp dimension; only one warp is launched by default |
 | Full GPU addresses 128 GB | **Not yet** — LSU/L1/crossbar/top still 32-bit (Step 1) |
 | A thread can address >4 GiB | **No** — 32-bit registers; needs aperture or 64-bit ISA |

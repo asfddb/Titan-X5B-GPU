@@ -331,12 +331,11 @@ module tb_titan_x5_gpu_top();
         // the L2, and the dedicated 512-bit memory port -- so a rendered
         // triangle proves the wide path actually carries data, not just that
         // it fails to break anything.
-        // NB: MUL (opcode 2), not SHL. Opcode 8 is SHL in the ISA header, the
-        // decoder, the compiler and the functional model, but titan_x5_alu.v
-        // maps opcode 8 to OP_CMP -- the ALU implements a different opcode map
-        // than the rest of the stack (see docs/ROADMAP_128GB_VRAM.md). MUL is
-        // one of the opcodes where the two agree.
-        write_vram_word(CODE_BASE + 32'd0,  32'h10DF0021); // MUL   R6, R62, #4   (tid*4)
+        // SHL (opcode 8). This deliberately uses a shift: the ALU used to map
+        // opcode 8 to OP_CMP, so this instruction returned a comparison and
+        // every lane computed address 0. It now executes as a real shift, so
+        // a correct render here is direct evidence the ALU matches the ISA.
+        write_vram_word(CODE_BASE + 32'd0,  32'h40DF0011); // SHL   R6, R62, #2   (tid*4)
         write_vram_word(CODE_BASE + 32'd4,  32'h00C30600); // ADD   R6, R6, R3    (base + tid*4)
         write_vram_word(CODE_BASE + 32'd8,  32'hB8430001); // STORE [R6+0], R2
         write_vram_word(CODE_BASE + 32'd12, 32'hB0A30001); // LOAD  R5, [R6+0]

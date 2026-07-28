@@ -125,6 +125,18 @@ SUITES = {
         toplevel="tb_l2_top",
         module="test_l2",
     ),
+    "alu_isa": dict(
+        sources=[os.path.join(TB, "tb_fpu_top.v")] + rtl_files(
+            "core/titan_x5_alu.v",
+            "fpu/titan_x5_fp32_add.v",
+            "fpu/titan_x5_fp32_mul.v",
+            "fpu/titan_x5_fp32_fma.v",
+            "tensor/titan_x5_fp16_mul.v",
+            "tensor/titan_x6_tensor_core_array.v",
+        ),
+        toplevel="tb_fpu_top",
+        module="test_alu_isa",
+    ),
     "pc_unit": dict(
         sources=[os.path.join(TB, "tb_pc_unit_top.v")] + rtl_files(
             "core/titan_x5_pc_unit.v",
