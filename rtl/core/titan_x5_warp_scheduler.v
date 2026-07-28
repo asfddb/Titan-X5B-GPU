@@ -301,10 +301,22 @@ module titan_x5_warp_scheduler #(
         end
     endgenerate
     
-    // Registered PC output for timing
-    always @(posedge clk) begin
-        sched_pc <= warp_pc_arr[sched_warp_id];
-        sched_active_mask <= active_mask[sched_warp_id];
+    // PC / active-mask output.
+    //
+    // These MUST be combinational in sched_warp_id. `sched_warp_id` and
+    // `sched_valid` are combinational, and titan_x5_pipeline tags an
+    // accepted fetch with the *current* sched_warp_id while issuing the
+    // address from sched_pc. A registered sched_pc therefore supplied the
+    // PC of the warp selected on the *previous* cycle -- the fetch would be
+    // tagged warp A but addressed with warp B's PC.
+    //
+    // This was latent only because titan_x5_gpu_top tied every warp's PC to
+    // the same constant (`.warp_pc_in(256'h0)`), which made the stale mux
+    // unobservable. With titan_x5_pc_unit supplying per-warp PCs the two
+    // paths must line up, so the registers are removed.
+    always @(*) begin
+        sched_pc = warp_pc_arr[sched_warp_id];
+        sched_active_mask = active_mask[sched_warp_id];
     end
 
 endmodule

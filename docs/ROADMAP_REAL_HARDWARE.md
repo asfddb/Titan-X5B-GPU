@@ -110,7 +110,31 @@ The verification story is only worth as much as its reproducibility.
   so an environment problem is never mistaken for a design regression).
 - Document the venv path for distro-patched setuptools.
 
-**Gate:** clean container → `pip install -r tb/requirements.txt && python tb/run_regression.py` → 11/11 PASS, exit 0.
+**Gate:** clean container → `pip install -r tb/requirements.txt && python tb/run_regression.py` → all suites PASS, exit 0.
+
+#### Lint portability (open follow-up)
+
+The CI lint job pins `ubuntu-22.04`, which ships **Verilator 4**. On
+**Verilator 5** the same command does not merely warn — it *errors out before
+linting anything*:
+
+```
+%Error: rtl/memory/titan_x5_l1_cache.v:247: Unknown verilator comment:
+        '/*verilator 's unroll limit handling (BLKLOOPINIT-safe pattern)*/'
+```
+
+A two-line explanatory comment happened to **begin** with the linter's own
+name, so v5 parsed it as a metacomment pragma. Fixed (comment reworded only —
+no functional change), which unblocks v5 and reveals what was hiding behind it:
+
+| Category | Count | Assessment |
+|:--|--:|:--|
+| `GENUNNAMED` | 18 | Cosmetic, new in v5 (unlabelled `generate` blocks, IEEE 1800-2017 27.6). Consistent with the categories CI already suppresses — but `-Wno-GENUNNAMED` is not a valid flag on v4, so suppressing it would break the pinned job. Label the blocks instead. |
+| `SYNCASYNCNET` | 1 | **A real finding, not cosmetic.** `rst_n` is flopped both synchronously and asynchronously (`titan_x5_crossbar.v:70` async vs `titan_x5_gddr7_pam3_phy.v:67` sync). The CI comment explicitly lists `SYNCASYNCNET` among the lints that "remain fatal", so this is a latent reset-domain inconsistency that the v4 pin has been masking. It matters directly for Phase 6, where reset recovery on real silicon/FPGA is a genuine bring-up hazard. |
+
+Neither is suppressed here. Labelling the generate blocks and resolving the
+reset-domain inconsistency should land before the CI lint job is moved to a
+Verilator 5 image.
 
 ### Phase 1 — Program execution: per-warp PC, branches, EXIT *(the unlock)*
 
@@ -135,6 +159,53 @@ differentially tested against it rather than against a hand-written expectation.
 **Gate:** a cocotb suite runs a multi-instruction program with straight-line
 sequencing, a taken branch, a not-taken branch, a backward loop with a real trip
 count, and EXIT — RTL register state bit-matches the C functional model.
+
+#### Phase 1 status
+
+**Step 1 of 2 — done.** `rtl/core/titan_x5_pc_unit.v` exists and is verified by
+the `pc_unit` suite (7 tests: reset/launch, interleaved straight-line
+sequencing, absolute-index taken branch, a 6-trip backward loop, EXIT retire
+with sibling warps still running, same-cycle priority, and a 4,000-cycle
+randomised soak against a reference model that mirrors
+`driver/titan_x6_gpu_model.c`). Clean under `verilator -Wall`.
+
+The suite was **mutation-tested** to confirm it is not vacuous — three
+independently injected RTL defects were each caught:
+
+| Injected defect | Result |
+|:--|:--|
+| advance `pc + 2` instead of `pc + 1` | 6/7 tests fail |
+| sequential advance given priority over redirect | 2/7 tests fail |
+| retired warps allowed to keep advancing | 2/7 tests fail |
+
+Also fixed en route: `sched_pc`/`sched_active_mask` in
+`titan_x5_warp_scheduler.v` were **registered** while `sched_warp_id` and
+`sched_valid` are combinational, so an accepted fetch was tagged with warp A
+while being addressed with warp B's PC. Unobservable while every PC was the
+same constant; fatal the moment per-warp PCs differ. Now combinational.
+
+**Step 2 of 2 — remaining: integration.** Wiring the PC unit into
+`titan_x5_sm.v` / `titan_x5_gpu_top.v` requires the full-chip testbench to
+change at the same time, and that is why it is deliberately a separate step:
+
+`tb/tb_titan_x5_gpu_top.v:299` installs exactly **one** instruction
+(`write_vram_word(32'h0000_0000, 32'h07E10001)`) and the render test depends on
+all 32 lanes re-executing it forever. Once PCs advance, warps walk off into
+zero-filled VRAM. So integration means:
+
+1. consume `dec_is_branch` in `titan_x5_pipeline.v` and drive `redirect_*`;
+2. detect `TX6_OP_BARRIER` + `use_imm` + `imm == 0xFFF` and drive `retire_*`;
+3. flush the in-flight fetch and any FIFO entries of a redirected warp, so a
+   wrong-path instruction cannot reach EX;
+4. form the fetch byte address as `code_base + pc*4` (index → address);
+5. **rewrite the TB shader as a real program that ends in EXIT**, reproducing
+   the same 181-pixel gradient triangle — which then becomes a far stronger
+   result than the current one, because it proves real control flow.
+
+Predicated branches (`pred != 0`) additionally need `SETP` and predicate
+registers, which the pipeline does not implement yet — the decoder exposes
+`is_predicated`/`pred_reg` but `titan_x5_pipeline.v` does not connect them.
+That is Phase 4 work; Phase 1 covers unconditional branch and EXIT.
 
 ### Phase 2 — Instruction supply *(medium)*
 

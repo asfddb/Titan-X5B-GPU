@@ -22,6 +22,8 @@ Suites:
     rt_core  - multi-ray BVH traversal engine over random scenes
     tensor   - 16x16 output-stationary tensor array via the warp-sync
                WMMA dispatcher (INT8 SIMD, FP8 E4M3/E5M2, FP16)
+    pc_unit  - per-warp program counter file: sequencing, absolute-index
+               branches, backward loops, EXIT retire, same-cycle priority
 """
 
 import os
@@ -122,6 +124,13 @@ SUITES = {
         ),
         toplevel="tb_l2_top",
         module="test_l2",
+    ),
+    "pc_unit": dict(
+        sources=[os.path.join(TB, "tb_pc_unit_top.v")] + rtl_files(
+            "core/titan_x5_pc_unit.v",
+        ),
+        toplevel="tb_pc_unit_top",
+        module="test_pc_unit",
     ),
 }
 
