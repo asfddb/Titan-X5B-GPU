@@ -37,7 +37,11 @@ NUM_SLICES = 2
 LINE_BYTES = 16
 LINE_BITS = LINE_BYTES * 8
 LINE_MASK = (1 << LINE_BITS) - 1
-ADDR_W = 32
+# 37-bit physical address => 128 GiB addressable VRAM. A 32-bit path caps the
+# design at 4 GiB no matter how much physical memory is attached.
+ADDR_W = 37
+ADDR_MASK = (1 << ADDR_W) - 1
+GIB = 1 << 30
 ALL_READY = (1 << NUM_SLICES) - 1
 
 
@@ -134,10 +138,12 @@ class ReqDriver:
         self.l2.req_wdata.value = self.rwdata
 
     def _set_slice(self, s, valid, addr, write, wdata):
-        m32 = 0xFFFFFFFF
+        # Mask must track ADDR_W: a hardcoded 32-bit mask would silently
+        # truncate every address above 4 GiB instead of failing loudly.
         self.rv = (self.rv & ~(1 << s)) | ((valid & 1) << s)
         self.rwrite = (self.rwrite & ~(1 << s)) | ((write & 1) << s)
-        self.raddr = (self.raddr & ~(m32 << (s * ADDR_W))) | ((addr & m32) << (s * ADDR_W))
+        self.raddr = (self.raddr & ~(ADDR_MASK << (s * ADDR_W))) | \
+                     ((addr & ADDR_MASK) << (s * ADDR_W))
         self.rwdata = (self.rwdata & ~(LINE_MASK << (s * LINE_BITS))) | \
                       ((wdata & LINE_MASK) << (s * LINE_BITS))
         self._push()
@@ -263,4 +269,60 @@ async def test_l2_parallel_slices(dut):
     g1 = await drv.request(1, False, a1)
     assert g0 == d0, f"slice0 got {g0:#x} exp {d0:#x}"
     assert g1 == d1, f"slice1 got {g1:#x} exp {d1:#x}"
+    mem.stop = True
+
+
+@cocotb.test()
+async def test_l2_128gib_addressing(dut):
+    """Data integrity at addresses spanning the full 128 GiB range.
+
+    This is the capacity check. A 32-bit address path caps the design at
+    4 GiB: every address below is >= 4 GiB, and the highest sits just under
+    2^37. If the path were still 32 bits wide these addresses would alias
+    down onto their low 32 bits, so two distinct high addresses that share
+    low bits would collide and return each other's data.
+
+    The pairs below are chosen to make exactly that failure observable:
+    each high address is paired with one whose low 32 bits are identical
+    but whose bits above 32 differ. Under a truncating path they become the
+    same line; under a correct 37-bit path they are distinct.
+    """
+    rng, mem, drv = await _setup(dut, seed=5)
+
+    base = addr_for(0, 0, 0x500)          # low-order layout bits, tag 0x500
+    top = (1 << ADDR_W) - (1 << 20)       # just under 128 GiB
+
+    # (label, address) - all >= 4 GiB except the deliberate low control
+    addrs = [
+        ("low control  <4GiB", base),
+        ("4 GiB",              (4 * GIB) | base),
+        ("4 GiB + alias",      (5 * GIB) | base),   # same low32 as above
+        ("32 GiB",             (32 * GIB) | base),
+        ("64 GiB",             (64 * GIB) | base),
+        ("96 GiB",             (96 * GIB) | base),
+        ("127 GiB (top)",      (top & ~0xFF) | base),
+    ]
+
+    for _, a in addrs:
+        assert a <= ADDR_MASK, f"address {a:#x} exceeds {ADDR_W}-bit space"
+
+    # Distinct data per address; write all, then read all back.
+    data = {}
+    for label, a in addrs:
+        d = rng.getrandbits(LINE_BITS)
+        data[a] = (label, d)
+        await drv.request(0, True, a, d)
+
+    for label, a in addrs:
+        got = await drv.request(0, False, a)
+        exp_label, exp = data[a]
+        assert got == exp, (
+            f"{exp_label} @ {a:#x} ({a / GIB:.1f} GiB): "
+            f"got {got:#x} exp {exp:#x} -- address truncated or aliased")
+
+    n_high = sum(1 for _, a in addrs if a >= 4 * GIB)
+    dut._log.info(
+        "128 GiB addressing verified: %d distinct lines above 4 GiB, "
+        "highest at %.1f GiB (%d-bit physical address)",
+        n_high, max(a for _, a in addrs) / GIB, ADDR_W)
     mem.stop = True

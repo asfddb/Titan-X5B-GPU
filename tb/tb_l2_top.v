@@ -14,7 +14,10 @@ module tb_l2_top;
     reg rst_n = 1'b0;
 
     titan_x6_banked_l2 #(
-        .ADDR_WIDTH(32),
+        // 37-bit physical address = 128 GiB of addressable VRAM.
+        // 32 bits caps the design at 4 GiB, which is the real capacity limit
+        // regardless of how many HBM stacks the memory controller talks to.
+        .ADDR_WIDTH(37),
         .DATA_WIDTH(256),
         .LINE_SIZE(16),     // 128-bit lines
         .WAYS(8),           // production associativity (slice replace_way is 3-bit)
