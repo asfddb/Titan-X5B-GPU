@@ -30,7 +30,7 @@ Versions used previously: Icarus 12.0, cocotb 2.0.1, Verilator 5.020, Yosys 0.33
 ## 2. How to verify anything
 
 ```bash
-# unit/transaction regression - 14 suites, must be 14/14 PASS, exit 0
+# unit/transaction regression - 15 suites, must be 15/15 PASS, exit 0
 python3 tb/run_regression.py
 python3 tb/run_regression.py fpu lsu          # subset
 
@@ -73,11 +73,16 @@ Recently completed on this branch:
   `titan_x5_mem_controller` gained a dedicated wide port. Measured 2 beats per
   128-byte line where the 32-bit path needed 64. Suites: `l2adapt32`,
   `l2adapt512`.
+- **ALU now matches the ISA** (section 4). Suite: `alu_isa`, plus a static
+  opcode-map check in `compiler/test_compiler_isa.py` (run it directly:
+  `python3 compiler/test_compiler_isa.py`, 75/75 checks).
+- **STORE fixed** — it sourced its data from the address offset instead of
+  `rd`, so `STORE [r6+0], r2` stored 0. Now reads `rd` via the spare rs3 port.
 
 The testbench kernel at `tb/tb_titan_x5_gpu_top.v` is now a real program:
 
 ```
-0: MUL     R6, R62, #4     R6 = tid*4
+0: SHL     R6, R62, #2     R6 = tid*4
 1: ADD     R6, R6, R3      R6 = DATA_BASE + tid*4
 2: STORE   [R6+0], R2      per-lane colour -> VRAM
 3: LOAD    R5, [R6+0]      read back via L2 and the 512-bit port
