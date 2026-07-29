@@ -181,6 +181,39 @@ SUITES = {
         module="test_l2_adapter",
         parameters={"DW": 512},
     ),
+    # ---- Titan X7: the high-frequency generation ------------------------
+    # These target a short-stage, advanced-node budget rather than the x5
+    # blocks' single-cycle-everything structure. See
+    # docs/PLAN_ADVANCED_NODE_CLEAN_SHEET.md for why each exists.
+    "fma8": dict(
+        sources=[os.path.join(TB, "tb_fma_x7.v")] + rtl_files(
+            "fpu/titan_x5_fp32_fma.v",
+            "fpu/titan_x7_fp32_fma_pipe.v",
+        ),
+        toplevel="tb_fma_x7",
+        module="test_fma_x7",
+    ),
+    "tensor7": dict(
+        sources=rtl_files(
+            "tensor/titan_x7_tensor_pe.v",
+            "tensor/titan_x7_tensor_array.v",
+        ),
+        toplevel="titan_x7_tensor_array",
+        module="test_tensor_x7",
+    ),
+    "sm7": dict(
+        sources=rtl_files(
+            "core/titan_x5_decoder.v",
+            "core/titan_x7_scoreboard.v",
+            "core/titan_x7_branch_predictor.v",
+            "core/titan_x7_warp_scheduler.v",
+            "fpu/titan_x7_fp32_fma_pipe.v",
+            "core/titan_x7_sm.v",
+        ),
+        toplevel="titan_x7_sm",
+        module="test_sm_x7",
+        parameters={"LANES": 4},
+    ),
     # Not a cocotb suite: pytest driving whole-GPU kernel runs. Handled by
     # run_compute_suite(); the dict entry exists so it appears in the suite
     # list and runs by default.
