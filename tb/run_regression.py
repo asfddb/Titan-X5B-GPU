@@ -222,6 +222,21 @@ SUITES = {
         module="test_sm_x7",
         parameters={"LANES": 4},
     ),
+    # Cross-warp independence. Separate module from sm7 because that suite's
+    # imem/dmem models run for the whole simulation; see the docstring.
+    "sm7warp": dict(
+        sources=rtl_files(
+            "core/titan_x5_decoder.v",
+            "core/titan_x7_scoreboard.v",
+            "core/titan_x7_branch_predictor.v",
+            "core/titan_x7_warp_scheduler.v",
+            "fpu/titan_x7_fp32_fma_pipe.v",
+            "core/titan_x7_sm.v",
+        ),
+        toplevel="titan_x7_sm",
+        module="test_sm_x7_warps",
+        parameters={"LANES": 4},
+    ),
     # Not a cocotb suite: pytest driving whole-GPU kernel runs. Handled by
     # run_compute_suite(); the dict entry exists so it appears in the suite
     # list and runs by default.
