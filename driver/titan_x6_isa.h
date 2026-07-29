@@ -65,7 +65,20 @@ enum {
     TX6_OP_WMMA     = 26,  // tensor tile op, see below
     TX6_OP_SIN      = 27,
     TX6_OP_COS      = 28,
-    TX6_OP_RSQRT    = 29,
+    // Slot 29 was RSQRT. RSQRT was assigned here and implemented in the C
+    // functional model, but never implemented in hardware -- titan_x5_alu.v
+    // has no SFU at all. The slot was reassigned to the FP32 fused
+    // multiply-add, which is the opposite case: rtl/fpu/titan_x5_fp32_fma.v is
+    // a real single-rounding fused unit, IEEE-754 verified against an integer
+    // oracle, that had no ISA opcode and was squatting on 21 -- the slot SETP
+    // needs. Opcode 15 (TX6_OP_FMA) is and remains INTEGER fma.
+    //
+    // This trades a transcendental that was never built for a datapath that
+    // was, and frees 21 for SETP. Adding RSQRT later needs a new ISA decision;
+    // the encoding is full (see the bit layout above), so it would cost either
+    // a register-index bit or a wider instruction word.
+    TX6_OP_FFMA     = 29,  // fp32 fused multiply-add: rd = rs1*rs2 + rs3
+                           // (single rounding)
     TX6_OP_ATOM_ADD = 30,  // rd = old mem32[rs1]; mem32[rs1] += rs2
     TX6_OP_ATOM_CAS = 31   // rd = old; if (old == rs2) mem32[rs1] = rs3
 };

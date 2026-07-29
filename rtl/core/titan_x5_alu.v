@@ -91,20 +91,21 @@ module titan_x5_alu #(
     localparam OP_FMIN  = 5'd18;
     localparam OP_FMAX  = 5'd19;
     localparam OP_CVT   = 5'd20;  // rs3[0]=0 int->fp32, 1 fp32->int
-    // Opcode 21 is SETP in the ISA. It is left mapped to the verified IEEE
-    // fused multiply-add unit here, deliberately, because:
-    //   * the ISA has NO opcode for an FP FMA -- opcode 15 is documented and
-    //     modelled as INTEGER fma -- yet rtl/fpu/titan_x5_fp32_fma.v is a real
-    //     single-rounding fused unit that is bit-exact against an integer
-    //     oracle (see docs/REMEDIATION_REPORT.md). Slots 0-31 are all
-    //     assigned, so there is nowhere to move it without an ISA change.
-    //   * SETP writes a predicate register, and predicate registers do not
-    //     exist in titan_x5_pipeline.v (the decoder exposes is_predicated /
-    //     pred_reg and nothing consumes them), so SETP is architecturally
-    //     inert today regardless of what the ALU does with it.
-    // Assigning FP FMA a real opcode is an ISA decision, recorded as open
-    // work rather than made unilaterally here.
-    localparam OP_FPFMA = 5'd21;
+    // FP32 fused multiply-add. This used to squat on opcode 21 -- the slot the
+    // ISA assigns to SETP -- because the ISA had no FP-FMA opcode at all
+    // (opcode 15 is documented and modelled as INTEGER fma) while
+    // rtl/fpu/titan_x5_fp32_fma.v is a real single-rounding fused unit,
+    // bit-exact against an integer oracle (docs/REMEDIATION_REPORT.md).
+    //
+    // Slot 29 was RSQRT: assigned in the ISA header and implemented in the C
+    // functional model, but never built in hardware -- there is no SFU in this
+    // ALU. Reassigning it trades a transcendental that never existed for a
+    // datapath that does, and returns 21 to SETP. See driver/titan_x6_isa.h.
+    //
+    // SETP is not handled here at all: its rd field carries {cond, pdst}
+    // rather than a register index, so it is resolved in the ID stage of
+    // titan_x5_pipeline.v and never reaches this ALU.
+    localparam OP_FPFMA = 5'd29;
     localparam OP_WMMA  = 5'd26;  // tensor core wmma
 
     // ---- helpers ---------------------------------------------------------

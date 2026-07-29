@@ -26,6 +26,8 @@ Suites:
                branches, backward loops, EXIT retire, same-cycle priority
     regfile  - per-warp vector register file: two warps holding different
                values in the same register number, cross-warp isolation
+    compute  - compiled kernels executed on the whole GPU (pytest, quick
+               subset only; see tb/test_compute_kernels.py for the rest)
 """
 
 import os
@@ -179,6 +181,10 @@ SUITES = {
         module="test_l2_adapter",
         parameters={"DW": 512},
     ),
+    # Not a cocotb suite: pytest driving whole-GPU kernel runs. Handled by
+    # run_compute_suite(); the dict entry exists so it appears in the suite
+    # list and runs by default.
+    "compute": dict(pytest=True),
 }
 
 
@@ -213,7 +219,30 @@ def check_results(xml_path):
     print(f"    results: {n} testcase(s), all passed")
 
 
+def run_compute_suite():
+    """Compiled kernels on the whole GPU (pytest, not cocotb).
+
+    Only the `not slow` subset runs here: these are full-chip Icarus
+    simulations and the design does roughly 90 clock cycles per wall second,
+    so the counted loops, the SETP condition sweep and matmul are left to an
+    explicit `pytest tb/test_compute_kernels.py`. Running the quick ones by
+    default is what stops the compiler -> ISA -> RTL path from rotting
+    unnoticed.
+    """
+    import subprocess
+    print("\n=== [compute] building & running ===", flush=True)
+    proc = subprocess.run(
+        [sys.executable, "-m", "pytest", os.path.join(TB, "test_compute_kernels.py"),
+         "-q", "-m", "not slow", "-p", "no:cacheprovider"],
+        cwd=TB)
+    if proc.returncode != 0:
+        raise RuntimeError(f"pytest exited {proc.returncode}")
+    print("    results: quick compute kernels passed")
+
+
 def run_suite(name, cfg):
+    if name == "compute":
+        return run_compute_suite()
     print(f"\n=== [{name}] building & running ===", flush=True)
     runner = get_runner("icarus")
     build_dir = os.path.join(TB, "sim_build", name)

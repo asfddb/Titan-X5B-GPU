@@ -48,6 +48,8 @@ module titan_x5_sm #(
     output wire [1:0]               dbg_mesi_state,
     output wire                     dbg_lsu_resp_valid,
     output wire [5:0]               dbg_lsu_xactions,
+    // sticky: a divergent predicate mask was used (unimplemented case)
+    output wire                     dbg_pred_divergent,
 
     // FP rounding mode for the vector FPUs (00 RNE, 01 RTZ, 10 RDN, 11 RUP)
     input  wire [1:0]               fp_rm,
@@ -329,6 +331,7 @@ module titan_x5_sm #(
         .wb_warp_out(wb_warp_id),
         .wb_dest_reg_out(wb_dest_reg),
         .fifo_full(fifo_full),
+        .dbg_pred_divergent(dbg_pred_divergent),
         .wmma_valid(),
         .wmma_a(),
         .wmma_b()

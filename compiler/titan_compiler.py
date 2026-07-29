@@ -57,7 +57,7 @@ OPS = {
     "SRA": 10, "SLT": 11, "SLTU": 12, "MIN": 13, "MAX": 14,
     "FMA": 15, "FADD": 16, "FMUL": 17, "FMIN": 18, "FMAX": 19,
     "CVT": 20, "SETP": 21, "LOAD": 22, "STORE": 23, "BRANCH": 24,
-    "BARRIER": 25, "WMMA": 26, "SIN": 27, "COS": 28, "RSQRT": 29,
+    "BARRIER": 25, "WMMA": 26, "SIN": 27, "COS": 28, "FFMA": 29,
     "ATOM_ADD": 30, "ATOM_CAS": 31,
 }
 OP_NAMES = {v: k for k, v in OPS.items()}

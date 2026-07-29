@@ -274,7 +274,7 @@ async def test_fp16_mul(dut):
     dut._log.info("fp16_mul exhaustive-random passed")
 
 
-OP_FADD, OP_FMUL, OP_FMA = 16, 17, 21
+OP_FADD, OP_FMUL, OP_FMA = 16, 17, 29   # FP FMA moved 21 -> 29 (21 is SETP)
 
 
 @cocotb.test()

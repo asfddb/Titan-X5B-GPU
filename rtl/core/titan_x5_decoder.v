@@ -29,8 +29,9 @@ module titan_x5_decoder (
     output wire        is_alu,
     output wire        is_valid,
     // new decode outputs
+    output wire        is_setp,        // SETP: writes a predicate, not a GPR
     output wire        is_wmma,        // tensor core wmma instruction
-    output wire        is_sfu,         // special function unit (sin/cos/rsqrt)
+    output wire        is_sfu,         // special function unit (sin/cos)
     output wire        is_atomic,      // atomic memory operation
     output wire        is_barrier,     // thread barrier synchronization
     output wire        is_predicated,  // instruction is predicated
@@ -95,18 +96,29 @@ module titan_x5_decoder (
     // --- SFU ---
     // 27: SIN       - Sine (Special Function Unit)
     // 28: COS       - Cosine (Special Function Unit)
-    // 29: RSQRT     - Reciprocal Square Root
+    // 29: FFMA      - FP32 fused multiply-add (was RSQRT; see titan_x6_isa.h)
     // --- Atomic ---
     // 30: ATOM_ADD  - Atomic Add to global memory
     // 31: ATOM_CAS  - Atomic Compare-And-Swap
 
-    assign is_alu       = (opcode <= 5'd21);
+    // is_alu selects the instructions that launch into EX and write a GPR.
+    //
+    // SETP (21) is deliberately NOT one of them. Its rd field is not a
+    // register index -- it carries {cond[2:0], pdst[1:0]} -- so letting it
+    // reach writeback would scribble on GPR #{cond,pdst}. Like BRANCH and
+    // BARRIER it is resolved in the ID stage, where its operands are already
+    // available through the forwarding network. is_setp is its own class.
+    //
+    // FFMA (29) is an ALU op despite sitting in the old SFU range: it drives
+    // the fused FP unit in titan_x5_alu.v and writes a GPR normally.
+    assign is_alu       = (opcode <= 5'd20) || (opcode == 5'd29);
+    assign is_setp      = (opcode == 5'd21);
     assign is_mem_load  = (opcode == 5'd22);
     assign is_mem_store = (opcode == 5'd23);
     assign is_branch    = (opcode == 5'd24);
     assign is_barrier   = (opcode == 5'd25);
     assign is_wmma      = (opcode == 5'd26);
-    assign is_sfu       = (opcode >= 5'd27) && (opcode <= 5'd29);
+    assign is_sfu       = (opcode >= 5'd27) && (opcode <= 5'd28);
     assign is_atomic    = (opcode >= 5'd30);
 
     assign is_valid     = 1'b1; // all 32 opcodes are valid in v2 isa

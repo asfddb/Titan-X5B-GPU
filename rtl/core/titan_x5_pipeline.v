@@ -90,6 +90,11 @@ module titan_x5_pipeline #(
     output wire [5:0] wb_dest_reg_out,
     output wire        fifo_full,
 
+    // Sticky: an instruction was predicated on a mask whose lanes disagreed.
+    // Divergent predication is not implemented (see the predicate block
+    // below); this makes the condition observable rather than silent.
+    output wire        dbg_pred_divergent,
+
     // tensor core datapath
     output wire        wmma_valid,
     output wire [1023:0] wmma_a,
@@ -215,7 +220,8 @@ module titan_x5_pipeline #(
     wire [15:0] dec_imm;
     wire        dec_use_imm, dec_is_branch, dec_is_load, dec_is_store, dec_is_alu, dec_is_valid;
     
-    wire        dec_is_wmma, dec_is_barrier;
+    wire        dec_is_wmma, dec_is_barrier, dec_is_setp, dec_is_predicated;
+    wire [1:0]  dec_pred_reg;
     titan_x5_decoder decoder_inst (
         .inst(id_inst_raw),
         .opcode(dec_opcode),
@@ -231,31 +237,90 @@ module titan_x5_pipeline #(
         .is_alu(dec_is_alu),
         .is_valid(dec_is_valid),
         .is_wmma(dec_is_wmma),
-        .is_barrier(dec_is_barrier)
+        .is_barrier(dec_is_barrier),
+        .is_setp(dec_is_setp),
+        .is_predicated(dec_is_predicated),
+        .pred_reg(dec_pred_reg)
     );
 
+    // ---- predicate registers ----------------------------------------------
+    //
+    // Per warp: P0 is hardwired true, P1-P3 are writable by SETP. Each is a
+    // 32-bit per-lane mask, because the machine is 32-wide SIMT and SETP
+    // compares per-lane operands -- storing one bit per warp would silently
+    // throw away 31 lanes' answers.
+    //
+    // Semantics follow driver/titan_x6_gpu_model.c, which gates the whole
+    // instruction:  if (!p[pred]) { pc = next_pc; continue; }
+    // so a predicated-off BRANCH falls through rather than branching.
+    //
+    // SCOPE -- divergent predication is NOT implemented. An instruction
+    // predicated on P executes iff every lane of P is true, and is skipped iff
+    // every lane is false. A mask whose lanes disagree is lane divergence,
+    // which needs a reconvergence stack this pipeline does not have. Rather
+    // than pick a silently-wrong answer, such an instruction is skipped and
+    // pred_divergent is raised (sticky) so the condition is detectable instead
+    // of invisible. Uniform predicates -- which is what the compiler's counted
+    // loops generate, since the loop counter is warp-uniform -- are exact.
+    localparam PRED_PER_WARP = 3;  // P1..P3; P0 is not stored
+    reg [31:0] pred_mask [0:NUM_WARPS*PRED_PER_WARP-1];
+    reg        pred_divergent;     // sticky: a divergent predicate was used
+
+    // P0 always reads as all lanes true. The index is clamped rather than
+    // written as `pred_reg - 1` inside the ternary: the array index is
+    // evaluated regardless of which arm is selected, and pred_reg == 0 would
+    // make it wrap to a huge value and read out of bounds (harmless here
+    // because the result is discarded, but it reads back as X and would trip
+    // an X-propagation check).
+    wire [1:0]  id_pred_sel = dec_pred_reg;
+    wire [4:0]  id_pred_idx = id_warp_raw*PRED_PER_WARP +
+                              ((id_pred_sel == 2'd0) ? 2'd0 : (id_pred_sel - 2'd1));
+    wire [31:0] id_pred_val = (id_pred_sel == 2'd0) ? 32'hFFFF_FFFF
+                                                   : pred_mask[id_pred_idx];
+
+    wire id_pred_all_true  = (id_pred_val == 32'hFFFF_FFFF);
+    wire id_pred_all_false = (id_pred_val == 32'h0000_0000);
+    wire id_pred_diverged  = !id_pred_all_true && !id_pred_all_false;
+
+    // The instruction is allowed to take effect only on a uniform-true
+    // predicate. P0 (the unpredicated case) is all-true by construction, so
+    // unpredicated instructions are unaffected.
+    wire id_pred_ok = id_pred_all_true;
+
     // ---- control-flow resolution (ID stage) -------------------------------
-    // BRANCH and BARRIER are neither ALU nor memory ops (is_alu covers
-    // opcodes <= 21), so they never launch into EX; they retire here, at the
-    // point the instruction is popped from the FIFO.
+    // BRANCH, BARRIER and SETP are neither ALU nor memory ops (is_alu covers
+    // opcodes <= 20 plus 29), so they never launch into EX; they resolve here,
+    // at the point the instruction is popped from the FIFO.
     //
     // Only a non-stale pop may steer control flow -- a wrong-path branch must
     // not redirect the warp that already branched away from it.
+    //
+    // id_commit is the pop; id_exec additionally requires the predicate to
+    // permit the instruction. A predicated-off instruction is still popped
+    // (it must not block the FIFO) but has no architectural effect.
     wire id_commit = fifo_pop && id_inst_valid_raw;
+    wire id_exec   = id_commit && id_pred_ok;
+
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n)
+            pred_divergent <= 1'b0;
+        else if (id_commit && dec_is_predicated && id_pred_diverged)
+            pred_divergent <= 1'b1;
+    end
+    assign dbg_pred_divergent = pred_divergent;
 
     // TX6_OP_BRANCH: pc = imm (absolute instruction index).
-    // Predicated branches (pred != 0) additionally require SETP and the
-    // predicate registers, which the pipeline does not implement yet; the
-    // decoder exposes is_predicated/pred_reg but nothing consumes them.
-    // Until then every branch is unconditional, matching P0 = "always".
-    assign pc_redirect_valid = id_commit && dec_is_branch;
+    // Now genuinely conditional: id_exec folds in the predicate, so a branch
+    // whose predicate is false falls through instead of redirecting. That is
+    // what makes a loop able to have an exit condition.
+    assign pc_redirect_valid = id_exec && dec_is_branch;
     assign pc_redirect_warp  = id_warp_raw;
     assign pc_redirect_pc    = {16'd0, dec_imm};
 
     // TX6_OP_BARRIER with use_imm && imm == 0xFFF is EXIT (TX6_EXIT_IMM):
     // the warp retires and stops being scheduled. A plain BARRIER (without
     // that immediate) is thread synchronisation, not termination.
-    assign pc_retire_valid = id_commit && dec_is_barrier && dec_use_imm &&
+    assign pc_retire_valid = id_exec && dec_is_barrier && dec_use_imm &&
                              (dec_imm == 16'h0FFF);
     assign pc_retire_warp  = id_warp_raw;
 
@@ -313,6 +378,54 @@ module titan_x5_pipeline #(
     wire [1023:0] fwd_data2 = fwd_rs2_ex ? ex_res : (fwd_rs2_mem ? mem_res : (fwd_rs2_wb ? wb_res : rf_rd_data2));
     wire [1023:0] fwd_data3 = fwd_rs3_ex ? ex_res : (fwd_rs3_mem ? mem_res : (fwd_rs3_wb ? wb_res : rf_rd_data3));
 
+    // ---- SETP (opcode 21) --------------------------------------------------
+    // rd carries {cond[2:0], pdst[1:0]}; P[pdst] = compare(rs1, rs2|imm) per
+    // lane. pdst == 0 is a no-op because P0 is read-only true, matching the
+    // model's `if (pdst != 0) p[pdst] = res;`.
+    //
+    // Resolved in ID rather than EX because the ALU has no rd port (so the
+    // condition code could not reach it) and because the operands are already
+    // available here through the same forwarding network every other
+    // instruction uses -- setp_a/setp_b below are literally the operands the
+    // EX stage would have latched. Resolving here also means the predicate is
+    // written the cycle SETP commits, so the very next instruction sees it: no
+    // SETP -> BRANCH hazard, which is exactly the back-to-back sequence the
+    // compiler emits for a loop exit.
+    wire [2:0] setp_cond = dec_rd[4:2];
+    wire [1:0] setp_pdst = dec_rd[1:0];
+
+    wire [1023:0] setp_a = fwd_data1;
+    wire [1023:0] setp_b = dec_use_imm ? id_imm_ext : fwd_data2;
+
+    wire [31:0] setp_result;
+    genvar lane;
+    generate
+        for (lane = 0; lane < 32; lane = lane + 1) begin : setp_lane_gen
+            wire [31:0] la = setp_a[lane*32 +: 32];
+            wire [31:0] lb = setp_b[lane*32 +: 32];
+            // TX6_CMP_*: 0 EQ, 1 NE, 2 LT (signed), 3 GE (signed),
+            //            4 LTU, 5 GEU. 6/7 are unassigned and read false.
+            assign setp_result[lane] =
+                (setp_cond == 3'd0) ? (la == lb) :
+                (setp_cond == 3'd1) ? (la != lb) :
+                (setp_cond == 3'd2) ? ($signed(la) <  $signed(lb)) :
+                (setp_cond == 3'd3) ? ($signed(la) >= $signed(lb)) :
+                (setp_cond == 3'd4) ? (la <  lb) :
+                (setp_cond == 3'd5) ? (la >= lb) : 1'b0;
+        end
+    endgenerate
+
+    integer pi;
+    always @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            for (pi = 0; pi < NUM_WARPS*PRED_PER_WARP; pi = pi + 1)
+                pred_mask[pi] <= 32'd0;
+        end else if (id_exec && dec_is_setp && (setp_pdst != 2'd0)) begin
+            pred_mask[id_warp_raw*PRED_PER_WARP +
+                      {30'd0, setp_pdst} - 1] <= setp_result;
+        end
+    end
+
     reg [2:0]  id_warp_reg;
     reg [4:0]  id_opcode;
     reg [5:0]  id_rd;
@@ -324,7 +437,11 @@ module titan_x5_pipeline #(
         if (!rst_n) begin
             id_valid_reg <= 0;
         end else if (id_ready) begin
-            id_valid_reg <= id_inst_valid_raw && dec_is_valid;
+            // id_pred_ok stops a predicated-off instruction from launching
+            // into EX, matching the model's "predicated off: fall through".
+            // SETP never gets here anyway: it is not is_alu, so ex_launch
+            // excludes it, and it resolves entirely in ID.
+            id_valid_reg <= id_inst_valid_raw && dec_is_valid && id_pred_ok;
             id_warp_reg  <= id_warp_raw;
             id_opcode    <= dec_opcode;
             id_rd        <= dec_rd;

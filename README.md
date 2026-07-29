@@ -64,7 +64,14 @@ By the numbers (all countable from this repo):
 **Software (the hardware/software contract)**
 - `compiler/titan_compiler.py` — a small compute compiler that emits the Titan ISA
 - `driver/` — C kernel driver + C++ runtime
-- A test that checks the **compiler's ISA encoding matches the driver header and the RTL decoder** (`compiler/test_compiler_isa.py`)
+- A test that checks the **compiler's ISA encoding matches the driver header, the RTL
+  decoder and the ALU** (`compiler/test_compiler_isa.py`)
+- **Compiled kernels actually run on the RTL.** `compiler/kernels/matmul.py` is compiled
+  to Titan ISA, loaded into VRAM, executed by `titan_x5_gpu_top` in simulation, and the
+  result matrix compared against NumPy — **bit-exact**, signed negatives included, at
+  2×2×2 and 4×4×4 (`tb/test_compute_kernels.py`). This needs real control flow: the
+  compiler lowers `for` loops to `SETP` plus a predicated `BRANCH`, so it only became
+  possible once predicate registers existed.
 
 ---
 
@@ -131,10 +138,18 @@ docs/         architecture, microarchitecture, ISA, verification notes
 
 **Simulate (Icarus + cocotb):**
 ```bash
-pip install cocotb pytest
-# example: run the NoC / ALU testbenches under tb/
+pip install cocotb pytest numpy
+# the block-level regression (17 suites)
 python tb/run_regression.py
 ```
+
+**Run a compiled kernel on the RTL, including the bit-exact matmul:**
+```bash
+python -m pytest tb/test_compute_kernels.py -v
+```
+These are whole-GPU simulations — the design runs at roughly 90 clock cycles per wall
+second under Icarus, so budget tens of minutes. `run_regression.py` runs the quick
+subset automatically as the `compute` suite.
 
 **Reproduce a chip layout (OpenLane, sky130):**
 ```bash
@@ -169,9 +184,20 @@ I want this to be judged as real engineering, so here's the straight story:
   top-level configuration, not silicon.
 - **The full GPU has not been placed & routed as one chip** — individual blocks have (FMA, tensor array).
 - **No instruction cache, and one outstanding fetch per SM.** Control flow works, but
-  instruction supply is slow; this is the next bottleneck (roadmap Phase 2).
-- **Branches are unconditional only.** Predicated branches need `SETP` and predicate
-  registers, which the pipeline does not implement yet.
+  instruction supply is slow; this is the next bottleneck (roadmap Phase 2). Measured:
+  ~58 clock cycles per instruction retired, and launching 8 warps instead of 1 took the
+  render test from 8,009 to 10,009 cycles.
+- **Divergent predication is not implemented.** `SETP` and per-warp predicate registers
+  exist and conditional branches work, so loops can have exit conditions. Predicates are
+  32-bit per-lane masks, but an instruction only executes when *every* lane agrees; a
+  mask whose lanes disagree needs a reconvergence stack the pipeline does not have. That
+  case is not silently mis-executed — the instruction is skipped and a sticky
+  `dbg_pred_divergent` flag is raised so it is observable.
+- **No cache flush path.** L1 and L2 are both write-back with no flush or writeback-all
+  port, so a kernel's results can sit in a Modified L1 line indefinitely; nothing makes
+  them reach memory. A host reading results back from a real part would need a flush that
+  does not exist yet. The compute testbench works around this by reading the
+  architectural value out of the cache hierarchy directly.
 - Parts of this were built with AI assistance; the goal was to understand GPU architecture end-to-end.
 
 Its honest peer group is open-source research GPUs like **MIAOW**, **Vortex**, and **Nyuzi** —

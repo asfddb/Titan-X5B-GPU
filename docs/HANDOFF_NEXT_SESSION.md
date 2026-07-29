@@ -30,9 +30,19 @@ Versions used previously: Icarus 12.0, cocotb 2.0.1, Verilator 5.020, Yosys 0.33
 ## 2. How to verify anything
 
 ```bash
-# unit/transaction regression - 15 suites, must be 15/15 PASS, exit 0
+# unit/transaction regression - 17 suites, must be 17/17 PASS, exit 0
 python3 tb/run_regression.py
 python3 tb/run_regression.py fpu lsu          # subset
+
+# compiled kernels on the whole GPU (pytest, not cocotb). run_regression.py
+# runs the "not slow" subset as the `compute` suite; this is the full set,
+# including the bit-exact matmul. Slow: the design simulates at roughly 90
+# clock cycles per wall second, so budget ~25 min plus ~15 min for matmul.
+python3 -m pytest tb/test_compute_kernels.py -v
+
+# the compiler's ISA conformance checks (78 checks, and they now actually
+# fail pytest -- see the note in that file)
+python3 compiler/test_compiler_isa.py
 
 # full-chip render test (the integration test that matters)
 cd tb && iverilog -g2012 -s tb_titan_x5_gpu_top -I../rtl -o /tmp/sim.vvp \
@@ -54,13 +64,38 @@ yosys -p "read_verilog -sv rtl/core/titan_x5_alu.v; \
 Full-chip Yosys synthesis of `titan_x5_gpu_top` takes **>30 min** (~604k cells).
 Budget for it or skip it.
 
+**Environment note (v2.0 session):** that session ran on Windows with Icarus
+12.0, cocotb 2.0.1 and numpy 2.5.1, but **no Verilator and no Yosys** — on
+Windows those mean the multi-hundred-MB oss-cad-suite, which the no-large-
+downloads constraint rules out. So the lint and area commands above were **not
+run**, and the area cost of the per-warp register file (8x the flops) and of
+the predicate registers is **unknown and unmeasured**. Everything else below
+was measured on a command that was actually run.
+
 ## 3. Where the project is now
 
 The full-chip render test passes and is genuinely self-checking:
 **181 pixels, 0 out of bounds, 0 wrong-path pixels, per-lane gradient intact,
-all warps retired, 8,009 cycles.**
+all 8 warps retired, 10,009 cycles.** (It was 8,009 cycles with a single warp;
+the extra 2,000 is instruction-supply contention between 8 warps sharing the
+SM's one outstanding fetch.)
+
+**The v2.0 headline: `compiler/kernels/matmul.py` runs end to end on the RTL
+and is bit-exact against NumPy.** Python source -> Titan ISA -> whole-GPU
+Icarus simulation -> a result matrix matching an independent reference word for
+word, at 2x2x2 (11,436 cycles) and 4x4x4 (65,311 cycles), signed negatives
+included. Test: `tb/test_compute_kernels.py::test_matmul_bit_exact_vs_numpy`.
+
+All three v2.0 steps in section 4b are done. Regression is **17/17**.
 
 Recently completed on this branch:
+
+- **Per-warp register file** (step 1). 64 regs x NUM_WARPS x 32 lanes,
+  warp-major. `LAUNCH_WARP_MASK` is back to `8'hFF`. Suite: `regfile`.
+- **SETP + per-warp predicate registers -> conditional branches** (step 2).
+  Loops can have exit conditions. FP FMA moved from opcode 21 to 29 (see
+  section 4b). Tests: `tb/test_compute_kernels.py`.
+- **matmul end to end** (step 3), bit-exact vs NumPy.
 
 - **Per-warp PCs and real control flow.** `rtl/core/titan_x5_pc_unit.v` gives
   the SM program counters. Previously `titan_x5_gpu_top` hardwired every PC to
@@ -172,16 +207,51 @@ consumes them.
   `driver/titan_x6_gpu_model.c`.
 - Gate instruction execution on the predicate in the pipeline.
 - Make `BRANCH` honour its predicate, so it becomes conditional.
-- **This also resolves the opcode-21 question**: once SETP needs 21, the FP
-  fused multiply-add unit must move. The ISA has no FP-FMA opcode and slots
-  0-31 are all assigned, so this needs an explicit ISA decision -- ask the
-  user rather than choosing unilaterally. Options: retire the FP FMA unit,
-  or add an ISA opcode and update the header, compiler, model and decoder
-  together.
+- **The opcode-21 question, RESOLVED.** SETP needs 21, which the FP fused
+  multiply-add unit was squatting on because the ISA had no FP-FMA opcode at
+  all (opcode 15 is documented and modelled as INTEGER fma) and slots 0-31
+  were all assigned. The encoding is exactly full -- `[31:27]` opcode,
+  `[26:21]` rd, `[20:15]` rs1, `[14:9]` rs2, `[8:3]` rs3, `[2:1]` pred,
+  `[0]` use_imm -- so widening the opcode field would cost register-index
+  bits.
+
+  **Decision (the user's, asked explicitly): move FP FMA to slot 29,
+  displacing RSQRT.** RSQRT was assigned in the header and implemented in the
+  C functional model but *never built in hardware* -- `titan_x5_alu.v` has no
+  SFU. So this trades a transcendental that never existed for a datapath that
+  does (`rtl/fpu/titan_x5_fp32_fma.v`, IEEE-754 verified), and leaves SETP at
+  its documented number so the header, compiler and model do not move.
+
+  Updated together: `driver/titan_x6_isa.h` (`TX6_OP_FFMA = 29`),
+  `driver/titan_x6_gpu_model.c` (RSQRT case removed, `fmaf()` added --
+  single rounding, not `a*b+c`), `compiler/titan_compiler.py`,
+  `rtl/core/titan_x5_decoder.v` (`is_alu` is now `<= 20 || == 29`) and
+  `rtl/core/titan_x5_alu.v`. Adding RSQRT back needs a new ISA decision.
 
 **Gate:** a kernel with a real counted loop (`SETP` + conditional `BRANCH`)
 runs to completion with the right trip count, checked against the functional
-model.
+model. **MET** — `test_counted_loop_trip_count` at trips 0, 1, 2, 17 and 64,
+each checked against `titan_compiler.simulate()`.
+
+**How it was built (worth knowing before changing it):**
+
+- **SETP is resolved in the ID stage, not EX.** Two reasons: the ALU has no
+  `rd` port, so the condition code in `rd[4:2]` could not reach it; and its
+  `rd` field is `{cond, pdst}` rather than a register index, so letting it
+  reach writeback would scribble on GPR #{cond,pdst}. It is now its own
+  decoder class (`is_setp`) alongside BRANCH and BARRIER, and `is_alu` no
+  longer covers 21. Resolving in ID also means the predicate is written the
+  same cycle SETP commits, so the very next instruction sees it — there is no
+  SETP -> BRANCH hazard, which matters because that back-to-back pair is
+  exactly what the compiler emits for a loop exit.
+- **Predicates are 32-bit per-lane masks**, per warp, `P1..P3` (`P0` reads as
+  all-ones). Storing one bit per warp would throw away 31 lanes' answers.
+- **Divergent predication is NOT implemented.** An instruction executes only
+  when every lane of its predicate agrees; a mixed mask is skipped and the
+  sticky `dbg_pred_divergent` flag is raised (plumbed out through
+  `titan_x5_sm` to `titan_x5_gpu_top.any_pred_divergent`). Handling divergence
+  properly needs a reconvergence stack. Every compute test asserts the flag
+  never fires, so if a future kernel diverges it will be noticed.
 
 ### Step 3 — matmul end to end, bit-exact
 
@@ -192,7 +262,69 @@ executed by the RTL.
   run it, and compare the output matrix against a NumPy reference.
 
 **Gate:** compiler -> ISA -> RTL produces a bit-exact matmul result. This is
-the headline claim for v2.0.
+the headline claim for v2.0. **MET** — 2x2x2 (11,436 cycles) and 4x4x4
+(65,311 cycles), every word matching NumPy including signed negatives.
+Test: `tb/test_compute_kernels.py::test_matmul_bit_exact_vs_numpy`.
+
+The harness built for this is `tb/tb_compute_top.v` + `tb/compute_runner.py`:
+it boots the same `titan_x5_gpu_top`, loads a compiled program, an input
+image and a kernel parameter block into VRAM, lets the SMs launch out of
+reset, waits for every warp to retire, and reads the result back. Notes:
+
+- **Threads are redundant, not partitioned.** Every launched warp on every SM
+  runs the same program with the same register state, so kernels must be
+  idempotent. The compiler's scalar kernels are (each thread computes and
+  stores the same value). `LAUNCH_WARP_MASK` therefore defaults to one warp
+  here — more warps only add duplicate work and coherence traffic.
+- **Results are read out of the cache hierarchy, not VRAM.** There is no cache
+  flush anywhere in the design (see section 5), so a kernel's stores sit in a
+  Modified L1 line and never reach memory.
+- **Simulation speed is the binding constraint**, measured at ~92 clock cycles
+  per wall second, so 4x4x4 matmul takes ~15 minutes. Two things bought a 3x
+  speedup and are worth keeping: `ENABLE_TENSOR(0)` (a 4x4 tensor array is
+  instantiated inside *every* ALU — 128 of them — and a scalar integer kernel
+  never touches one) and a small `FB_STRIDE` (the display engine free-runs
+  scanning video and contends for the same crossbar). Going much beyond
+  4x4x4 needs Verilator, not more patience.
+
+### Working rules that keep producing good results
+
+- **No invented numbers.** Every figure must come from a command actually run.
+  Say "unknown and unmeasured" rather than estimating.
+- **Mutation-test every new test.** Inject a defect, confirm the test fails,
+  restore, confirm it passes.
+
+  This is not a formality — in the v2.0 work it killed three defects
+  (BRANCH ignoring its predicate, predication not gating EX, SETP comparing
+  unsigned) **and exposed a verification gap that would otherwise have been
+  reported as a passing test.** See the next item.
+
+- **Known verification gap: nothing proves the predicate registers are
+  per-warp.** `test_predicates_are_per_warp` does not, despite the name, and
+  its docstring says so. With `pred_mask` reindexed so all warps share warp
+  0's slots, 8 warps still produced exactly the right per-warp results. Giving
+  each warp a different trip count did not help.
+
+  Measured reason: **warps barely overlap.** The 8-warp loop takes 24,069
+  cycles where 1 warp takes 3,257 — 7.4x for 8x the work. Two causes: one
+  outstanding fetch per SM, and `titan_x5_warp_scheduler.v:88`, where the
+  hazard check tests the *current ID instruction's* source registers against
+  *every* warp's scoreboard, so warps running the same program stall on each
+  other's register numbers. A warp's SETP and its BRANCH end up adjacent, and
+  a shared predicate is never read stale.
+
+  The per-warp indexing is implemented because the ISA requires per-thread
+  predicate state, not because a test caught it missing. **The defect is
+  latent, not benign** — widening fetch (Phase 2) or fixing that hazard check
+  will expose it. Anyone doing either should re-run this mutation first.
+
+  Generalise the lesson: **if every warp (or lane, or bank) in a test does the
+  same thing — or the machine never lets them overlap — that test cannot see a
+  cross-warp bug.** The scheduler's coarse hazard check is itself worth fixing
+  on its own merits: it is conservative, so never unsafe, but it destroys
+  multi-warp concurrency, which is the entire point of having warps.
+- **Control-experiment every fix.** Revert the fix with the new test in place
+  and show the failure, so the bug is demonstrated rather than asserted.
 
 ### After the three steps
 
@@ -223,7 +355,27 @@ version number with the limitations quietly removed.
   Note: the wrong-path epoch in `titan_x5_pipeline.v` is 1 bit and is only
   sound because a single fetch is outstanding — widening fetch requires
   widening the epoch.
-- **Branches are unconditional only** (needs SETP + predicate registers).
+- ~~**Branches are unconditional only.**~~ **DONE** (step 2). Per-warp predicate
+  registers (P0 hardwired true, P1-P3 writable, each a 32-bit per-lane mask)
+  live in `titan_x5_pipeline.v`; SETP is resolved in ID and BRANCH honours its
+  predicate. **Divergent predication is still not implemented**: an instruction
+  executes only when every lane of its predicate agrees, and a mixed mask is
+  skipped with the sticky `dbg_pred_divergent` flag raised so it is observable
+  rather than silent. That needs a reconvergence stack.
+- **Warps barely run concurrently.** Measured: the same counted loop takes
+  24,069 cycles with 8 warps and 3,257 with 1 — 7.4x for 8x the work.
+  `titan_x5_warp_scheduler.v:88` compares the *current ID instruction's*
+  source registers against *every* warp's scoreboard, so warps executing the
+  same program stall on each other's register numbers even with no real
+  dependency. Conservative, so never unsafe, but it removes the concurrency
+  warps exist to provide — and it is what hides the shared-predicate defect
+  described in the working rules above.
+- **No cache flush path.** L1 and L2 are both write-back with no flush or
+  writeback-all port, so kernel results can sit in a Modified L1 line forever.
+  Measured: a kernel that stores 0xABC and exits leaves VRAM reading 0.
+  `tb/tb_compute_top.v` works around it by reading the architectural value out
+  of the hierarchy (L1s, then L2, then VRAM). A real host readback needs an
+  actual flush; this is the next thing worth building for the runtime.
 - **Threads cannot address above 4 GiB** — registers are 32-bit. Needs an
   aperture base register or 64-bit addressing.
 - **`SYNCASYNCNET`**: `rst_n` is flopped both synchronously and asynchronously

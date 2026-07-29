@@ -140,6 +140,12 @@ module titan_x5_gpu_top #(
     wire [3:0] sm_all_retired;
     // Kernel is complete when every SM has retired all of its warps.
     wire       kernel_complete = &sm_all_retired;
+    // Sticky per-SM flag: an instruction used a predicate whose lanes
+    // disagreed. Divergent predication is not implemented (see the predicate
+    // block in titan_x5_pipeline.v); this keeps it observable at the top level
+    // so a testbench can assert it never fires.
+    wire [3:0] sm_pred_divergent;
+    wire       any_pred_divergent = |sm_pred_divergent;
 
     // SM L1 D-cache coherent fabric (MESI): 4 SM L1s <-> coherent xbar <-> L2
     localparam CXB_LINE = 128;
@@ -367,6 +373,7 @@ module titan_x5_gpu_top #(
                 .dbg_mesi_state(),
                 .dbg_lsu_resp_valid(),
                 .dbg_lsu_xactions(),
+                .dbg_pred_divergent(sm_pred_divergent[gi]),
                 .fp_rm(2'b00),
 
                 .shader_wb_valid(sm_shader_wb_valid[gi]),

@@ -52,6 +52,36 @@ def check(cond, msg):
         _failures += 1
 
 
+class _Section:
+    """Fail the enclosing pytest test if any check() inside it failed.
+
+    check() deliberately records rather than raises, so one run reports every
+    problem instead of stopping at the first. Standalone that is fine --
+    main() returns 1 and the process exits non-zero. Under pytest it was not:
+    the test_* functions never looked at _failures, so `pytest
+    test_compiler_isa.py` reported "4 passed" while checks were failing. The
+    ISA conformance test could not fail, which is the same class of hole it
+    was written to close.
+
+    Usage:  with _Section("name"): ...checks...
+    """
+
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.before = _failures
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            return False
+        added = _failures - self.before
+        assert added == 0, (
+            f"{self.name}: {added} check(s) failed -- see the [FAIL] lines above")
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Independent reference encoder straight from the titan_x6_isa.h bit spec.
 # Deliberately NOT calling tc.enc_* so a matching result cross-validates them.
@@ -66,7 +96,7 @@ def spec_enc_i(op, rd, rs1, imm, pred):
             ((imm & 0xFFF) << 3) | ((pred & 0x3) << 1) | 1)
 
 
-def test_encoding():
+def _body_test_encoding():
     print("[1] instruction encoding matches the bit-field spec")
     # A spread of operands incl. boundary (63/62) and overflow (>63 must mask).
     vectors = [
@@ -132,7 +162,7 @@ def _parse_isa_header():
     return ops, defs
 
 
-def test_spec_sync():
+def _body_test_spec_sync():
     print("[2] compiler constants stay in sync with titan_x6_isa.h")
     ops, defs = _parse_isa_header()
 
@@ -167,7 +197,7 @@ def _compile(backend, dtype=None):
     return tc.compile_tensor(fn, dtype)
 
 
-def test_kernels():
+def _body_test_kernels():
     print("[3] compiled matmul kernels match the ISA")
     scalar = _compile("scalar")
     i8 = _compile("tensor", "int8")
@@ -227,7 +257,7 @@ ALU_TO_ISA = {
     "OP_SLTU": "SLTU", "OP_MIN": "MIN",   "OP_MAX": "MAX",
     "OP_IFMA": "FMA",  "OP_FADD": "FADD", "OP_FMUL": "FMUL",
     "OP_FMIN": "FMIN", "OP_FMAX": "FMAX", "OP_CVT": "CVT",
-    "OP_WMMA": "WMMA",
+    "OP_WMMA": "WMMA", "OP_FPFMA": "FFMA",
 }
 
 
@@ -239,7 +269,7 @@ def _parse_alu_opcodes():
                                  text)}
 
 
-def test_alu_opcode_map():
+def _body_test_alu_opcode_map():
     """The ALU must agree with the ISA, not just the decoder.
 
     This check exists because it did not before. titan_x5_alu.v carried a
@@ -264,29 +294,58 @@ def test_alu_opcode_map():
               f"({alu[alu_name]} vs {ops[isa_name]})")
 
     # Every arithmetic opcode the decoder routes to the ALU (is_alu is
-    # opcode <= 21) must be implemented by it. LOAD/STORE reuse ADD for
-    # address arithmetic, so they are not ALU opcodes themselves.
+    # opcode <= 20, plus 29 for FFMA) must be implemented by it. LOAD/STORE
+    # reuse ADD for address arithmetic, so they are not ALU opcodes themselves.
     implemented = set(alu.values())
     for isa_name, val in sorted(ops.items(), key=lambda kv: kv[1]):
-        if val > 21 or isa_name in ("LOAD", "STORE"):
+        if (val > 21 and isa_name != "FFMA") or isa_name in ("LOAD", "STORE"):
             continue
         if isa_name == "SETP":
-            # Opcode 21 is knowingly still the FP fused unit: the ISA has no
-            # FP-FMA opcode and predicate registers do not exist yet. See the
-            # comment in titan_x5_alu.v. Flagged, not silently accepted.
-            check("OP_FPFMA" in alu and alu["OP_FPFMA"] == 21,
-                  "SETP (21) is documented as still mapped to the FP FMA unit")
+            # SETP is not an ALU op. Its rd field carries {cond, pdst} rather
+            # than a register index, so it is resolved in the ID stage of
+            # titan_x5_pipeline.v and must NOT appear in the ALU -- letting it
+            # reach writeback would scribble on GPR #{cond,pdst}.
+            check("OP_SETP" not in alu,
+                  "SETP (21) is not implemented by the ALU (resolved in ID)")
+            check(alu.get("OP_FPFMA") != 21,
+                  "opcode 21 is no longer the FP fused multiply-add unit")
             continue
         check(val in implemented,
               f"TX6_OP_{isa_name} ({val}) is implemented by the ALU")
 
 
+
+# --- pytest entry points -------------------------------------------------
+# Thin wrappers so a failing check() actually fails pytest. main() calls the
+# _body_* functions directly and summarises instead.
+
+
+def test_encoding():
+    with _Section("test_encoding"):
+        _body_test_encoding()
+
+
+def test_spec_sync():
+    with _Section("test_spec_sync"):
+        _body_test_spec_sync()
+
+
+def test_kernels():
+    with _Section("test_kernels"):
+        _body_test_kernels()
+
+
+def test_alu_opcode_map():
+    with _Section("test_alu_opcode_map"):
+        _body_test_alu_opcode_map()
+
+
 def main():
     print("== Titan Compute Compiler: ISA encoding unit tests ==")
-    test_encoding()
-    test_spec_sync()
-    test_kernels()
-    test_alu_opcode_map()
+    _body_test_encoding()
+    _body_test_spec_sync()
+    _body_test_kernels()
+    _body_test_alu_opcode_map()
     print(f"\n{'COMPILER TEST FAILED' if _failures else 'COMPILER TEST PASSED'} "
           f"({_checks - _failures}/{_checks} checks passed)")
     return 1 if _failures else 0

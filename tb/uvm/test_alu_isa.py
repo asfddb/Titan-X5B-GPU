@@ -43,9 +43,11 @@ SLT, SLTU, MIN, MAX = 11, 12, 13, 14
 IFMA = 15
 FADD, FMUL, FMIN, FMAX, CVT = 16, 17, 18, 19, 20
 
-# Opcodes this suite covers. FADD/FMUL are covered in depth by test_fpu.py;
-# 21 is deliberately still the FP fused unit (the ISA has no FP-FMA opcode --
-# see the note in titan_x5_alu.v), so SETP is not exercised here.
+# Opcodes this suite covers. FADD/FMUL/FFMA are covered in depth by
+# test_fpu.py. SETP (21) is not exercised here because it never reaches the
+# ALU: its rd field carries {cond, pdst} rather than a register index, so it
+# is resolved in the ID stage of titan_x5_pipeline.v. Its suite is
+# tb/uvm/test_predicates.py.
 INT_OPS = [ADD, SUB, MUL, MULHI, DIV, AND, OR, XOR, SHL, SHR, SRA,
            SLT, SLTU, MIN, MAX, IFMA]
 

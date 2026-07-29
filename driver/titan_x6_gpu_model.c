@@ -325,12 +325,23 @@ static int exec_thread(titan_gpu_model_t *gpu, uint32_t code_addr,
             exec_wmma(gpu, r[rd], a, r[TX6_F_RS2(inst)], TX6_F_RS3(inst),
                       r[TX6_REG_LDA], r[TX6_REG_LDB], r[TX6_REG_LDC]);
             break;
-        case TX6_OP_SIN: case TX6_OP_COS: case TX6_OP_RSQRT: {
+        case TX6_OP_SIN: case TX6_OP_COS: {
             float fa, fr;
             memcpy(&fa, &a, 4);
-            fr = (op == TX6_OP_SIN) ? sinf(fa)
-               : (op == TX6_OP_COS) ? cosf(fa)
-               : 1.0f / sqrtf(fa);
+            fr = (op == TX6_OP_SIN) ? sinf(fa) : cosf(fa);
+            memcpy(&r[rd], &fr, 4);
+            break;
+        }
+        case TX6_OP_FFMA: {
+            // fp32 fused multiply-add, SINGLE rounding -- the product is not
+            // rounded before the add. fmaf() is the C library's guarantee of
+            // exactly that, which is what rtl/fpu/titan_x5_fp32_fma.v
+            // implements; a*b+c written out would round twice and disagree.
+            float fa, fb, fc, fr;
+            memcpy(&fa, &a, 4);
+            memcpy(&fb, &b, 4);
+            memcpy(&fc, &r[TX6_F_RS3(inst)], 4);
+            fr = fmaf(fa, fb, fc);
             memcpy(&r[rd], &fr, 4);
             break;
         }
