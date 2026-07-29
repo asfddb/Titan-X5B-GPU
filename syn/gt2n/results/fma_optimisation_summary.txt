@@ -1,0 +1,23 @@
+titan_x7_fp32_fma_pipe on GT2N elvt/w31/tt, before and after the
+prefix-adder + LZC-tree rework. See docs/GT2N_2NM_SYNTHESIS.md section 7.
+
+RTL            synthesis effort              delay      GHz    levels
+original       default   (-D 333)          658.71 ps    1.52     58
+original       aggressive(-D 200, buffer)  561.15 ps    1.78      -
+prefix+LZC     default   (-D 333)          572.18 ps    1.75     31
+prefix+LZC     aggressive(-D 200, buffer)  401.81 ps    2.49      -
+
+Isolating the two effects (control experiment):
+  tool settings alone, original RTL      : -14.8%
+  RTL alone, default effort              : -13.1%
+  RTL alone, matched aggressive effort   : -28.4%   <- the design's own gain
+  both together                          : -39.0%
+
+Area: 448.99 -> 476.85 um2 (+6.2%)
+
+Formal equivalence (Yosys SAT):
+  prefix_add == a+b+cin (W=106)                     proven
+  lzc == the 106-deep linear scan it replaces       proven
+  ~sub_pc[105] == (mag_p >= mag_c)                  proven
+  optimised FMA == original FMA, sequential         proven
+      (equiv_induct: 2172 cells proven, 0 unproven)

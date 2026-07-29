@@ -123,18 +123,27 @@ module titan_x7_fp32_fma_pipe (
     wire [23:0] mb_raw = {(eb != 0), fb};
     wire [23:0] mc_raw = {(ec != 0), fc};
 
-    reg [4:0] clz_a_c, clz_b_c, clz_c_c;
-    always @(*) begin
-        clz_a_c = 5'd0;
-        for (i = 0; i <= 23; i = i + 1)
-            if (ma_raw[i]) clz_a_c = 5'd23 - i[4:0];
-        clz_b_c = 5'd0;
-        for (i = 0; i <= 23; i = i + 1)
-            if (mb_raw[i]) clz_b_c = 5'd23 - i[4:0];
-        clz_c_c = 5'd0;
-        for (i = 0; i <= 23; i = i + 1)
-            if (mc_raw[i]) clz_c_c = 5'd23 - i[4:0];
-    end
+    // Leading-zero counts, as log-depth trees rather than the 24-deep linear
+    // priority scans these replace (see titan_x7_lzc). clz = 23 - msb_index.
+    //
+    // The `nz ? ... : 0` guard reproduces the replaced loop EXACTLY: with an
+    // all-zero mantissa no iteration fired, so the accumulator kept its 5'd0
+    // initialiser rather than yielding 23. That case may well be unreachable
+    // -- a zero mantissa with a zero exponent is classified as a special
+    // before this is used -- but matching the old behaviour outright is
+    // cheaper than depending on the argument being true.
+    wire [4:0] msb_a, msb_b, msb_c;
+    wire       nz_a, nz_b, nz_c;
+    titan_x7_lzc #(.W(32), .LW(5)) u_clz_a (
+        .vec({8'd0, ma_raw}), .idx(msb_a), .nz(nz_a));
+    titan_x7_lzc #(.W(32), .LW(5)) u_clz_b (
+        .vec({8'd0, mb_raw}), .idx(msb_b), .nz(nz_b));
+    titan_x7_lzc #(.W(32), .LW(5)) u_clz_c (
+        .vec({8'd0, mc_raw}), .idx(msb_c), .nz(nz_c));
+
+    wire [4:0] clz_a_c = nz_a ? (5'd23 - msb_a) : 5'd0;
+    wire [4:0] clz_b_c = nz_b ? (5'd23 - msb_b) : 5'd0;
+    wire [4:0] clz_c_c = nz_c ? (5'd23 - msb_c) : 5'd0;
 
     reg        e1_valid;
     reg        e1_special, e1_invalid;
@@ -273,7 +282,11 @@ module titan_x7_fp32_fma_pipe (
     // ------------------------------------------------------------------
     // E4: multiplier half 2 (partial-product CPA) + addend alignment
     // ------------------------------------------------------------------
-    wire [47:0] prod = {12'd0, e3_pp_lo} + {e3_pp_hi, 12'd0};
+    // Partial-product CPA, prefix rather than ripple (see E5 note below).
+    wire [47:0] prod;
+    titan_x7_prefix_add #(.W(48), .LEVELS(6)) u_e4_cpa (
+        .a({12'd0, e3_pp_lo}), .b({e3_pp_hi, 12'd0}), .cin(1'b0),
+        .sum(prod), .cout());
 
     reg [103:0] c_frame_c;
     reg         c_sticky_c;
@@ -329,10 +342,30 @@ module titan_x7_fp32_fma_pipe (
     wire [104:0] mag_p = {e4_pfr, 1'b0};
     wire [104:0] mag_c = {e4_cfr, e4_cst};
 
-    wire [105:0] sum_add = {1'b0, mag_p} + {1'b0, mag_c};
-    wire [105:0] sub_pc  = {1'b0, mag_p} - {1'b0, mag_c};
-    wire [105:0] sub_cp  = {1'b0, mag_c} - {1'b0, mag_p};
-    wire         p_ge_c  = (mag_p >= mag_c);
+    // Parallel-prefix rather than `+`/`-`: on GT2N a bare operator on a
+    // 106-bit vector becomes a ripple chain, because the library has no
+    // adder cells (docs/GT2N_2NM_SYNTHESIS.md). titan_x7_prefix_add is
+    // SAT-proven equivalent to a+b+cin, so this is a structural change only.
+    wire [105:0] sum_add, sub_pc, sub_cp;
+
+    titan_x7_prefix_add #(.W(106), .LEVELS(7)) u_e5_add (
+        .a({1'b0, mag_p}), .b({1'b0, mag_c}), .cin(1'b0),
+        .sum(sum_add), .cout());
+
+    // a - b == a + ~b + 1
+    titan_x7_prefix_add #(.W(106), .LEVELS(7)) u_e5_sub_pc (
+        .a({1'b0, mag_p}), .b(~{1'b0, mag_c}), .cin(1'b1),
+        .sum(sub_pc), .cout());
+
+    titan_x7_prefix_add #(.W(106), .LEVELS(7)) u_e5_sub_cp (
+        .a({1'b0, mag_c}), .b(~{1'b0, mag_p}), .cin(1'b1),
+        .sum(sub_cp), .cout());
+
+    // `mag_p >= mag_c` was a fourth 106-bit carry chain. It is redundant:
+    // both operands are 105 bits zero-extended to 106, so sub_pc stays below
+    // 2^105 exactly when mag_p >= mag_c, and borrows into bit 105 otherwise.
+    // Reusing that bit deletes the comparator outright.
+    wire         p_ge_c  = ~sub_pc[105];
 
     reg  [105:0] sum_mag_c;
     reg          sum_sign_c;
@@ -377,12 +410,13 @@ module titan_x7_fp32_fma_pipe (
     // ------------------------------------------------------------------
     // E6: 106-bit CLZ + normalized-exponent computation
     // ------------------------------------------------------------------
-    reg [6:0] msb_idx_c;
-    always @(*) begin
-        msb_idx_c = 7'd0;
-        for (m = 0; m <= 105; m = m + 1)
-            if (e5_sum[m]) msb_idx_c = m[6:0];
-    end
+    // Was a 106-deep linear priority scan despite the "CLZ tree" in the
+    // header; it became the dominant critical path once E5's adders were
+    // made parallel-prefix. Now log-depth, and SAT-proven identical to the
+    // scan it replaces (including its all-zero-reads-0 behaviour).
+    wire [6:0] msb_idx_c;
+    titan_x7_lzc #(.W(128), .LW(7)) u_e6_lzc (
+        .vec({22'd0, e5_sum}), .idx(msb_idx_c), .nz());
 
     wire signed [11:0] exp_norm = e5_Ep + {5'd0, msb_idx_c} + 12'sd126;
 

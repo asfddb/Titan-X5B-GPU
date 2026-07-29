@@ -179,7 +179,96 @@ piece of engineering; the GT2N result is the more advanced node.
 
 ---
 
-## 7. Reproducing
+## 7. Closing the gap: 1.52 GHz -> 2.49 GHz
+
+Section 3 said the fix was to restructure the adders rather than add pipeline
+stages. That was done, and then the next bottleneck was found and done too.
+
+### 7.1 What changed
+
+**`rtl/common/titan_x7_prefix_add.v`** — Kogge-Stone parallel-prefix adder,
+replacing the bare `+`/`-` on E5's three 106-bit operations and E4's 48-bit
+partial-product CPA. Carry depth O(W) -> O(log2 W).
+
+**The 106-bit comparator deleted.** `p_ge_c = (mag_p >= mag_c)` was a *fourth*
+106-bit carry chain in E5. Both operands are 105 bits zero-extended to 106, so
+the subtract already answers it: `p_ge_c = ~sub_pc[105]`.
+
+**`rtl/common/titan_x7_lzc.v`** — the real find. E6 was described in the
+module header as a "106-bit CLZ tree" and was not a tree:
+
+```verilog
+for (m = 0; m <= 105; m = m + 1)
+    if (e5_sum[m]) msb_idx_c = m[6:0];
+```
+
+That is a 106-deep linear priority scan — ~106 chained 7-bit muxes, with the
+normalized-exponent add serialised behind it. Once E5's adders were made
+prefix, this became the dominant path. Replaced with a log-depth reduction
+tree, along with E1's three 24-bit instances of the same pattern.
+
+### 7.2 Measured, elvt/w31/tt
+
+| RTL | synthesis effort | delay | GHz | levels |
+|:--|:--|--:|--:|--:|
+| original | default (`-D 333`) | 658.71 ps | 1.52 | 58 |
+| original | aggressive (`-D 200`, buffer) | 561.15 ps | 1.78 | — |
+| prefix + LZC | default (`-D 333`) | 572.18 ps | 1.75 | 31 |
+| **prefix + LZC** | **aggressive** | **401.81 ps** | **2.49** | — |
+
+**The control experiment matters here.** Part of the gain is simply driving
+ABC harder, which is a tool setting and not an achievement of the design. Run
+at *matched* effort:
+
+- tool settings alone, on the original RTL: 658.71 -> 561.15 ps (**-14.8%**)
+- RTL alone, at default effort: 658.71 -> 572.18 ps (**-13.1%**)
+- **RTL alone, at matched aggressive effort: 561.15 -> 401.81 ps (-28.4%)**
+- both together: 658.71 -> 401.81 ps (**-39.0%**, 1.52 -> 2.49 GHz)
+
+Neither gets close to 2.49 GHz on its own; they compose. Area cost of the
+whole exercise is **+6.2%** (448.99 -> 476.85 um2).
+
+Logic levels fell 58 -> 31 (**-47%**) while delay fell only 13% at matched
+effort, which says the remaining path is **load- and fanout-dominated, not
+depth-dominated** — one net on the critical path drives fanout 22 at 10.4 ff
+and costs 61.7 ps in a single gate. That is what the buffering pass then
+attacks, and it is why the two changes compound.
+
+Against the 333 ps target the miss is now **1.21x**, down from 1.98x.
+
+### 7.3 Correctness: formally proven, not sampled
+
+Every substitution was proven equivalent with Yosys' SAT engine before being
+trusted, and then the whole pipeline was proven end to end:
+
+| Property | Result |
+|:--|:--|
+| `titan_x7_prefix_add` == `a + b + cin`, W=106 | **SAT: proven** |
+| `titan_x7_lzc` == the 106-deep linear scan it replaces | **SAT: proven** |
+| `~sub_pc[105]` == `(mag_p >= mag_c)` | **SAT: proven** |
+| optimised FMA == original FMA, **sequential**, all cycles | **`equiv_induct`: 2172 cells proven, 0 unproven — "Equivalence successfully proven!"** |
+
+The sequential proof needed `async2sync` first; without it `equiv_simple`
+aborts on the async-reset flops with "No SAT model available for async FF
+cell".
+
+This is stronger than the differential test: it covers all inputs rather
+than 6,880 vectors.
+
+### 7.4 The cost, which is real
+
+**Simulation got ~250x slower.** `fma8` ran in 2.3 s before and now exceeds
+10 minutes under Icarus, because a Kogge-Stone and a reduction tree are
+hundreds of explicit gates each and event-driven simulation pays per gate.
+Simulation speed was already the binding constraint on this project (~90
+clock cycles per wall second for the whole GPU), so this is a genuine
+trade, not a free win. Mitigations, in order of leverage: use Verilator
+(now installed) instead of Icarus, or keep a behavioural `+` version behind
+a `` `ifdef `` for simulation while synthesising the structural one — at the
+cost of simulating something other than what is built, which is exactly the
+kind of divergence the formal proofs above would then be guarding.
+
+## 8. Reproducing
 
 ```bash
 export GT2N_ROOT=/path/to/GT2N

@@ -1,0 +1,2 @@
+ABC: WireLoad = "none"  Gates =  11722 ( 16.2 %)   Cap =  1.1 ff ( 11.8 %)   Area =      283.26 ( 79.8 %)   Delay =   401.81 ps  (  1.4 %)               
+   Chip area for module '\titan_x7_fp32_fma_pipe': 476.854656

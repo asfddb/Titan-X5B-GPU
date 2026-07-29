@@ -187,10 +187,16 @@ I want this to be judged as real engineering, so here's the straight story:
   also *synthesis only*: no place & route, no CTS, no extraction, and ABC reports
   `WireLoad = "none"`, so they contain **zero wire delay** and can only get worse after routing.
   GT2N ships one corner (`tt` 0.7 V 25 °C), so there is no slow-corner signoff.
-  Measured: the 8-stage FP32 FMA is 448.99 µm² and 885.73 ps (svt/w31), i.e. **1.13 GHz** —
-  against the 333 ps/stage target in its own header, a ~2× miss, traced to a **58-gate ripple-carry
-  critical path** because GT2N has no adder cells. Full results and caveats:
-  [docs/GT2N_2NM_SYNTHESIS.md](docs/GT2N_2NM_SYNTHESIS.md).
+  Measured: the 8-stage FP32 FMA first came out at 658.71 ps (**1.52 GHz**, elvt/w31) against the
+  333 ps/stage target in its own header — a ~2× miss, traced to a **58-gate ripple-carry critical
+  path** (GT2N has no adder cells) and a "CLZ tree" that was actually a 106-deep linear scan.
+  Replacing both with a Kogge-Stone prefix adder and a real log-depth reduction tree took it to
+  **401.81 ps = 2.49 GHz** for +6.2% area — a 39% improvement, of which **28.4% is the RTL change
+  measured at matched synthesis effort** (the rest is driving the tool harder; both were measured
+  separately with a control run). Every substitution is **SAT-proven** equivalent, and the whole
+  pipeline is proven sequentially equivalent to the original (`equiv_induct`: 2172 cells proven,
+  0 unproven). Cost: Icarus simulation of that block got ~250× slower.
+  Full results and caveats: [docs/GT2N_2NM_SYNTHESIS.md](docs/GT2N_2NM_SYNTHESIS.md).
 - **The banked register file has no SRAM to map onto at 2 nm.** GT2N contains no memory compiler,
   so the behavioural macro model synthesises into 535,419 gates of flip-flops — 37,288 µm², 83× the
   FMA. The module is functionally correct and structurally right; it is simply not implementable

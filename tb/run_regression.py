@@ -188,6 +188,8 @@ SUITES = {
     "fma8": dict(
         sources=[os.path.join(TB, "tb_fma_x7.v")] + rtl_files(
             "fpu/titan_x5_fp32_fma.v",
+            "common/titan_x7_prefix_add.v",
+            "common/titan_x7_lzc.v",
             "fpu/titan_x7_fp32_fma_pipe.v",
         ),
         toplevel="tb_fma_x7",
@@ -215,6 +217,8 @@ SUITES = {
             "core/titan_x7_scoreboard.v",
             "core/titan_x7_branch_predictor.v",
             "core/titan_x7_warp_scheduler.v",
+            "common/titan_x7_prefix_add.v",
+            "common/titan_x7_lzc.v",
             "fpu/titan_x7_fp32_fma_pipe.v",
             "core/titan_x7_sm.v",
         ),
@@ -230,6 +234,8 @@ SUITES = {
             "core/titan_x7_scoreboard.v",
             "core/titan_x7_branch_predictor.v",
             "core/titan_x7_warp_scheduler.v",
+            "common/titan_x7_prefix_add.v",
+            "common/titan_x7_lzc.v",
             "fpu/titan_x7_fp32_fma_pipe.v",
             "core/titan_x7_sm.v",
         ),
