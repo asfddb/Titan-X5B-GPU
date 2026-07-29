@@ -1,0 +1,2 @@
+ABC: WireLoad = "none"  Gates = 535419 (  6.1 %)   Cap =  1.0 ff (  1.6 %)   Area =    12140.24 ( 97.9 %)   Delay = 22022.40 ps  (  2.3 %)               
+   Chip area for module '\titan_x7_regfile_banked': 37288.914552

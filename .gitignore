@@ -87,3 +87,9 @@ tb/uvm/*_coverage.yml
 
 # Node.js
 node_modules/
+
+# GT2N synthesis scratch (full logs are large; summaries live in syn/gt2n/results/)
+syn/gt2n/results/*.log
+syn/gt2n/results/.ys
+fma_gt2n.log
+fma_timed.log

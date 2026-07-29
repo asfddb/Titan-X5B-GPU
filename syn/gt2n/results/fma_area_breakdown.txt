@@ -1,0 +1,2 @@
+   Chip area for module '\titan_x7_fp32_fma_pipe': 448.719312
+     of which used for sequential elements: 193.596480 (43.14%)

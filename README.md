@@ -180,6 +180,21 @@ I want this to be judged as real engineering, so here's the straight story:
   install, and no benchmarked performance.
 - **sky130 is a 130 nm open PDK** (~2005-era). Real GPUs are on ~4 nm. The hardened blocks target
   ~100 MHz on sky130 — orders of magnitude behind commercial silicon in speed and density.
+- **There are real 2 nm synthesis numbers, and they are synthesis only.** The Titan X7 blocks
+  have been mapped onto [GT2N](https://github.com/azadnaeemi/GT2N), an open-source 2 nm nanosheet
+  GAAFET PDK. **GT2N is predictive, not fabbable** — no foundry will take it, and a fabbable 2 nm
+  part needs an NDA foundry agreement and a mask set costing tens of millions. The numbers are
+  also *synthesis only*: no place & route, no CTS, no extraction, and ABC reports
+  `WireLoad = "none"`, so they contain **zero wire delay** and can only get worse after routing.
+  GT2N ships one corner (`tt` 0.7 V 25 °C), so there is no slow-corner signoff.
+  Measured: the 8-stage FP32 FMA is 448.99 µm² and 885.73 ps (svt/w31), i.e. **1.13 GHz** —
+  against the 333 ps/stage target in its own header, a ~2× miss, traced to a **58-gate ripple-carry
+  critical path** because GT2N has no adder cells. Full results and caveats:
+  [docs/GT2N_2NM_SYNTHESIS.md](docs/GT2N_2NM_SYNTHESIS.md).
+- **The banked register file has no SRAM to map onto at 2 nm.** GT2N contains no memory compiler,
+  so the behavioural macro model synthesises into 535,419 gates of flip-flops — 37,288 µm², 83× the
+  FMA. The module is functionally correct and structurally right; it is simply not implementable
+  on this PDK without an external SRAM generator.
 - **Each "SM" is a simplified core** compared to a real GPU SM. The 64-SM figure is the parameterized
   top-level configuration, not silicon.
 - **The full GPU has not been placed & routed as one chip** — individual blocks have (FMA, tensor array).

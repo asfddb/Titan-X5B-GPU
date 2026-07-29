@@ -1,0 +1,2 @@
+ABC: WireLoad = "none"  Gates =   5254 (  7.4 %)   Cap =  1.1 ff ( 10.1 %)   Area =      132.10 ( 86.5 %)   Delay =  1239.29 ps  (  1.9 %)               
+   Chip area for module '\titan_x7_tensor_pe': 262.918680
