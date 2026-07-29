@@ -201,6 +201,14 @@ SUITES = {
         toplevel="titan_x7_tensor_array",
         module="test_tensor_x7",
     ),
+    "rfbank": dict(
+        sources=rtl_files(
+            "memory/titan_x7_sram_1r1w.v",
+            "core/titan_x7_regfile_banked.v",
+        ),
+        toplevel="titan_x7_regfile_banked",
+        module="test_regfile_banked",
+    ),
     "sm7": dict(
         sources=rtl_files(
             "core/titan_x5_decoder.v",
