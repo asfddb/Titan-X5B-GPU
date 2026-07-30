@@ -16,3 +16,37 @@ sticky. 401.81 -> 460.39 ps (worse). At 24 bits the per-bit comparisons run
 in parallel into a balanced OR; the mask form inserts a barrel shift in
 series ahead of it. The rewrite is a win at 137 bits and a loss at 24.
 Reverted, with a warning comment in the RTL.
+
+--------------------------------------------------------------------------
+THREE ATTEMPTS TO BREAK THE 401.81 ps FLOOR. ALL THREE MADE IT WORSE.
+
+  1. tensor PE: split D2 across a pipeline register    434.52 vs 433.06 ps
+                (and +7.8% area)
+  2. FMA: sticky-mask rewrite on E4                    460.39 vs 401.81 ps
+  3. FMA: split E7 into a 9th stage, registering the
+     106-bit normalisation shift before the 81-bit
+     sticky OR reduction                               476.91 vs 401.81 ps
+                (and +7.8% area: 514.09 vs 476.85 um2)
+
+Plus: stubbing logic OUT made it slower twice --
+     E7 normalisation shift replaced by a constant     453.50 ps
+     E4 alignment shift replaced by a constant         427.49 ps
+
+That last pair is the tell. REMOVING a barrel shifter should never lengthen
+the critical path. It does here because ABC's structural mapping is sensitive
+enough to the surrounding cone that unrelated changes swing the result by
+10-15%. Stub-based localisation of the critical stage is therefore not
+reliable on this flow, and neither is chasing the last 17% by adding stages.
+
+CONCLUSION: 401.81 ps / 2.49 GHz is a robust floor for this RTL on this PDK
+with this toolchain. The design is load- and fanout-limited, not
+depth-limited -- which is exactly why adding pipeline registers hurts: the
+extra flops add load without shortening a path that was never too deep.
+
+3 GHz is NOT reached and is not reachable by these means. What would plausibly
+get there, none of it attempted here:
+  - real place-and-route (ORFS), where a physical tool does buffering and
+    sizing against actual wire loads rather than ABC's wireload="none" model
+  - a richer standard-cell library; GT2N tops out at x4 drive for most cells
+    and has no complex gates beyond aoi/oai33
+  - a different FMA microarchitecture, not a re-partition of this one
