@@ -172,16 +172,29 @@ Measured cost, hvt/w31:
 An ICG is instantiated behind `` `ifdef TITAN_HAS_ICG `` for a PDK that has
 one; on GT2N it must stay undefined.
 
-**Correctness status: the transparency test is written
-(`tb/uvm/test_apex_lane.py`, suite `apexlane`) but does NOT yet complete
-under Icarus.** A bounded sequential SAT proof was attempted first and is
-intractable — two full FMAs unrolled 12 cycles is 2.17 M variables and the
-solver did not finish in 9 minutes. The simulation is slow for the reason
-documented in `GT2N_2NM_SYNTHESIS.md` §7.4: after the Kogge-Stone/LZC rework
-each FMA is hundreds of explicit gates and the miter holds two of them.
-**This block is therefore synthesised and measured but not yet functionally
-verified. Do not treat it as proven.** Running it under Verilator (now
-installed) is the fix.
+**Correctness: verified.** `tb/uvm/test_apex_lane.py` (suite `apexlane`)
+runs `ISOLATE=1` against `ISOLATE=0` through the miter in
+`syn/gt2n/iso_miter.v` and asserts the outputs never differ on a cycle where
+`valid_out` is high — **3/3 pass**:
+
+| test | result |
+|:--|:--|
+| sparse traffic, 52/66 cycles isolated | PASS |
+| back-to-back launch burst | PASS |
+| `lane_active` low ⇒ 0 results in 12 request cycles | PASS |
+
+**Mutation-tested:** clamping the operands on launch cycles too is caught at
+cycle 8 of the dense test and cycle 10 of the sparse one, so the suite is not
+vacuous. Defect reverted.
+
+A bounded sequential SAT proof was attempted first and is **intractable**
+here — two full FMAs unrolled 12 cycles is 2.17 M variables and the solver
+did not finish in 9 minutes. The randomised test is what backs this module.
+
+The cost is real: the miter runs at **1.61 ns of simulated time per wall
+second** (1,580 ns in 980 s), because after the Kogge-Stone/LZC rework each
+FMA is hundreds of explicit gates and there are two of them. Vector counts
+are small for exactly that reason; raise them under Verilator.
 
 ---
 

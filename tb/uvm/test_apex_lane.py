@@ -125,10 +125,15 @@ async def apex_lane_isolation_is_transparent(dut):
 
 @cocotb.test()
 async def apex_lane_back_to_back(dut):
-    """Fully dense traffic: isolation should essentially never engage.
+    """Back-to-back issue, with no idle gaps between launches.
 
-    The complement of the sparse test. If results diverged only under
+    The complement of the sparse test: if results diverged only under
     back-to-back issue, the sparse test's heavy idling could hide it.
+
+    Note the isolated-cycle count this reports is still high. That is not a
+    contradiction -- every launch happens in the first n_ops cycles with no
+    gaps, and the loop then runs on to drain the pipe, which is idle time.
+    The property being exercised is the gapless launch burst at the start.
     """
     rng = random.Random(0x2244)
     await start_clock_and_reset(dut)

@@ -32,11 +32,16 @@
 // !valid_in cycles changes only the contents of pipeline slots whose
 // valid bit is 0, and those never reach valid_out.
 //
-// That argument is checked, not assumed: tb/uvm/test_apex_lane.py runs the
-// gated lane against a bare FMA on identical valid streams with randomised
-// idle gaps and stalls, and the bounded sequential SAT check in
-// syn/gt2n/prove_isolation.ys proves result equality on every cycle where
-// valid_out is high.
+// That argument is checked, not assumed: tb/uvm/test_apex_lane.py (suite
+// `apexlane`) runs ISOLATE=1 against ISOLATE=0 on identical stimulus through
+// the miter in syn/gt2n/iso_miter.v, and asserts the outputs never differ on
+// a cycle where valid_out is high. 3/3 pass, and the suite is mutation-tested
+// -- clamping the operands on launch cycles too is caught at cycle 8.
+//
+// A bounded sequential SAT proof of the same property was attempted first and
+// is NOT tractable here: two full FMAs unrolled 12 cycles is 2.17 million
+// variables and Yosys' solver did not finish in 9 minutes. The randomised
+// test is what actually backs this module.
 //
 // CLOCK GATING -- WHAT GT2N CANNOT DO
 //
