@@ -181,6 +181,25 @@ SUITES = {
         module="test_l2_adapter",
         parameters={"DW": 512},
     ),
+    "l2adapt1024": dict(
+        sources=[os.path.join(TB, "tb_l2_adapter_top.v")] + rtl_files(
+            "memory/titan_x5_l2_mem_adapter.v",
+        ),
+        toplevel="tb_l2_adapter_top",
+        module="test_l2_adapter",
+        parameters={"DW": 1024},
+    ),
+    # Beyond 1024 bits a 128-byte line has nothing left to widen: WORDS would
+    # be 0. Going wider requires a wider LINE too, so this pairs a 2048-bit
+    # beat with a 256-byte line -- still one beat per line, twice the payload.
+    "l2adapt2048": dict(
+        sources=[os.path.join(TB, "tb_l2_adapter_top.v")] + rtl_files(
+            "memory/titan_x5_l2_mem_adapter.v",
+        ),
+        toplevel="tb_l2_adapter_top",
+        module="test_l2_adapter",
+        parameters={"DW": 2048, "LINE_BYTES": 256},
+    ),
     # ---- Titan X7: the high-frequency generation ------------------------
     # These target a short-stage, advanced-node budget rather than the x5
     # blocks' single-cycle-everything structure. See
@@ -197,6 +216,8 @@ SUITES = {
     ),
     "tensor7": dict(
         sources=rtl_files(
+            "common/titan_x7_prefix_add.v",
+            "common/titan_x7_lzc.v",
             "tensor/titan_x7_tensor_pe.v",
             "tensor/titan_x7_tensor_array.v",
         ),

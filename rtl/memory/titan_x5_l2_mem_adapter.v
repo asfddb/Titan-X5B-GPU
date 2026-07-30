@@ -47,7 +47,13 @@ module titan_x5_l2_mem_adapter #(
 );
 
     localparam WORDS   = LINE_BYTES * 8 / DATA_WIDTH;
-    localparam CNT_W   = $clog2(WORDS);
+    // $clog2(1) is 0, and a zero-width counter makes `{CNT_W{1'b0}}` a
+    // zero-repeat concatenation, which is an elaboration ERROR rather than a
+    // warning. That made the single-beat configuration -- DATA_WIDTH equal to
+    // the whole line, the fastest one this module can run -- impossible to
+    // build, despite the module being nominally width-generic. Same guard the
+    // register file uses for NUM_WARPS == 1.
+    localparam CNT_W   = (WORDS <= 1) ? 1 : $clog2(WORDS);
 
     localparam A_IDLE    = 2'd0;
     localparam A_WRITE   = 2'd1;
@@ -67,6 +73,31 @@ module titan_x5_l2_mem_adapter #(
     // the previous beat and corrupting the line. At DATA_WIDTH = 512 the
     // whole 128-byte line would land inside the first 8 bytes.
     localparam BYTES_PER_BEAT = DATA_WIDTH / 8;
+
+    // A beat width that does not evenly divide the line is silently
+    // catastrophic rather than merely wrong: WORDS truncates toward zero, so
+    // any DATA_WIDTH above LINE_BYTES*8 gives WORDS == 0, and the terminal
+    // test `word_cnt == WORDS - 1` then compares against an underflowed
+    // all-ones value that is never reached -- the transfer runs forever.
+    // A width that divides unevenly (e.g. 1182, which is not even a whole
+    // number of bytes) drops the remainder of every line.
+    //
+    // Neither case is a legal configuration, so refuse to build rather than
+    // let it reach simulation as a hang.
+    // synthesis translate_off
+    initial begin
+        if (DATA_WIDTH < 8 || (DATA_WIDTH % 8) != 0) begin
+            $display("FATAL %m: DATA_WIDTH=%0d is not a whole number of bytes",
+                     DATA_WIDTH);
+            $fatal(1);
+        end
+        if (WORDS == 0 || (LINE_BYTES*8) % DATA_WIDTH != 0) begin
+            $display("FATAL %m: DATA_WIDTH=%0d does not evenly divide the %0d-bit line (WORDS=%0d)",
+                     DATA_WIDTH, LINE_BYTES*8, WORDS);
+            $fatal(1);
+        end
+    end
+    // synthesis translate_on
 
     wire [ADDR_WIDTH-1:0] beat_offset =
         {{(ADDR_WIDTH-CNT_W){1'b0}}, word_cnt} * BYTES_PER_BEAT;
