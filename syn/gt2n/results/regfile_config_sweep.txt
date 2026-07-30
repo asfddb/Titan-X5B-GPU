@@ -1,0 +1,19 @@
+titan_x7_regfile_banked area vs configuration, GT2N svt/w31/tt, LANES=8,
+NUM_BANKS=8. Measured by Yosys mapping onto GT2N cells.
+
+  REGS  WARPS      bits    area(um2)   um2/bit
+    64      8    131072     37398.80   0.28533
+    64      4     65536     20079.08   0.30638
+    32      8     65536     20079.08   0.30638
+    32      4     32768     11532.96   0.35197
+
+KEY RESULT: 64x4 and 32x8 cost EXACTLY the same (20079.08 um2). Area tracks
+TOTAL CAPACITY, not how that capacity is divided between warps and registers.
+
+That is what makes a register POOL work: the silicon is fixed, and the
+scheduler chooses the warps/registers split at runtime by handing each warp
+a base row. A kernel declaring 32 registers per thread runs 8 warps in the
+same storage that a 64-register kernel uses for 4.
+
+um2/bit rises slightly as the array shrinks because the collector, arbiters
+and bypass logic are fixed overhead that does not scale with capacity.

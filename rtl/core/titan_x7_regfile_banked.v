@@ -85,6 +85,17 @@ module titan_x7_regfile_banked #(
     input  wire                          clk,
     input  wire                          rst_n,
 
+    // ---- per-warp register window base ----------------------------------
+    // Row at which warp w's registers start, in bank-rows. The storage is a
+    // POOL rather than NUM_WARPS fixed windows of NUM_REGS: the scheduler
+    // hands each warp a base, so a kernel needing 32 registers can run twice
+    // the warps of one needing 64 out of the same silicon. See the header.
+    //
+    // Driving warp_base[w] = w * (NUM_REGS/NUM_BANKS) reproduces the fixed
+    // per-warp layout exactly, which is what the default below does, so
+    // existing callers are unaffected.
+    input  wire [NUM_WARPS*ROW_W-1:0]    warp_base,
+
     // ---- allocate a collector unit for one instruction ------------------
     input  wire                          alloc_valid,
     output wire                          alloc_ready,
@@ -164,7 +175,8 @@ module titan_x7_regfile_banked #(
                 b = wr_reg[p*6 +: BANK_W];
                 if (!bank_we[b]) begin
                     bank_we[b]    = 1'b1;
-                    bank_waddr[b] = {wr_warp[p*WARP_W +: WARP_W],
+                    bank_waddr[b] = warp_base[wr_warp[p*WARP_W +: WARP_W]*ROW_W +: ROW_W] +
+                                    {{(ROW_W-(6-BANK_W)){1'b0}},
                                      wr_reg[p*6 + BANK_W +: (6-BANK_W)]};
                     bank_wmask[b] = wr_mask[p*LANES +: LANES];
                     bank_wdata[b] = wr_data[p*DW +: DW];
@@ -214,7 +226,11 @@ module titan_x7_regfile_banked #(
     generate
         for (gb = 0; gb < NOP; gb = gb + 1) begin : slot_map
             assign slot_bank[gb] = op_reg[gb][BANK_W-1:0];
-            assign slot_row[gb]  = {cu_warp[gb/3], op_reg[gb][5:BANK_W]};
+            // Pool addressing: the warp's base row plus its register's row
+            // offset, rather than a hardwired {warp, reg} concatenation.
+            assign slot_row[gb]  =
+                warp_base[cu_warp[gb/3]*ROW_W +: ROW_W] +
+                {{(ROW_W-(6-BANK_W)){1'b0}}, op_reg[gb][5:BANK_W]};
         end
     endgenerate
 

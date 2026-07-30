@@ -120,6 +120,25 @@ class WritePorts:
         d.wr_data.value = dat
 
 
+ROWS_PER_WARP = NUM_REGS // NUM_BANKS      # bank-rows one warp's window spans
+ROW_W = 6
+
+
+def set_warp_base(dut, rows_per_warp=ROWS_PER_WARP):
+    """Drive the per-warp register window bases.
+
+    The default `w * ROWS_PER_WARP` reproduces the old fixed {warp, reg}
+    layout exactly, so every pre-existing test still exercises the same
+    addressing. A smaller stride packs warps closer together, which is the
+    whole point of the pool: a kernel needing fewer registers per thread
+    fits more warps in the same storage.
+    """
+    v = 0
+    for w in range(NUM_WARPS):
+        v |= ((w * rows_per_warp) & ((1 << ROW_W) - 1)) << (w * ROW_W)
+    dut.warp_base.value = v
+
+
 def idle_alloc(dut):
     dut.alloc_valid.value = 0
     dut.alloc_warp.value = 0
@@ -189,6 +208,7 @@ async def collect(dut, warp, regs, need=0b111, tag=1, timeout=200):
 async def regfile_banked_roundtrip(dut):
     """1. Data written to every bank comes back correctly."""
     await start_clock_and_reset(dut)
+    set_warp_base(dut)
     wp = WritePorts(dut)
     dut.issue_ready.value = 1
     idle_alloc(dut)
@@ -218,6 +238,7 @@ async def regfile_banked_conflict_cost(dut):
     serialising and the test is not measuring what it claims.
     """
     await start_clock_and_reset(dut)
+    set_warp_base(dut)
     wp = WritePorts(dut)
     dut.issue_ready.value = 1
     idle_alloc(dut)
@@ -270,6 +291,7 @@ async def regfile_banked_write_first_bypass(dut):
     value, which is exactly the failure a write-first SRAM assumption hides.
     """
     await start_clock_and_reset(dut)
+    set_warp_base(dut)
     wp = WritePorts(dut)
     dut.issue_ready.value = 1
     idle_alloc(dut)
@@ -326,6 +348,7 @@ async def regfile_banked_write_first_bypass(dut):
 async def regfile_banked_lane_mask(dut):
     """5. A partial write updates only the enabled lanes."""
     await start_clock_and_reset(dut)
+    set_warp_base(dut)
     wp = WritePorts(dut)
     dut.issue_ready.value = 1
     idle_alloc(dut)
@@ -357,6 +380,7 @@ async def regfile_banked_write_port_arbitration(dut):
     as a stale operand.
     """
     await start_clock_and_reset(dut)
+    set_warp_base(dut)
     wp = WritePorts(dut)
     dut.issue_ready.value = 1
     idle_alloc(dut)
@@ -404,6 +428,7 @@ async def regfile_banked_random_soak(dut):
     discipline described in the module docstring.
     """
     await start_clock_and_reset(dut)
+    set_warp_base(dut)
     random.seed(0xB0FFED)
     wp = WritePorts(dut)
     dut.issue_ready.value = 1
@@ -448,3 +473,53 @@ async def regfile_banked_random_soak(dut):
     dut._log.info(
         f"soak: 60 instructions, {len(ref)} live registers, "
         f"{conflict_cases} forced same-bank operand sets, all correct")
+
+
+@cocotb.test()
+async def regfile_banked_pool_packs_more_warps(dut):
+    """8. The register pool: a register-light kernel packs warps tighter.
+
+    This is the area lever. Storage is provisioned as a POOL, not as
+    NUM_WARPS fixed windows of NUM_REGS, so the scheduler can hand warps
+    overlapping-free windows sized to what the kernel actually declared.
+
+    Here every warp is given a 32-register window (4 bank-rows) instead of
+    64 (8 rows). Eight warps then occupy 32 rows rather than 64 -- HALF the
+    storage -- and must still hold completely independent state in the
+    registers they were promised.
+
+    If the base were ignored, or the add were dropped and the old
+    {warp, reg} concatenation left in place, warps would land on the wrong
+    rows and this fails.
+    """
+    await start_clock_and_reset(dut)
+    HALF = ROWS_PER_WARP // 2          # 4 rows == 32 registers per warp
+    set_warp_base(dut, rows_per_warp=HALF)
+    wp = WritePorts(dut)
+    dut.issue_ready.value = 1
+    idle_alloc(dut)
+
+    REGS_PER_WARP = HALF * NUM_BANKS   # 32
+    ref = {}
+    seed = 0
+    # every warp writes distinct values across its whole promised window
+    for w in range(NUM_WARPS):
+        for r in (1, 5, 17, REGS_PER_WARP - 1):
+            seed += 1
+            val = lane_pattern(seed)
+            await write_one(dut, wp, w, r, val)
+            ref[(w, r)] = val
+
+    for w in range(NUM_WARPS):
+        for r in (1, 5, 17, REGS_PER_WARP - 1):
+            o1, _, _, _ = await collect(dut, w, (r, 0, 0), need=0b001,
+                                        tag=(w * 4 + (r % 4)) % 250 + 1)
+            assert o1 == ref[(w, r)], (
+                f"packed pool: warp {w} r{r} = {o1:#x}, expected "
+                f"{ref[(w,r)]:#x} -- warps are aliasing at a {HALF}-row "
+                f"stride, so the pool base is not being honoured")
+
+    dut._log.info(
+        f"{NUM_WARPS} warps x {REGS_PER_WARP} registers packed into "
+        f"{NUM_WARPS*HALF} bank-rows (was {NUM_WARPS*ROWS_PER_WARP}) -- "
+        f"half the storage, all state independent")
