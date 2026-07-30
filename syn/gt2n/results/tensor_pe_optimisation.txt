@@ -1,0 +1,24 @@
+titan_x7_tensor_pe on GT2N elvt/w31/tt. See docs/GT2N_2NM_SYNTHESIS.md sec 8.
+
+RTL                  synthesis              delay      GHz      area(um2)
+original             default  (-D 333)   1239.29 ps   0.81       262.92
+original             aggressive           921.91 ps   1.08       275.79
+prefix+LZC           aggressive           460.90 ps   2.17       284.35
++ sticky mask fix    aggressive           433.06 ps   2.31       283.29
+
+Matched-effort RTL gain: 921.91 -> 433.06 ps = -53.0% (2.13x) for +2.7% area.
+
+REJECTED: splitting D2 across a pipeline register (drain path, so free on
+throughput -- II stays 1). Measured with the sticky fix in place:
+    with D2 split      434.52 ps    305.42 um2
+    without D2 split   433.06 ps    283.29 um2
+Same timing, +7.8% area. The block is load/fanout-dominated, not
+depth-dominated, and D2 was not the critical stage. Reverted.
+
+The accumulate loop cannot be pipelined at all: acc_s/acc_c are
+loop-carried, which is the point of redundant carry-save.
+
+Formal equivalence (Yosys SAT):
+  (1<<down)-1 == ~(~0<<down), W=137            proven (syn/gt2n/prove_mask.ys)
+  optimised PE == original PE, sequential      proven
+      equiv_induct: 1250 cells proven, 0 unproven

@@ -81,15 +81,18 @@ module titan_x7_tensor_pe #(
     wire [10:0] ma_raw = {(ea != 0), fa};
     wire [10:0] mb_raw = {(eb != 0), fb};
 
-    reg [3:0] clz_a, clz_b;
-    always @(*) begin
-        clz_a = 4'd0;
-        for (i = 0; i <= 10; i = i + 1)
-            if (ma_raw[i]) clz_a = 4'd10 - i[3:0];
-        clz_b = 4'd0;
-        for (i = 0; i <= 10; i = i + 1)
-            if (mb_raw[i]) clz_b = 4'd10 - i[3:0];
-    end
+    // Log-depth rather than the 11-deep linear priority scans these replace;
+    // the `nz ? ... : 0` guard reproduces the old all-zero-reads-0 behaviour
+    // exactly. See titan_x7_lzc and docs/GT2N_2NM_SYNTHESIS.md section 7.
+    wire [3:0] msb_ma, msb_mb;
+    wire       nz_ma, nz_mb;
+    titan_x7_lzc #(.W(16), .LW(4)) u_clz_a (
+        .vec({5'd0, ma_raw}), .idx(msb_ma), .nz(nz_ma));
+    titan_x7_lzc #(.W(16), .LW(4)) u_clz_b (
+        .vec({5'd0, mb_raw}), .idx(msb_mb), .nz(nz_mb));
+
+    wire [3:0] clz_a = nz_ma ? (4'd10 - msb_ma) : 4'd0;
+    wire [3:0] clz_b = nz_mb ? (4'd10 - msb_mb) : 4'd0;
 
     reg        m1_valid;
     reg        m1_sign;
@@ -154,6 +157,14 @@ module titan_x7_tensor_pe #(
 
     wire [ACC_W-1:0] shifted = {{(ACC_W-22){1'b0}}, m2_prod} << m2_shift;
 
+    // Two's-complement negate = ~x + 1, and that +1 is a full 113-bit ripple
+    // increment sitting in series with the barrel shift above. Prefix form
+    // instead (titan_x7_prefix_add is SAT-proven == a+b+cin).
+    wire [ACC_W-1:0] shifted_neg;
+    titan_x7_prefix_add #(.W(ACC_W), .LEVELS(7)) u_m3_neg (
+        .a(~shifted), .b({ACC_W{1'b0}}), .cin(1'b1),
+        .sum(shifted_neg), .cout());
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             m3_valid <= 1'b0; m3_nan <= 1'b0; m3_inf <= 1'b0; m3_inf_sign <= 1'b0;
@@ -163,7 +174,7 @@ module titan_x7_tensor_pe #(
             m3_nan      <= m2_valid && m2_nan;
             m3_inf      <= m2_valid && m2_inf;
             m3_inf_sign <= m2_sign;
-            m3_addend   <= m2_sign ? (~shifted + {{(ACC_W-1){1'b0}}, 1'b1}) : shifted;
+            m3_addend   <= m2_sign ? shifted_neg : shifted;
         end
     end
 
@@ -208,13 +219,20 @@ module titan_x7_tensor_pe #(
     reg [ACC_W-1:0]   d1_sum;
     reg               d1_nan, d1_pinf, d1_ninf;
 
+    // Resolving the redundant carry-save pair is a 113-bit carry-propagate
+    // add -- the one place the accumulator's O(1) loop has to be paid for.
+    // It is off the MAC loop, but it was still a ripple chain.
+    wire [ACC_W-1:0] acc_cpa;
+    titan_x7_prefix_add #(.W(ACC_W), .LEVELS(7)) u_d1_cpa (
+        .a(acc_s), .b(acc_c), .cin(1'b0), .sum(acc_cpa), .cout());
+
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             d1_valid <= 1'b0; d1_sum <= {ACC_W{1'b0}};
             d1_nan <= 1'b0; d1_pinf <= 1'b0; d1_ninf <= 1'b0;
         end else begin
             d1_valid <= acc_drain;
-            d1_sum   <= acc_s + acc_c;            // CPA
+            d1_sum   <= acc_cpa;                  // CPA, prefix form
             d1_nan   <= sticky_nan;
             d1_pinf  <= sticky_pinf;
             d1_ninf  <= sticky_ninf;
@@ -227,15 +245,37 @@ module titan_x7_tensor_pe #(
     reg               d2_zero;
     reg               d2_nan, d2_pinf, d2_ninf;
 
-    wire               s_neg  = d1_sum[ACC_W-1];
-    wire [ACC_W-1:0]   s_mag  = s_neg ? (~d1_sum + {{(ACC_W-1){1'b0}}, 1'b1}) : d1_sum;
+    // The worst path in this module before the rework: a 113-bit ripple
+    // increment (the two's-complement negate) feeding a 112-deep linear
+    // priority scan, in series. Both are now log-depth -- and then SPLIT
+    // ACROSS A PIPELINE STAGE, because two chained log-depth trees is still
+    // the longest path in the PE.
+    //
+    // This costs one cycle of DRAIN latency and nothing else. The drain runs
+    // once per tile, not once per MAC, so throughput -- the number that
+    // matters for a systolic PE -- is untouched: II stays 1.
+    //
+    // The accumulate loop deliberately is NOT pipelined and cannot be: acc_s
+    // and acc_c are loop-carried, which is the entire reason the accumulator
+    // is held in redundant carry-save form. A register inside that loop would
+    // either break single-cycle accumulation or need the loop restructured.
+    // The drain path (D1..D3) is feed-forward and free to cut.
 
-    reg [6:0] msb_c;
-    always @(*) begin
-        msb_c = 7'd0;
-        for (im = 0; im < ACC_W-1; im = im + 1)
-            if (s_mag[im]) msb_c = im[6:0];
-    end
+    wire               s_neg  = d1_sum[ACC_W-1];
+
+    wire [ACC_W-1:0]   d1_neg;
+    titan_x7_prefix_add #(.W(ACC_W), .LEVELS(7)) u_d2_neg (
+        .a(~d1_sum), .b({ACC_W{1'b0}}), .cin(1'b1), .sum(d1_neg), .cout());
+
+    wire [ACC_W-1:0]   s_mag  = s_neg ? d1_neg : d1_sum;
+
+    // The scan this replaces covered bits 0..ACC_W-2 only, so bit ACC_W-1 is
+    // masked off rather than fed in; and it left msb 0 when nothing was set,
+    // which titan_x7_lzc also does.
+    wire [6:0] msb_c;
+    titan_x7_lzc #(.W(128), .LW(7)) u_d2_lzc (
+        .vec({{(128-(ACC_W-1)){1'b0}}, s_mag[ACC_W-2:0]}),
+        .idx(msb_c), .nz());
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -286,7 +326,16 @@ module titan_x7_tensor_pe #(
             // mant window: bits [msb : msb-23] -> normalize via ext shift
             mant_d  = mag_ext[down + 24 -: 24];
             rb_d    = mag_ext[down];        // bit msb-24 (guard)
-            st_d    = |(mag_ext & (({{ACC_W+24-1{1'b0}}, 1'b1} << down) - 1));
+            // Sticky = OR of every bit below the guard. The mask of `down`
+            // ones was built as (1 << down) - 1, whose `- 1` is a 137-bit
+            // ripple DECREMENT sitting in series with the shift and the
+            // 137-bit OR reduction -- measured as the PE's critical path
+            // (41 of 47 gate levels were or3/nand3/nor3).
+            //
+            // The same mask is ~(~0 << down): a shift of all-ones and an
+            // invert, with no arithmetic at all. Identical for every `down`
+            // in range, and SAT-proven so (syn/gt2n/prove_mask.ys).
+            st_d    = |(mag_ext & ~({ACC_W+24{1'b1}} << down));
 
             mant_rr = {1'b0, mant_d} + {24'd0, rb_d && (st_d || mant_d[0])};
             exp_rr  = {3'd0, d2_msb} - 10'sd68 + 10'sd127;

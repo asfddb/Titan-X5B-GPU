@@ -1,0 +1,4 @@
+read_verilog syn/gt2n/prove_mask.v
+hierarchy -top mask_equiv
+proc; opt -full; flatten; opt -full
+sat -verify -prove diff 1'b0 mask_equiv

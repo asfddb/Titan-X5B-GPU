@@ -268,7 +268,83 @@ a `` `ifdef `` for simulation while synthesising the structural one — at the
 cost of simulating something other than what is built, which is exactly the
 kind of divergence the formal proofs above would then be guarding.
 
-## 8. Reproducing
+## 8. The tensor PE: 1239 ps -> 433 ps, and one idea that did not work
+
+The tensor PE was the slowest block in the design at 1239.29 ps, and it is
+the one that does matmul, so it is what local-AI throughput rests on.
+
+### 8.1 What worked
+
+Same treatment as the FMA — it had the identical defects:
+
+| site | was | now |
+|:--|:--|:--|
+| M1, two 11-bit CLZs | linear priority scan | `titan_x7_lzc` tree |
+| M3, product negate | 113-bit ripple increment | prefix adder |
+| D1, carry-save resolve | 113-bit ripple CPA | prefix adder |
+| D2, magnitude negate | 113-bit ripple increment | prefix adder |
+| D2, 112-bit CLZ | linear priority scan | `titan_x7_lzc` tree |
+| **D3, sticky mask** | **`(1 << down) - 1`** | **`~(~0 << down)`** |
+
+That last one was the real critical path and is worth stating plainly:
+
+```verilog
+st_d = |(mag_ext & (({...,1'b1} << down) - 1));
+```
+
+is a 137-bit variable shift, then a **137-bit ripple decrement**, then a
+137-bit OR reduction, all in series. `stime -p` showed 41 of 47 gate levels
+were or3/nand3/nor3 — an OR/borrow chain, not a carry chain, which is what
+pointed here. The mask of `down` ones needs no arithmetic at all:
+`(1 << down) - 1 == ~(~0 << down)`, **SAT-proven** in
+`syn/gt2n/prove_mask.ys`.
+
+### 8.2 Measured, elvt/w31/tt
+
+| RTL | synthesis | delay | GHz | area |
+|:--|:--|--:|--:|--:|
+| original | default (`-D 333`) | 1239.29 ps | 0.81 | 262.92 um2 |
+| original | aggressive | 921.91 ps | 1.08 | 275.79 um2 |
+| prefix + LZC | aggressive | 460.90 ps | 2.17 | 284.35 um2 |
+| **+ sticky mask** | **aggressive** | **433.06 ps** | **2.31** | **283.29 um2** |
+
+At matched effort the RTL changes are worth **53.0%** (921.91 -> 433.06,
+a 2.13x speedup) for **+2.7% area**.
+
+### 8.3 What did NOT work: adding a pipeline stage
+
+The obvious move — the PE's D2 stage chained two log-depth trees (prefix
+negate, then LZC), so splitting it across a register should have halved that
+path. The drain runs once per tile rather than once per MAC, so the extra
+cycle of latency costs no throughput at all: II stays 1. It looked free.
+
+**It made things worse.** Measured, both with the sticky fix in place:
+
+| | delay | area |
+|:--|--:|--:|
+| with the D2 split | 434.52 ps | 305.42 um2 |
+| **without it** | **433.06 ps** | **283.29 um2** |
+
+Identical timing, **+7.8% area**. Reverted.
+
+The reason is the one the FMA already taught: after the prefix/LZC rework
+these blocks are **load- and fanout-dominated, not depth-dominated**. Cutting
+a path that is not critical buys nothing, and the added flops cost area and
+put more load on the nets that *are* critical. The stage split was aimed at
+D2 on the assumption D2 was the bottleneck; a diagnostic (stubbing the
+zero-compare, then reading the gate histogram) showed the real path ran
+through D3's sticky computation instead.
+
+**The lesson is procedural, not architectural: measure which stage is
+critical before slicing one.** Pipelining is the right instinct for a
+depth-dominated path, and this one was not.
+
+The accumulate loop is separately off-limits: `acc_s`/`acc_c` are
+loop-carried, which is the whole reason the accumulator is redundant
+carry-save. A register inside that loop breaks single-cycle accumulation.
+Only the feed-forward multiply front-end and drain path can be cut at all.
+
+## 9. Reproducing
 
 ```bash
 export GT2N_ROOT=/path/to/GT2N
