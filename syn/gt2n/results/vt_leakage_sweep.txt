@@ -1,0 +1,7 @@
+GT2N w31/tt, identical effort (-D 200, buffer -N 4, upsize/dnsize)
+VT      delay(ps)   GHz   area(um2)  leak/FMA(uW)  x30208(W)
+elvt      401.81   2.49      476.9        900.3      27.20
+ulvt      423.20   2.36      476.5        341.1      10.30
+lvt       448.05   2.23      476.4        173.7       5.25
+svt       554.75   1.80      476.4         14.6       0.44
+hvt       761.82   1.31      476.7          0.8       0.02

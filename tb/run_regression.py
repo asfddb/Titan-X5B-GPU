@@ -243,6 +243,16 @@ SUITES = {
         module="test_sm_x7_warps",
         parameters={"LANES": 4},
     ),
+    "apexlane": dict(
+        sources=[os.path.join(TB, "..", "syn", "gt2n", "iso_miter.v")] + rtl_files(
+            "common/titan_x7_prefix_add.v",
+            "common/titan_x7_lzc.v",
+            "fpu/titan_x7_fp32_fma_pipe.v",
+            "fpu/titan_apex_fma_lane.v",
+        ),
+        toplevel="iso_miter",
+        module="test_apex_lane",
+    ),
     # Not a cocotb suite: pytest driving whole-GPU kernel runs. Handled by
     # run_compute_suite(); the dict entry exists so it appears in the suite
     # list and runs by default.
