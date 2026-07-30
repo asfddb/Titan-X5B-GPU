@@ -300,6 +300,15 @@ module titan_x7_fp32_fma_pipe (
         end else begin
             rsh = (-e3_s < 8'sd25) ? (-e3_s) : 5'd24;
             c_frame_c = {80'd0, e3_mc >> rsh};
+            // Sticky = OR of the bits shifted out, i.e. bits [rsh-1:0].
+            //
+            // MEASURED, do not "optimise" this into the mask form
+            // |(e3_mc & ~(~0 << rsh)) that the tensor PE's D3 sticky uses.
+            // That rewrite is a 2x win at 137 bits, where it removes a ripple
+            // decrement -- and a LOSS here at 24 bits: 401.81 -> 460.39 ps on
+            // GT2N elvt/w31. At this width the per-bit `k < rsh` comparisons
+            // synthesise in parallel and feed a balanced OR, whereas the mask
+            // form puts a barrel shift in series ahead of the same OR.
             for (k = 0; k < 24; k = k + 1)
                 if (k < rsh) c_sticky_c = c_sticky_c | e3_mc[k];
         end

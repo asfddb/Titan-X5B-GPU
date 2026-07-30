@@ -1,0 +1,18 @@
+titan_x7_fp32_fma_pipe frequency floor, GT2N elvt/w31/tt.
+ABC delay-target sweep with buffering; RTL unchanged between rows.
+
+  target      delay        GHz      area(um2)
+  -D 200    401.81 ps     2.49       476.85
+  -D 150    401.81 ps     2.49       496.81
+  -D 120    401.81 ps     2.49       496.81
+
+Identical delay, more area. 401.81 ps is a STRUCTURAL floor for this RTL,
+not a tool setting. 3 GHz = 333.33 ps, so the remaining 17% must come from
+re-partitioning the 8 pipeline stages into ~10-11. Critical path is 40 gate
+levels with 6 buffers on it and no single dominant structure.
+
+REJECTED: applying the tensor PE's sticky-mask rewrite to the FMA's E4
+sticky. 401.81 -> 460.39 ps (worse). At 24 bits the per-bit comparisons run
+in parallel into a balanced OR; the mask form inserts a barrel shift in
+series ahead of it. The rewrite is a win at 137 bits and a loss at 24.
+Reverted, with a warning comment in the RTL.

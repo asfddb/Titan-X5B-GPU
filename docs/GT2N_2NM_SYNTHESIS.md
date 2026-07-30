@@ -344,7 +344,94 @@ loop-carried, which is the whole reason the accumulator is redundant
 carry-save. A register inside that loop breaks single-cycle accumulation.
 Only the feed-forward multiply front-end and drain path can be cut at all.
 
-## 9. Reproducing
+## 9. The 3 GHz question, and the 20,000-lane die budget
+
+### 9.1 2.49 GHz is a structural floor, not a tool setting
+
+Sweeping ABC's delay target on the FMA:
+
+| target | delay | area |
+|:--|--:|--:|
+| `-D 200` | 401.81 ps | 476.85 um2 |
+| `-D 150` | **401.81 ps** | 496.81 um2 |
+| `-D 120` | **401.81 ps** | 496.81 um2 |
+
+Identical delay, more area. The tool has nothing left to give: **401.81 ps
+(2.49 GHz) is what this RTL structure costs.** 3 GHz means 333.33 ps, so the
+gap is 17% and it has to come from the design.
+
+The critical path is now **40 gate levels with 6 buffers on it** and no
+single dominant structure — the ripple chains and linear scans are gone. A
+distributed 40-level path in one pipeline stage is simply too deep for
+3 GHz; closing it means re-partitioning the 8 stages into roughly 10-11,
+which is a substantial rewrite of the stage boundaries rather than a local
+fix. That is the honest next step, and it is not attempted here.
+
+### 9.2 A negative result worth keeping: the mask trick is width-dependent
+
+Section 8 replaced the tensor PE's sticky mask `(1 << d) - 1` with
+`~(~0 << d)` for a 2x win. The FMA's E4 has a *textually similar* sticky:
+
+```verilog
+for (k = 0; k < 24; k = k + 1)
+    if (k < rsh) c_sticky_c = c_sticky_c | e3_mc[k];
+```
+
+Applying the same rewrite there **made it worse: 401.81 -> 460.39 ps.**
+Reverted, with a comment in the RTL so nobody "fixes" it again.
+
+The reason is width. At 137 bits the mask form removes a ripple decrement
+that dominates everything. At 24 bits there is no decrement worth removing,
+the per-bit `k < rsh` comparisons synthesise **in parallel** feeding a
+balanced OR, and the mask form instead puts a barrel shift **in series**
+ahead of that same OR. Same transformation, opposite sign, decided by
+operand width.
+
+### 9.3 Will 20,000 lanes fit on a 2 nm die?
+
+Yes, comfortably. `syn/gt2n/die_budget.py` sums the measured per-block
+areas (it is a cell-area budget, not a floorplan — no routing, clock tree,
+power grid, PHYs or pads):
+
+| block | mm2 | share |
+|:--|--:|--:|
+| FP32 FMA lanes (20,000) | 9.54 | 8.8% |
+| tensor PEs (20,000) | 5.67 | 5.2% |
+| register files, **as built (flops)** | **93.22** | **86.0%** |
+| **total cell area** | **108.43** | |
+| at 70% utilisation -> die | **154.89** | |
+
+| reference | die | this design |
+|:--|--:|--:|
+| reticle limit | 858 mm2 | 18.1% |
+| H100 | 814 mm2 | 19.0% |
+| RTX 4090 (AD102) | 609 mm2 | 25.4% |
+
+**Fitting is not the problem.** The problem is that the register file is
+**86% of the area**, holding 39.1 MiB in flip-flops because GT2N has no SRAM
+and no memory compiler (section 4). On the stated -- and *not measured* --
+assumption that a compiled SRAM bitcell is ~10x denser than a flop, the same
+design is 24.53 mm2 of cells, about 35 mm2 of die, 5.8% of a 4090.
+
+So the single highest-value change available is still an SRAM macro source,
+not more frequency: it is worth ~4.4x the whole die area, where the entire
+FMA rework was worth 39% of one block's delay.
+
+### 9.4 "Every core works"
+
+Per-lane correctness is structural rather than exhaustively simulated:
+every lane is an instance of one module, and that module is proven — the
+FMA and tensor PE are each SAT-proven sequentially equivalent to their
+pre-optimisation versions (sections 7.3 and 8).
+
+Instance-level independence is verified at **N=16** by the `tensor7` suite,
+which checks all 4x4 PE outputs individually against an exact reference for
+K=1/4/16/64 and back-to-back tiles. That is the largest array that
+simulates in reasonable time: 16 PEs already exceeds 9 minutes under Icarus
+(section 7.4). Simulating 20,000 lanes is not feasible here and is not
+claimed.
+
+## 10. Reproducing
 
 ```bash
 export GT2N_ROOT=/path/to/GT2N

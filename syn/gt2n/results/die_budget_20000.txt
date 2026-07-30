@@ -1,0 +1,28 @@
+
+TITAN X7 die budget on GT2N 2 nm -- 20,000 lanes
+==================================================================
+all per-block areas MEASURED by Yosys on GT2N cells (elvt/w31/tt)
+
+  block                                   mm^2     share
+  ------------------------------------------------------
+  FP32 FMA lanes                          9.54      8.8%
+  tensor PEs                              5.67      5.2%
+  register files (FLOPS, as built)       93.22     86.0%
+  ------------------------------------------------------
+  TOTAL cell area                       108.43
+  / 70% utilisation -> die              154.89   <- realistic
+
+  vs reference dies:
+    reticle limit         858 mm^2      18.1% of it   FITS
+    H100                  814 mm^2      19.0% of it   FITS
+    RTX 4090 (AD102)      609 mm^2      25.4% of it   FITS
+
+  The register file is 86% of the area and holds 39.1 MiB.
+  It is flip-flops because GT2N has NO SRAM and no memory compiler.
+
+  ASSUMPTION (not measured): a compiled SRAM bitcell is ~10x
+  denser than a flop for storage. On that assumption:
+    register files ->     9.32 mm^2
+    TOTAL cell area ->    24.53 mm^2
+    die at 70% util ->    35.04 mm^2   (5.8% of a 4090 die)
+
