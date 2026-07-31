@@ -53,6 +53,21 @@ module titan_x7_lzc #(
     output wire          nz
 );
 
+`ifdef TITAN_FAST_SIM
+    // Behavioural form for SIMULATION ONLY -- see the note in
+    // titan_x7_prefix_add.v. SAT-proven identical to the tree below, so the
+    // switch is licensed by proof rather than by hope. Synthesis never sees
+    // it: only tb/run_regression.py defines TITAN_FAST_SIM.
+    integer bi;
+    reg [LW-1:0] beh_idx;
+    always @(*) begin
+        beh_idx = {LW{1'b0}};
+        for (bi = 0; bi < W; bi = bi + 1)
+            if (vec[bi]) beh_idx = bi[LW-1:0];
+    end
+    assign idx = beh_idx;
+    assign nz  = |vec;
+`else
     genvar l, j;
 
     // Level l holds W>>l nodes. Flattened: node j of level l is at
@@ -86,5 +101,6 @@ module titan_x7_lzc #(
 
     assign idx = ix_f[(LW*W)*LW +: LW];
     assign nz  = nz_f[LW*W];
+`endif
 
 endmodule

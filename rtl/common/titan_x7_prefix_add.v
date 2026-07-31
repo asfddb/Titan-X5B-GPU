@@ -49,6 +49,30 @@ module titan_x7_prefix_add #(
     output wire         cout
 );
 
+`ifdef TITAN_FAST_SIM
+    // ------------------------------------------------------------------
+    // Behavioural form, for SIMULATION ONLY.
+    //
+    // The structural Kogge-Stone below is W*log2(W) explicit gates, and an
+    // event-driven simulator pays per gate per event. Measured: after this
+    // module and titan_x7_lzc landed, the `fma8` suite went from 2.3 s to
+    // beyond 10 minutes and `tensor7` to 12,805 s (3.56 h) -- roughly 250x.
+    //
+    // Swapping in `a + b + cin` for simulation is normally indefensible: you
+    // would be verifying something other than what you build. It is defensible
+    // HERE, and only here, because the two forms are SAT-PROVEN identical for
+    // all 2^213 inputs (syn/gt2n/prove_prefix_add, and the sequential proofs
+    // of the whole FMA and tensor PE). The proof is what licenses the switch.
+    //
+    // Synthesis must NEVER see this branch: `TITAN_FAST_SIM` is defined only
+    // by tb/run_regression.py, and syn/gt2n/run_gt2n.sh does not define it.
+    // If it ever did, the design would silently lose its prefix structure and
+    // the 2 nm timing results would be meaningless.
+    // ------------------------------------------------------------------
+    wire [W:0] beh_sum = {1'b0, a} + {1'b0, b} + {{W{1'b0}}, cin};
+    assign sum  = beh_sum[W-1:0];
+    assign cout = beh_sum[W];
+`else
     genvar l, i;
 
     wire [W-1:0] g0 = a & b;
@@ -84,5 +108,6 @@ module titan_x7_prefix_add #(
 
     assign sum  = p0 ^ {carry[W-2:0], cin};
     assign cout = carry[W-1];
+`endif
 
 endmodule

@@ -354,7 +354,13 @@ def run_suite(name, cfg):
     runner.build(
         verilog_sources=cfg["sources"],
         hdl_toplevel=cfg["toplevel"],
-        build_args=["-g2012"],
+        # TITAN_FAST_SIM selects the behavioural form of titan_x7_prefix_add
+        # and titan_x7_lzc. Both are SAT-proven identical to the structural
+        # versions, and the structural ones cost ~250x simulation time (fma8
+        # 2.3 s -> >10 min, tensor7 -> 3.56 h). Synthesis never defines it:
+        # syn/gt2n/run_gt2n.sh builds the structural RTL, which is what the
+        # 2 nm timing numbers are measured on.
+        build_args=["-g2012", "-DTITAN_FAST_SIM"],
         build_dir=build_dir,
         always=True,
         parameters=cfg.get("parameters", {}),
