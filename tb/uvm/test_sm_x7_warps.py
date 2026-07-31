@@ -206,3 +206,154 @@ async def sm_x7_control_flow_is_per_warp(dut):
     dut._log.info(
         f"{NUM_WARPS} warps ran loops of {1}..{NUM_WARPS} trips concurrently, "
         f"each reaching its own accumulator total")
+
+
+@cocotb.test()
+async def sm_x7_exit_retires_only_the_exiting_warp(dut):
+    """EXIT (BARRIER, use_imm, imm==0xFFF) retires one warp at a time;
+    `all_retired` only rises once every ACTIVE warp has retired.
+
+    Three warps run programs of different lengths, each ending in EXIT.
+    If `warp_retired`/`all_retired` were shared across warps -- or if EXIT
+    were confused with a plain BARRIER (which waits for every warp) -- the
+    short warps would either retire every warp at once or never retire at
+    all while a longer warp is still running.
+    """
+    await boot(dut)
+
+    prog = {}
+    lengths = {0: 2, 1: 4, 2: 6}   # instructions before EXIT, per warp
+    bases = {}
+    for w, n in lengths.items():
+        base = 0x1000 * (w + 1)
+        bases[w] = base
+        body = [enc("ADD", rd=1, rs1=0, imm=w) for _ in range(n)]
+        body.append(enc("BARRIER", imm=0xFFF))   # EXIT
+        for i, word in enumerate(body):
+            prog[base + i * 4] = word
+
+    cocotb.start_soon(imem_model(dut, prog))
+
+    pcs = [bases.get(w, 0) for w in range(NUM_WARPS)]
+    dut.warp_pc_in.value = pack_pcs(pcs)
+    dut.warp_active.value = 0b0111   # warps 0, 1, 2
+
+    exits_seen = []
+    all_retired_at_exit_count = []
+    for cyc in range(300):
+        await RisingEdge(dut.clk)
+        if int(dut.warp_exit_valid.value):
+            exits_seen.append(int(dut.warp_exit_warp.value))
+            all_retired_at_exit_count.append(int(dut.all_retired.value))
+
+    assert sorted(exits_seen) == [0, 1, 2], (
+        f"expected exactly one EXIT pulse per active warp, got {exits_seen}")
+    # all_retired must not assert until every active warp has exited, i.e.
+    # only on the LAST of the three pulses -- regardless of which warp
+    # (scheduling fairness, not program length, decides the exact order)
+    assert all_retired_at_exit_count == [0, 0, 1], (
+        f"all_retired asserted before every active warp had retired: "
+        f"{all_retired_at_exit_count}")
+    assert int(dut.all_retired.value) == 1, (
+        "all_retired should stay asserted once every active warp has retired")
+
+    dut._log.info(
+        "3 warps of different lengths each retired independently via EXIT; "
+        "all_retired only rose after the last (longest) warp finished")
+
+
+@cocotb.test()
+async def sm_x7_relaunch_clears_retired(dut):
+    """A warp that EXITs and is relaunched at a new PC is not stuck retired.
+
+    Guards the activation-edge clear of `warp_retired`: without it, a warp
+    reused after EXIT would never become issueable again and `all_retired`
+    would latch true forever regardless of what runs next.
+    """
+    await boot(dut)
+
+    prog = {
+        0x0000: enc("BARRIER", imm=0xFFF),                 # EXIT immediately
+        0x2000: enc("ADD", rd=5, rs1=0, imm=0x55),
+        0x2004: enc("ADD", rd=6, rs1=0, imm=0x66),
+    }
+    cocotb.start_soon(imem_model(dut, prog))
+
+    dut.warp_pc_in.value = 0x0000
+    dut.warp_active.value = 0b1
+    await ClockCycles(dut.clk, 40)
+    assert int(dut.all_retired.value) == 1, "warp 0 should have retired"
+
+    # deactivate, then relaunch at a fresh PC -- a real falling->rising edge
+    dut.warp_active.value = 0b0
+    await ClockCycles(dut.clk, 2)
+    dut.warp_pc_in.value = 0x2000
+    dut.warp_active.value = 0b1
+    await ClockCycles(dut.clk, 2)
+    assert int(dut.all_retired.value) == 0, (
+        "all_retired must drop on relaunch, not stay latched from the "
+        "previous EXIT")
+
+    await ClockCycles(dut.clk, 60)
+    lanes = await read_reg(dut, 0, 6)
+    for ln, got in enumerate(lanes):
+        assert got == 0x66, (
+            f"relaunched warp 0 lane {ln} r6 = {got:#x}, expected 0x66 -- "
+            f"the warp did not resume normal execution after EXIT")
+    assert int(dut.all_retired.value) == 0, (
+        "relaunched program has no EXIT, so all_retired must stay low")
+
+    dut._log.info(
+        "warp 0 retired, was relaunched at a new PC, and resumed normal "
+        "execution instead of staying latched retired")
+
+
+@cocotb.test()
+async def sm_x7_plain_barrier_is_not_exit(dut):
+    """A plain BARRIER (use_imm=0, thread sync) must NOT retire a warp.
+
+    Only BARRIER with use_imm && imm==0xFFF is EXIT. If that distinction
+    were lost -- e.g. by treating every BARRIER as EXIT -- ordinary
+    synchronisation would silently deactivate warps instead of just
+    rendezvousing them, and this test is what would catch it: both warps
+    must run their post-barrier instruction, and neither `warp_exit_valid`
+    nor `all_retired` may fire anywhere in the run.
+    """
+    await boot(dut)
+
+    prog = {
+        0x1000: enc("ADD", rd=1, rs1=0, imm=1),
+        0x1004: enc("BARRIER"),                     # plain sync, not EXIT
+        0x1008: enc("ADD", rd=2, rs1=0, imm=0xAA),
+        0x2000: enc("ADD", rd=1, rs1=0, imm=2),
+        0x2004: enc("ADD", rd=63, rs1=63, imm=0),    # extra NOP: staggers arrival
+        0x2008: enc("BARRIER"),
+        0x200C: enc("ADD", rd=2, rs1=0, imm=0xBB),
+    }
+    cocotb.start_soon(imem_model(dut, prog))
+
+    dut.warp_pc_in.value = pack_pcs([0x1000, 0x2000] + [0] * (NUM_WARPS - 2))
+    dut.warp_active.value = 0b11
+
+    saw_exit = False
+    saw_all_retired = False
+    for cyc in range(200):
+        await RisingEdge(dut.clk)
+        if int(dut.warp_exit_valid.value):
+            saw_exit = True
+        if int(dut.all_retired.value):
+            saw_all_retired = True
+
+    assert not saw_exit, "plain BARRIER must never pulse warp_exit_valid"
+    assert not saw_all_retired, "plain BARRIER must never assert all_retired"
+
+    for w, want in ((0, 0xAA), (1, 0xBB)):
+        lanes = await read_reg(dut, w, 2)
+        for ln, got in enumerate(lanes):
+            assert got == want, (
+                f"warp {w} lane {ln} r2 = {got:#x}, expected {want:#x} -- "
+                f"it did not resume after the plain barrier released")
+
+    dut._log.info(
+        "plain BARRIER synchronised both warps and released them without "
+        "retiring either one")

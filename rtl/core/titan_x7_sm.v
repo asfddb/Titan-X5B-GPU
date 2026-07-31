@@ -80,6 +80,13 @@ module titan_x7_sm #(
     output reg  [LANES*32-1:0]      wmma_a,
     output reg  [LANES*32-1:0]      wmma_b,
 
+    // warp retirement: EXIT is BARRIER with use_imm && imm == 0xFFF (the
+    // same TX6_EXIT_IMM convention as titan_x5_pipeline). A plain BARRIER
+    // (without that immediate) is thread sync, not termination.
+    output reg                      warp_exit_valid,
+    output reg  [WARP_W-1:0]        warp_exit_warp,
+    output wire                     all_retired,
+
     // observability
     output reg  [31:0]              dbg_retired,
     input  wire [WARP_W-1:0]        dbg_warp,
@@ -127,7 +134,11 @@ module titan_x7_sm #(
     reg [NUM_WARPS-1:0] branch_shadow;
     reg [1:0]           pred_pending [0:NUM_WARPS-1];
     reg [NUM_WARPS-1:0] barrier_wait;
+    reg [NUM_WARPS-1:0] warp_retired;
     reg                 lsu_busy;
+
+    assign all_retired = (warp_active != {NUM_WARPS{1'b0}}) &&
+                          ((warp_retired & warp_active) == warp_active);
 
     // ==================================================================
     // register file & predicate file (flop model; physical: banked SRAM
@@ -178,7 +189,7 @@ module titan_x7_sm #(
             reg [WARP_W-1:0] w;
             w = fetch_rr + fsi[WARP_W-1:0];
             if (!f_valid && warp_active[w] && prev_active[w] && !pend[w] &&
-                ib_cnt[w] <= (IB_DEPTH-2)) begin
+                !warp_retired[w] && ib_cnt[w] <= (IB_DEPTH-2)) begin
                 f_valid = 1'b1;
                 f_warp  = w;
             end
@@ -274,6 +285,7 @@ module titan_x7_sm #(
     wire is_fp_op [0:NUM_WARPS-1];
     wire [1:0] head_class [0:NUM_WARPS-1];
     wire writes_rd [0:NUM_WARPS-1];
+    wire d_exit [0:NUM_WARPS-1];
     wire [NUM_WARPS-1:0] issueable;
     wire [2*NUM_WARPS-1:0] head_pipe_flat;
 
@@ -283,6 +295,11 @@ module titan_x7_sm #(
             // SFU seed run in the INT pipe's comparators/shifters
             assign is_fp_op[g] = (d_op[g] == 5'd15) || (d_op[g] == 5'd16) ||
                                  (d_op[g] == 5'd17);
+
+            // EXIT is BARRIER with use_imm && imm == 0xFFF (TX6_EXIT_IMM,
+            // same convention as titan_x5_pipeline). A plain BARRIER is
+            // thread sync, not termination.
+            assign d_exit[g] = d_barr[g] && d_uimm[g] && (d_imm[g] == 16'h0FFF);
             assign head_class[g] = (d_ld[g] || d_st[g] || d_atom[g]) ? CL_MEM :
                                    is_fp_op[g]                       ? CL_FP  :
                                    (d_wmma[g] || d_barr[g])          ? CL_OTH :
@@ -307,7 +324,7 @@ module titan_x7_sm #(
                            ((!writes_rd[g] && !d_st[g]) || !bz[d_rd[g]]);
 
             assign issueable[g] =
-                warp_active[g] && head_vld[g] && deps_ok &&
+                warp_active[g] && !warp_retired[g] && head_vld[g] && deps_ok &&
                 !branch_shadow[g] && (pred_pending[g] == 2'd0) &&
                 !barrier_wait[g] &&
                 !(head_class[g] == CL_MEM && lsu_busy);
@@ -636,6 +653,7 @@ module titan_x7_sm #(
             prev_active <= {NUM_WARPS{1'b0}};
             branch_shadow <= {NUM_WARPS{1'b0}};
             barrier_wait <= {NUM_WARPS{1'b0}};
+            warp_retired <= {NUM_WARPS{1'b0}};
             lsu_busy <= 1'b0;
             fetch_rr <= {WARP_W{1'b0}};
             s_valid[0] <= 1'b0; s_valid[1] <= 1'b0;
@@ -646,6 +664,8 @@ module titan_x7_sm #(
             wb_int_v <= 1'b0; wb_fp_v <= 1'b0; wb_mem_v <= 1'b0;
             wmma_valid <= 1'b0;
             dbg_retired <= 32'd0;
+            warp_exit_valid <= 1'b0;
+            warp_exit_warp <= {WARP_W{1'b0}};
         end else begin
             // defaults
             bru_valid <= 1'b0;
@@ -665,6 +685,7 @@ module titan_x7_sm #(
                     ib_rd[i]    <= 3'd0;
                     ib_wr[i]    <= 3'd0;
                     ib_cnt[i]   <= 4'd0;
+                    warp_retired[i] <= 1'b0;
                 end
             end
 
@@ -736,6 +757,7 @@ module titan_x7_sm #(
                                  - (pop1 ? 4'd1 : 4'd0);
             end
 
+            warp_exit_valid <= 1'b0;
             for (j = 0; j < 2; j = j + 1) begin : is_latch
                 reg v;
                 v  = (j == 0) ? sel0_v : sel1_v;
@@ -764,7 +786,13 @@ module titan_x7_sm #(
                     if (d_br[iw])            branch_shadow[iw] <= 1'b1;
                     if (d_op[iw] == 5'd21)   pred_pending[iw]  <= 2'd3;
                     if (head_class[iw] == CL_MEM) lsu_busy     <= 1'b1;
-                    if (d_barr[iw])          barrier_wait[iw]  <= 1'b1;
+                    if (d_exit[iw]) begin
+                        warp_retired[iw] <= 1'b1;
+                        warp_exit_valid  <= 1'b1;
+                        warp_exit_warp   <= iw;
+                    end else if (d_barr[iw]) begin
+                        barrier_wait[iw] <= 1'b1;
+                    end
                 end
             end
 
