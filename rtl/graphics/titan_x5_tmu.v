@@ -53,6 +53,17 @@ module titan_x5_tmu (
     input  wire        mem_valid,
     input wire [31:0] mem_rdata,
     
+    // ---- cache flush ------------------------------------------------------
+    // Straight through to this TMU's texture cache. That cache is hardwired
+    // READ-ONLY (core_req_write is tied to 1'b0 below), so a flush of it
+    // writes nothing back -- it contributes invalidation only. That is still
+    // worth doing: the TMU caches are not on the coherent crossbar (their
+    // snoop ports are tied off), so nothing else ever invalidates them, and
+    // a clean stale texture line would otherwise survive a host write to the
+    // same address indefinitely.
+    input  wire        flush_req,
+    output wire        flush_done,
+
     output wire [2:0] dbg_state
 );
 
@@ -211,8 +222,8 @@ module titan_x5_tmu (
         .snp_resp_dirty(),
         .snp_resp_data(),
 
-        .flush_req(1'b0),   // no flush path plumbed to this instance yet
-        .flush_done(),
+        .flush_req(flush_req),
+        .flush_done(flush_done),
         .dbg_addr(32'd0),
         .dbg_mesi()
     );

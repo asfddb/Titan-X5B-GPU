@@ -50,24 +50,39 @@ def _tool(name):
     raise RuntimeError(f"{name} not found on PATH")
 
 
+def _sources():
+    """Every Verilog file that goes into the compute image."""
+    out = [os.path.join(TB, "tb_compute_top.v")]
+    for sub in sorted(os.listdir(RTL)):
+        d = os.path.join(RTL, sub)
+        if os.path.isdir(d):
+            out += [os.path.join(d, f) for f in sorted(os.listdir(d))
+                    if f.endswith(".v")]
+    out += [os.path.join(RTL, f) for f in sorted(os.listdir(RTL))
+            if f.endswith(".v")]
+    return out
+
+
 def build(warp_mask=0x01, force=False):
     """Elaborate tb_compute_top for a launch mask; reused across kernels.
 
     LAUNCH_WARP_MASK is a parameter of titan_x5_gpu_top, not a runtime input,
     so each mask needs its own elaborated image.
+
+    The image is reused only while it is NEWER than every source that went
+    into it. It used to be reused whenever it merely existed, which meant an
+    RTL change was silently not tested: a stale image from a previous session
+    kept passing, and a control experiment that disabled a feature entirely
+    still came back green. Elaboration is ~30 s against a suite that runs for
+    minutes, so the staleness check is cheap insurance.
     """
     sim = _sim_path(warp_mask)
+    sources = _sources()
     if os.path.exists(sim) and not force:
-        return sim
+        newest = max(os.path.getmtime(s) for s in sources)
+        if os.path.getmtime(sim) >= newest:
+            return sim
     os.makedirs(_BUILD_DIR, exist_ok=True)
-    sources = [os.path.join(TB, "tb_compute_top.v")]
-    for sub in sorted(os.listdir(RTL)):
-        d = os.path.join(RTL, sub)
-        if os.path.isdir(d):
-            sources += [os.path.join(d, f) for f in sorted(os.listdir(d))
-                        if f.endswith(".v")]
-    sources += [os.path.join(RTL, f) for f in sorted(os.listdir(RTL))
-                if f.endswith(".v")]
     cmd = [_tool("iverilog"), "-g2012", "-s", "tb_compute_top",
            "-P", f"tb_compute_top.LAUNCH_MASK={warp_mask}",
            "-I", RTL, "-o", sim] + sources

@@ -250,7 +250,16 @@ module titan_x5_coherent_xbar #(
     output reg  [ADDR_WIDTH-1:0]               l2_req_addr,
     output reg  [LINE_BYTES*8-1:0]             l2_req_wdata,
     input  wire                                l2_resp_valid,
-    input  wire [LINE_BYTES*8-1:0]             l2_resp_rdata
+    input  wire [LINE_BYTES*8-1:0]             l2_resp_rdata,
+
+    // ---- quiescence -------------------------------------------------
+    // Nothing in flight anywhere in this crossbar: front-end idle, queue
+    // empty, engine idle, no response being delivered. The device flush
+    // sequencer needs this because an L1's flush_done only means its last
+    // write-back was ACCEPTED here -- the grant is one cycle and the
+    // transaction then sits in the queue -- so L2 must not be flushed
+    // until those write-backs have actually reached it.
+    output wire                                bus_idle
 );
 
     localparam BUS_RD   = 2'd0;
@@ -319,6 +328,9 @@ module titan_x5_coherent_xbar #(
     reg [LINE_BYTES*8-1:0] e_rdata;     // captured L2 read data
 
     wire engine_responding = (estate == E_RESP);
+
+    assign bus_idle = (fstate == F_IDLE) && (q_count == {(QPTR_BITS+1){1'b0}}) &&
+                      (estate == E_IDLE) && (m_resp_valid == {NUM_MASTERS{1'b0}});
 
     // ------------------------------------------------------------------
     // per-master same-line conflict detection (combinational)

@@ -191,6 +191,10 @@ async def run_case(dut, mem, u_fix, v_fix, w, h, clamp, fmt, base, tag):
 @cocotb.test()
 async def test_tmu_bilinear(dut):
     rng = random.Random(0x7311)
+    # Driven before reset: the TMU is the toplevel here, so an undriven
+    # flush_req is X, and the texture cache gates core_req_ready on it --
+    # every request would hang rather than fail visibly.
+    dut.flush_req.value = 0
     await start_clock_and_reset(dut)
     dut.i_valid.value = 0
     dut.o_ready.value = 1

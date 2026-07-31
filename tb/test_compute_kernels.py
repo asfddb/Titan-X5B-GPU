@@ -218,6 +218,63 @@ def test_predicated_instruction_is_skipped():
         f"{[hex(w) for w in expect]}")
 
 
+def test_host_reads_kernel_results_from_memory():
+    """A kernel's stores reach VRAM, and a host can read them back.
+
+    This is the property the whole cache-flush path exists for, and until
+    CMD_FENCE was wired to titan_x5_flush_ctrl it was FALSE: both cache
+    levels are write-back, so a kernel that stored a value and exited left
+    it sitting in a Modified L1 line and VRAM read zero. tb_compute_top.v
+    worked around it by reading results out of the cache hierarchy, which
+    meant no test in this repo ever exercised the path between an L1
+    write-back and memory at all.
+
+    Every other test in this file now depends on that path too -- the
+    testbench reads results straight from the AXI memory model. This one
+    states the dependency outright, with values chosen so a partial flush
+    cannot pass by luck:
+
+      * 0x00000000 and 0xFFFFFFFF, the extremes a byte-enable or
+        write-strobe bug mangles;
+      * words in two different cache lines, so more than one line has to
+        be walked and written back;
+      * 0xDEADBEEF, which cannot be confused with the zero VRAM is
+        initialised to -- without a distinctive value, "the flush wrote
+        nothing" and "the flush wrote zeros" look identical.
+    """
+    a = Assembler()
+    R_VAL, R_ADDR = 2, 5
+    a.li(R_ADDR, cr.DATA_BASE)
+
+    # Two words in the first cache line, two 128 B away in the next one.
+    for offset, value in ((0, 0xDEADBEEF), (4, 0x00000000),
+                          (128, 0xFFFFFFFF), (132, 0x5A5A5A5A)):
+        a.li(R_VAL, value)
+        a.i("STORE", R_VAL, R_ADDR, offset)
+    a.exit()
+    a.finalize()
+    prog = a.words
+
+    # 132/4 + 1 = 34 words spans both lines; the gap reads back as zero.
+    res = cr.run(prog, n_res=34, max_cycles=1_500_000)
+    assert not res.timed_out, f"kernel never retired:\n{res.log[-3000:]}"
+
+    # The testbench prints this line only when VRAM disagrees with the
+    # architectural value held in the caches -- i.e. the flush lost a word.
+    assert "STALE" not in res.log, (
+        f"a result word never reached VRAM:\n{res.log[-3000:]}")
+    assert "FENCE TIMEOUT" not in res.log, (
+        f"CMD_FENCE never completed:\n{res.log[-3000:]}")
+
+    got = {0: res.words[0], 4: res.words[1],
+           128: res.words[32], 132: res.words[33]}
+    expect = {0: 0xDEADBEEF, 4: 0x00000000,
+              128: 0xFFFFFFFF, 132: 0x5A5A5A5A}
+    assert got == expect, (
+        f"host readback from VRAM: {  {k: hex(v) for k, v in got.items()} } "
+        f"!= {  {k: hex(v) for k, v in expect.items()} }")
+
+
 def _matmul_setup(M, N, K, seed=0x71760006):
     """Compile compiler/kernels/matmul.py and lay out its operands in VRAM.
 

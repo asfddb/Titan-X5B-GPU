@@ -152,13 +152,42 @@ Measured beats to move one cache line:
 | 512-bit | 2 |
 | **1024-bit** | **1** |
 
-### Cache flush
+### Cache flush — a host can read kernel results back
 
 Until this work, a kernel's results could sit in a Modified cache line
 forever — a kernel that stored a value and exited left memory reading zero,
-which made the GPU unusable from a host regardless of compute speed. There is
-now a flush path: **3 dirty lines written back and invalidated in 17 cycles**;
-a clean-cache flush terminates in 11 with no bus traffic.
+which made the GPU unusable from a host regardless of compute speed.
+
+Both cache levels are write-back, so flushing L1 alone was never enough: L1
+writes back to the coherent bus, and the coherent bus terminates at L2, which
+had no flush port. `CMD_FENCE` now runs a device-level flush and raises its
+completion interrupt only when every dirty line has reached memory:
+
+| Stage | What it does |
+|:--|:--|
+| 1. All 8 L1s | writeback + invalidate, in parallel |
+| 2. Crossbar drain | wait for the split-transaction queue to empty |
+| 3. L2 | writeback + invalidate every (bank, set, way) |
+
+The drain is not a safety margin. An L1's `flush_done` means the crossbar
+*accepted* its last writeback, not that it reached L2 — so flushing L2 first
+would let those writebacks land in sets the walk had already passed.
+
+| Measurement | Value |
+|:--|--:|
+| Full device fence, whole chip | **3,411 cycles** |
+| L1 walk, 3 dirty lines | 17 cycles |
+| L1 walk, clean cache | 11 cycles, no bus traffic |
+| L2 walk, 4×4×8 entries, clean | 131 cycles |
+
+**Verified against memory, not against the cache.** The compute testbench used
+to read results out of the cache hierarchy; it now queues a real `CMD_FENCE`
+in the ring buffer, waits for the interrupt, and reads the AXI memory model.
+Control experiment: with the flush disabled, the same test fails with VRAM
+reading `00000000` while the values sit in the caches.
+
+Of the eight L1s, the four TMU texture caches are read-only, so they
+contribute invalidation rather than writeback.
 
 ---
 

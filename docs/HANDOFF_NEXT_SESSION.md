@@ -370,12 +370,25 @@ version number with the limitations quietly removed.
   dependency. Conservative, so never unsafe, but it removes the concurrency
   warps exist to provide — and it is what hides the shared-predicate defect
   described in the working rules above.
-- **No cache flush path.** L1 and L2 are both write-back with no flush or
-  writeback-all port, so kernel results can sit in a Modified L1 line forever.
-  Measured: a kernel that stores 0xABC and exits leaves VRAM reading 0.
-  `tb/tb_compute_top.v` works around it by reading the architectural value out
-  of the hierarchy (L1s, then L2, then VRAM). A real host readback needs an
-  actual flush; this is the next thing worth building for the runtime.
+- ~~**No cache flush path.**~~ **DONE.** `CMD_FENCE` now runs a device-level
+  flush: all 8 L1s, then a wait for the coherent crossbar to drain, then L2.
+  The drain matters — an L1's `flush_done` means the crossbar *accepted* its
+  last writeback, not that it reached L2. `rtl/control/titan_x5_flush_ctrl.v`;
+  suites `l2flush`, `flushctl`, and
+  `test_compute_kernels.py::test_host_reads_kernel_results_from_memory`.
+  Measured: **3,411 cycles per fence**. `tb/tb_compute_top.v` now reads
+  results out of the AXI memory model, not the hierarchy; the old
+  `read_arch_word` survives only as a diagnostic that distinguishes "the flush
+  lost it" from "the kernel computed it wrong".
+  **Two traps worth knowing about**, both found by mutation testing:
+  a held `flush_req` used to restart the walk (fixed with a `flush_seen`
+  one-shot latch in each cache — one assertion, one walk), and
+  `compute_runner.build()` reused its elaborated `.vvp` whenever the file
+  merely existed, so the compute suite silently tested a two-day-old binary.
+  It now rebuilds when any source is newer. **If a compute result ever looks
+  impossible, check that first.**
+  Still open: the fence flushes everything rather than a range, and there is
+  no acquire-side invalidate ordering beyond it.
 - **Threads cannot address above 4 GiB** — registers are 32-bit. Needs an
   aperture base register or 64-bit addressing.
 - **`SYNCASYNCNET`**: `rst_n` is flopped both synchronously and asynchronously

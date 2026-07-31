@@ -54,6 +54,15 @@ module titan_x5_sm #(
     // FP rounding mode for the vector FPUs (00 RNE, 01 RTZ, 10 RDN, 11 RUP)
     input  wire [1:0]               fp_rm,
 
+    // ---- cache flush ----------------------------------------------------
+    // Straight through to this SM's L1 D-cache. Held by the device-level
+    // sequencer (titan_x5_flush_ctrl) for the whole flush, not just this
+    // cache's own walk: while it is high the L1 refuses core requests, which
+    // is what stops this SM storing into an already-flushed L1 while the
+    // other caches and L2 are still being walked.
+    input  wire                     flush_req,
+    output wire                     flush_done,
+
     // Shader Export Interface
     output wire        shader_wb_valid,
     output wire [5:0]  shader_wb_reg,
@@ -273,8 +282,8 @@ module titan_x5_sm #(
         .snp_resp_dirty(snp_resp_dirty),
         .snp_resp_data(snp_resp_data),
 
-        .flush_req(1'b0),   // no flush path plumbed to this instance yet
-        .flush_done(),
+        .flush_req(flush_req),
+        .flush_done(flush_done),
         .dbg_addr(dbg_mesi_addr),
         .dbg_mesi(dbg_mesi_state)
     );

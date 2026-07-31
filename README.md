@@ -214,11 +214,17 @@ I want this to be judged as real engineering, so here's the straight story:
   mask whose lanes disagree needs a reconvergence stack the pipeline does not have. That
   case is not silently mis-executed — the instruction is skipped and a sticky
   `dbg_pred_divergent` flag is raised so it is observable.
-- **No cache flush path.** L1 and L2 are both write-back with no flush or writeback-all
-  port, so a kernel's results can sit in a Modified L1 line indefinitely; nothing makes
-  them reach memory. A host reading results back from a real part would need a flush that
-  does not exist yet. The compute testbench works around this by reading the
-  architectural value out of the cache hierarchy directly.
+- **Cache flush: done, and a host can now read results back.** Both cache levels are
+  write-back, so until this existed a kernel that stored a value and exited left it in a
+  Modified L1 line and VRAM read zero — the compute testbench had to read results out of
+  the cache hierarchy instead. `CMD_FENCE` now runs a device-level flush (every L1, then
+  a wait for the coherent crossbar to drain, then L2) and raises its completion interrupt
+  only when every dirty line has reached memory. **Measured: fence completes in 3,411
+  cycles**, and `test_host_reads_kernel_results_from_memory` reads a kernel's stores
+  straight out of the AXI memory model. Control experiment: with the flush disabled that
+  test fails with VRAM reading `00000000` while the values sit in the caches.
+  Still missing: the fence flushes *everything* rather than a range, and there is no
+  acquire-side invalidate ordering beyond it.
 - Parts of this were built with AI assistance; the goal was to understand GPU architecture end-to-end.
 
 Its honest peer group is open-source research GPUs like **MIAOW**, **Vortex**, and **Nyuzi** —

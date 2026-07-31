@@ -274,6 +274,99 @@ about for the x5 predicates. That warning was correct and still live.
 
 ---
 
+## The flush that only went halfway, and a suite that tested nothing
+
+The L1 flush was already built and verified when this started. It was not
+enough for the thing it existed for, and finding out why took reading the code
+rather than the description of it.
+
+**L1 flushes to the coherent bus, and the coherent bus terminates at L2** —
+which is also write-back. `titan_x5_l2_cache` had a `dirty_array`, set it on
+every write hit, and wrote back only when capacity eviction happened to pick
+that way. There was no flush port at all. So flushing L1 moved a kernel's
+result from a Modified L1 line into a dirty L2 line and stopped there. VRAM
+still read stale, and `tb_compute_top.v` still read results out of the cache
+hierarchy.
+
+So the work was three pieces, not one: an L2 writeback-all, a sequencer to
+order the two levels, and the wiring to `CMD_FENCE`.
+
+**The ordering is load-bearing in two places.** An L1's `flush_done` means the
+crossbar *accepted* its last writeback, not that it reached L2 — the crossbar
+is split-transaction, with a 4-deep queue behind a one-cycle grant. Flushing
+L2 first lets those writebacks land in sets the walk has already passed, where
+nothing will ever write them back. And `l1_flush_req` has to stay asserted
+across the *whole* sequence, because that is what holds every L1's
+`core_req_ready` low: release it after the L1 phase and an SM can store into a
+freshly flushed L1 while L2 is still walking.
+
+I got that second one wrong first, and had to revert my own change. I had
+relaxed `core_req_ready` so each cache resumed service after its own walk,
+worrying about a lockup. That reintroduced exactly the hole above.
+
+### Two bugs mutation testing found, both in code written that day
+
+**Both caches restarted their flush walk.** `flush_req` is a level, and the
+requester cannot drop it until it has seen `flush_done` — by which point the
+FSM is back in IDLE with the level still high, so it walks again. The extra
+walk is *idempotent*, which is precisely why no existing test could see it. It
+was not harmless: it cost a full sweep per fence, and it ran concurrently with
+whatever the requester did next. It was actively corrupting my own residency
+check — a 128-entry probe loop was reading state that a second, unrequested
+walk was clearing underneath it. That is how it was caught. Fixed with a
+`flush_seen` one-shot latch in each cache: one assertion, one walk.
+
+**The sequencer restarted itself** when the requester's `flush_start` glitched
+low mid-flush, because the one-shot latch was rearmed on the level being low
+rather than only while idle.
+
+Nine mutations, all caught. Two initially **survived** and changed the tests
+rather than the RTL:
+
+| mutation | why it survived |
+|:--|:--|
+| write back but don't invalidate | the behavioural check ("read it back, require a miss") cannot see residency — replaced with a direct entry probe |
+| rearm mid-sequence | the test withdrew the request but never re-raised it, so the restart could not fire |
+
+### The compute suite had been testing a two-day-old binary
+
+The control experiment is what caught this. With the flush deliberately
+disabled, `test_host_reads_kernel_results_from_memory` still **passed**.
+
+`compute_runner.build()` reused its elaborated `.vvp` whenever the file merely
+*existed*. The image on disk was from two days earlier. Every compute run that
+session — including the ones reported as a clean baseline — had executed RTL
+that predated all of this work, and would have kept doing so indefinitely.
+
+`build()` now reuses the image only while it is newer than every source that
+went into it. Elaboration is ~30 s against a suite that runs for minutes.
+
+With a build that actually reflected the RTL, the control did what it should:
+
+```
+[20765000] STALE @00400000: VRAM has 00000000, the hierarchy still holds deadbeef
+[20765000] STALE @00400080: VRAM has 00000000, the hierarchy still holds ffffffff
+[20765000] STALE @00400084: VRAM has 00000000, the hierarchy still holds 5a5a5a5a
+```
+
+and with the flush restored:
+
+```
+[11515000] Kernel complete after 1152 cycles.
+[51635000] Fence complete in 3411 cycles: caches flushed, VRAM holds the architectural state.
+```
+
+**Measured: 3,411 cycles per fence.** The full-chip render test is unchanged at
+181 pixels, 0 out of bounds, 0 poison pixels, 10,009 cycles.
+
+One honest note on scope: eight L1s are flushed, but the four TMU texture
+caches are hardwired read-only (`core_req_write` is tied to `1'b0`), so they
+contribute **invalidation only, never a writeback**. They are still worth
+sequencing — they are not on the snoop bus, so nothing else ever invalidates
+them — but they are not eight equal contributors.
+
+---
+
 ## Where formal beat simulation
 
 Simulation got slow — the Kogge-Stone and reduction trees are hundreds of

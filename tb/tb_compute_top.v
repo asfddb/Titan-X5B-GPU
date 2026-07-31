@@ -54,6 +54,10 @@ module tb_compute_top();
     localparam [31:0] CODE_BASE = 32'h0020_0000;   // 2 MiB in, clear of the FB
     localparam [31:0] DATA_BASE = 32'h0040_0000;   // 4 MiB in
     localparam [31:0] PARAM_BASE = 32'h0060_0000;  // 6 MiB in
+    // Command ring. VRAM aliases modulo 8 MiB, so this lands 1 MiB in --
+    // clear of the code, data and parameter regions above.
+    localparam [31:0] RING_BASE = 32'h1010_0000;
+    localparam integer FENCE_MAX_CYC = 200000;
 
     reg clk, mem_clk, pclk, rst_n;
 
@@ -348,6 +352,14 @@ module tb_compute_top();
     endfunction
 
     // Newest copy wins: L1s, then L2, then VRAM.
+    //
+    // KEPT ONLY AS A DIAGNOSTIC. Results are read straight out of VRAM now
+    // that CMD_FENCE performs a real device flush; this is used to tell the
+    // two interesting failures apart when a result word is wrong. If VRAM
+    // disagrees with this, the value exists but the flush did not deliver
+    // it; if they agree and both are wrong, the kernel computed the wrong
+    // answer. Without that distinction a flush bug and a compiler bug look
+    // identical in the output file.
     function [31:0] read_arch_word;
         input [31:0] addr;
         reg [31:0] v;
@@ -379,12 +391,18 @@ module tb_compute_top();
     reg [31:0] res_base;
     integer fd, w, t;
     integer timed_out;
+    integer fence_cycles;
+    integer fence_timed_out;
 
     initial begin
         rst_n = 0;
-        host_ring_base = 32'h1010_0000;
-        host_ring_wptr = 32'h0;   // no DRAW: the graphics path stays idle
+        host_ring_base = RING_BASE;
+        host_ring_wptr = 32'h0;   // no DRAW: the graphics path stays idle.
+                                  // A CMD_FENCE is queued after the kernel
+                                  // retires; see issue_fence.
         timed_out = 0;
+        fence_cycles = 0;
+        fence_timed_out = 0;
 
         if (!$value$plusargs("PROG=%s", prog_file)) begin
             $display("FATAL: +PROG=<hexfile> is required");
@@ -488,11 +506,29 @@ module tb_compute_top();
                      $time, cycle_count);
         end
 
-        // Let anything still in flight land. This is a settle delay, not a
-        // flush: the caches are write-back with no flush port, so results are
-        // read out of the hierarchy by read_arch_word rather than waiting for
-        // a drain that never comes.
+        // Let anything still in flight land before the fence is issued.
         settle();
+
+        // ---- host fence -------------------------------------------------
+        // The real path a host uses: queue CMD_FENCE in the ring buffer and
+        // wait for the completion interrupt. That interrupt now means every
+        // dirty line has been written back and invalidated, so the results
+        // below are read out of the AXI VRAM model and nowhere else.
+        //
+        // This testbench used to read results out of the cache hierarchy
+        // instead, because there was no flush anywhere in the design -- a
+        // kernel that stored 0xABC and exited left VRAM reading 0. That
+        // workaround also meant no test in this repo ever exercised the path
+        // between an L1 write-back and memory.
+        if (!timed_out) begin
+            issue_fence();
+            if (fence_timed_out)
+                $display("[%0t] FENCE TIMEOUT: no completion interrupt after %0d cycles; results below are whatever reached VRAM on its own.",
+                         $time, FENCE_MAX_CYC);
+            else
+                $display("[%0t] Fence complete in %0d cycles: caches flushed, VRAM holds the architectural state.",
+                         $time, fence_cycles);
+        end
 
         fd = $fopen(out_file, "w");
         if (fd == 0) begin
@@ -503,8 +539,19 @@ module tb_compute_top();
         // timeout from a real answer instead of silently diffing garbage.
         $fdisplay(fd, "%0d %0d %0d", timed_out, cycle_count,
                   dut.any_pred_divergent);
-        for (i = 0; i < n_res; i = i + 1)
-            $fdisplay(fd, "%08x", read_arch_word(res_base + i*4));
+        // Straight from the AXI memory model. If a word is wrong, say
+        // whether the architectural value existed somewhere in the cache
+        // hierarchy -- that separates "the flush lost it" from "the kernel
+        // computed it wrong", which the result file alone cannot show.
+        for (i = 0; i < n_res; i = i + 1) begin
+            if (read_vram_word(res_base + i*4) !=
+                read_arch_word(res_base + i*4))
+                $display("[%0t] STALE @%08x: VRAM has %08x, the hierarchy still holds %08x -- the flush did not deliver it.",
+                         $time, res_base + i*4,
+                         read_vram_word(res_base + i*4),
+                         read_arch_word(res_base + i*4));
+            $fdisplay(fd, "%08x", read_vram_word(res_base + i*4));
+        end
         $fclose(fd);
         $display("[%0t] Wrote %0d result words to %0s", $time, n_res, out_file);
 
@@ -594,6 +641,43 @@ module tb_compute_top();
         integer q;
         begin
             for (q = 0; q < 300; q = q + 1) @(posedge clk);
+        end
+    endtask
+
+    // ---- host fence -------------------------------------------------------
+    // Queue one CMD_FENCE in the ring buffer and wait for the command
+    // processor's completion interrupt.
+    //
+    // A command is 17 words: one opcode word, then 16 payload words that the
+    // command processor fetches unconditionally for every opcode (FENCE has
+    // no payload, but the fetch happens anyway). Advancing the write pointer
+    // to 17 therefore queues exactly one command and leaves the ring empty
+    // afterwards, so the processor goes idle rather than looping.
+    task issue_fence;
+        integer q;
+        begin
+            fence_timed_out = 0;
+            fence_cycles    = 0;
+
+            write_vram_word(RING_BASE + 0*4, 32'h0000_0004);   // CMD_FENCE
+            for (q = 1; q < 17; q = q + 1)
+                write_vram_word(RING_BASE + q*4, 32'h0000_0000);
+
+            @(posedge clk);
+            host_ring_wptr = 32'd17;
+
+            // host_intr is a single-cycle pulse, so this samples every cycle
+            // rather than waiting on an edge that may already have passed.
+            while (!host_intr && fence_cycles < FENCE_MAX_CYC) begin
+                @(posedge clk);
+                fence_cycles = fence_cycles + 1;
+            end
+            if (!host_intr) fence_timed_out = 1;
+
+            // Let the final write-backs retire through the AXI model: the
+            // fence interrupt fires when L2's walk ends, and the last line
+            // it handed to the memory controller is still on its way out.
+            settle();
         end
     endtask
 

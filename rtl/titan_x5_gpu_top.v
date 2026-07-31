@@ -90,6 +90,7 @@ module titan_x5_gpu_top #(
     wire [7:0]  cmd_opcode;
     wire [55:0] cmd_payload;
     wire        cmd_ready;
+    wire        vt_cmd_ready;   // the vertex transformer's own input-ready
     // rop interface
     wire        rop_o_ready;
     wire        mc_req_ready;
@@ -181,6 +182,26 @@ module titan_x5_gpu_top #(
     wire [31:0] cmd_mem_addr;
     wire        cmd_mem_ack;
     wire [63:0] cmd_mem_data;
+
+    // ---- device-level cache flush -----------------------------------------
+    // Both cache levels are write-back, so without this a kernel's stores sit
+    // in a Modified L1 line and a host reading VRAM sees nothing. CMD_FENCE
+    // now means what its name implies: when the command processor retires it
+    // and raises the interrupt, every dirty line has reached memory.
+    //
+    // Eight L1s: four SM D-caches (indices 0-3) and four TMU texture caches
+    // (4-7). The TMU caches are read-only, so they contribute invalidation
+    // rather than write-back -- see the comment on titan_x5_tmu's flush port.
+    localparam NUM_L1 = 8;
+    wire            fl_l1_req;
+    wire [NUM_L1-1:0] fl_l1_done;
+    wire            fl_l2_req, fl_l2_done;
+    wire            fl_bus_idle;
+    wire            fl_start, fl_busy, fl_complete;
+
+    wire [3:0]  sm_flush_done;
+    wire [3:0]  tmu_flush_done;
+    assign fl_l1_done = {tmu_flush_done, sm_flush_done};
 
 
     // crossbar master assignments
@@ -329,14 +350,29 @@ module titan_x5_gpu_top #(
         .i_valid(cmd_valid && (cmd_opcode == 8'h01)), // CMD_DRAW
         .i_weights(vt_payload[255:0]),
         .i_vertices(vt_payload[511:256]),
-        .i_ready(cmd_ready),
-        
+        .i_ready(vt_cmd_ready),
+
         .o_valid(vt_valid),
         .o_v0_x(vt_v0_x), .o_v0_y(vt_v0_y),
         .o_v1_x(vt_v1_x), .o_v1_y(vt_v1_y),
         .o_v2_x(vt_v2_x), .o_v2_y(vt_v2_y),
         .o_ready(vt_ready)
     );
+
+    // ---- CMD_FENCE completion ---------------------------------------------
+    // A fence retires when the flush finishes, not immediately. The command
+    // processor pulses intr_req on the cycle it sees cmd_ready for a FENCE,
+    // so tying cmd_ready to flush_complete makes that interrupt mean "every
+    // dirty line has reached memory" -- which is what a host waiting on a
+    // fence before reading results actually needs. Previously it retired the
+    // cycle the vertex transformer happened to be idle and guaranteed
+    // nothing at all.
+    //
+    // fl_start is a level held for as long as the fence is outstanding;
+    // titan_x5_flush_ctrl's one-shot latch turns it into exactly one flush.
+    wire cmd_is_fence = cmd_valid && (cmd_opcode == 8'h04);   // CMD_FENCE
+    assign fl_start  = cmd_is_fence;
+    assign cmd_ready = cmd_is_fence ? fl_complete : vt_cmd_ready;
 
     // 2. Streaming Multiprocessors (4x)
     wire [3:0] sm_shader_wb_valid;
@@ -375,6 +411,9 @@ module titan_x5_gpu_top #(
                 .dbg_lsu_xactions(),
                 .dbg_pred_divergent(sm_pred_divergent[gi]),
                 .fp_rm(2'b00),
+
+                .flush_req(fl_l1_req),
+                .flush_done(sm_flush_done[gi]),
 
                 .shader_wb_valid(sm_shader_wb_valid[gi]),
                 .shader_wb_reg(sm_shader_wb_reg[gi]),
@@ -425,7 +464,8 @@ module titan_x5_gpu_top #(
         .l2_req_addr(l2_req_addr),
         .l2_req_wdata(l2_req_wdata),
         .l2_resp_valid(l2_resp_valid),
-        .l2_resp_rdata(l2_resp_rdata)
+        .l2_resp_rdata(l2_resp_rdata),
+        .bus_idle(fl_bus_idle)
     );
 
     // Unified L2 (previously unconnected in the hierarchy)
@@ -446,6 +486,8 @@ module titan_x5_gpu_top #(
         .req_ready(l2_req_ready),
         .resp_valid(l2_resp_valid),
         .resp_rdata(l2_resp_rdata),
+        .flush_req(fl_l2_req),
+        .flush_done(fl_l2_done),
         .mem_req_valid(l2m_req_valid),
         .mem_req_addr(l2m_req_addr),
         .mem_req_write(l2m_req_write),
@@ -453,6 +495,22 @@ module titan_x5_gpu_top #(
         .mem_req_ready(l2m_req_ready),
         .mem_resp_valid(l2m_resp_valid),
         .mem_resp_rdata(l2m_resp_rdata)
+    );
+
+    // Device-level flush sequencer: every L1, then the crossbar drain, then
+    // L2. See rtl/control/titan_x5_flush_ctrl.v for why the order and the
+    // drain are both load-bearing.
+    titan_x5_flush_ctrl #(.NUM_L1(NUM_L1)) u_flush_ctrl (
+        .clk            (clk),
+        .rst_n          (rst_n),
+        .flush_start    (fl_start),
+        .flush_busy     (fl_busy),
+        .flush_complete (fl_complete),
+        .l1_flush_req   (fl_l1_req),
+        .l1_flush_done  (fl_l1_done),
+        .bus_idle       (fl_bus_idle),
+        .l2_flush_req   (fl_l2_req),
+        .l2_flush_done  (fl_l2_done)
     );
 
     // L2 line traffic -> 32-bit legacy crossbar master 13
@@ -536,6 +594,7 @@ module titan_x5_gpu_top #(
                     .o_color      (tmu_o_color),
                     .o_x          (tmu_o_x),
                     .o_y          (tmu_o_y),
+                    .flush_req    (fl_l1_req), .flush_done(tmu_flush_done[gi]),
                     .dbg_state    (dbg_tmu_state),
                     .mem_req(tmu_mem_req[gi]), .mem_gnt(xbar_m_req_ready[1+gi]), .mem_addr(tmu_mem_addr[gi]), .mem_valid(xbar_m_resp_valid[1+gi]), .mem_rdata(xbar_m_resp_rdata[(1+gi)*32 +: 32]) // return white color for texture
                 );
@@ -551,6 +610,7 @@ module titan_x5_gpu_top #(
                     .o_color      (),
                     .o_x          (),
                     .o_y          (),
+                    .flush_req    (fl_l1_req), .flush_done(tmu_flush_done[gi]),
                     .dbg_state    (),
                     .mem_req(tmu_mem_req[gi]), .mem_gnt(xbar_m_req_ready[1+gi]), .mem_addr(tmu_mem_addr[gi]), .mem_valid(xbar_m_resp_valid[1+gi]), .mem_rdata(xbar_m_resp_rdata[(1+gi)*32 +: 32])
                 );
