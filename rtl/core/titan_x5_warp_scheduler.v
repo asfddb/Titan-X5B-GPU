@@ -85,8 +85,26 @@ module titan_x5_warp_scheduler #(
     genvar g;
     generate
         for (g = 0; g < NUM_WARPS; g = g + 1) begin : hazard_gen
-            wire src1_match = scoreboard[g][id_src_reg1];
-            wire src2_match = scoreboard[g][id_src_reg2];
+            // id_src_reg1/2 are the source registers of the ONE instruction
+            // currently in ID, and that instruction belongs to id_warp_id.
+            // Testing them against warp g's scoreboard for every g stalled
+            // warps on register numbers they had nothing to do with: warp 5
+            // blocked because it had a pending write to r6 and warp 2's
+            // instruction happened to read r6.
+            //
+            // Measured cost of that: the same counted loop took 24,069
+            // cycles with 8 warps and 3,257 with 1 -- 7.4x for 8x the work,
+            // i.e. almost no concurrency, in a machine whose entire purpose
+            // is running warps concurrently.
+            //
+            // Only the warp that owns the ID instruction can be hazarded by
+            // that instruction's operands. Correctness of the actual RAW
+            // dependency is enforced in titan_x5_pipeline by the forwarding
+            // network and its hazard interlock; this check is a fetch
+            // throttle, and it is now a per-warp one.
+            wire own_id     = (g[2:0] == id_warp_id) && id_valid;
+            wire src1_match = own_id && scoreboard[g][id_src_reg1];
+            wire src2_match = own_id && scoreboard[g][id_src_reg2];
             wire has_hazard = src1_match | src2_match | fifo_full;
         end
     endgenerate
