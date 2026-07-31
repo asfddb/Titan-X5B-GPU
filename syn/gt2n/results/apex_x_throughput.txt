@@ -1,0 +1,42 @@
+TITAN APEX-X vs RTX 5090 -- throughput arithmetic
+
+5090 reference (published): 21,760 CUDA cores @ 2.41 GHz, 104.8 TFLOPS FP32,
+750 mm2 on N4P, 575 W, 32 GB GDDR7 on a 512-bit bus, 1.79 TB/s.
+Tensor, DENSE (NVIDIA quotes 2:4 sparse; dense is half):
+    FP8   838 TFLOPS      FP4  1,676 TOPS
+
+APEX-X uses the MEASURED 2.49 GHz FMA (401.81 ps on GT2N elvt/w31).
+FP32: 2 FLOP/lane/cycle.
+
+  lanes      FP32 TFLOPS    vs 5090
+  10,000        49.8         0.48x
+  20,000        99.6         0.95x
+  40,000       199.2         1.90x     <- the 4-chiplet target
+
+WHY THE FP32-WIDTH MAC IS MANDATORY, not a preference:
+
+At 40,000 lanes and 2.49 GHz, tensor throughput = 2 * 40000 * 2.49e9 * K,
+where K is MACs per lane per cycle at that precision.
+
+  built on the existing FP16 PE (11x11 mantissa multiply):
+      K = 1 / 2 / 4  for FP16 / FP8 / FP4
+      FP8   398 TOPS  vs 838   -> 0.48x   LOSES
+      FP4   797 TOPS  vs 1676  -> 0.48x   LOSES
+
+  built on an FP32-width MAC (24x24 mantissa multiply), segmented:
+      K = 4 / 8 / 16
+      FP8  1,594 TOPS vs 838   -> 1.90x   WINS
+      FP4  3,187 TOPS vs 1676  -> 1.90x   WINS
+
+Area check: 24x24 = 576 bit-products. 4x FP16 needs 4*121 = 484, 8x FP8
+(4-bit mantissa) needs 8*16 = 128, 16x FP4 (2-bit) needs 16*4 = 64. All fit
+inside one FP32-width array, so the segmentation costs summation logic, not
+a second multiplier.
+
+MEASURED, titan_apex_mult_seg on GT2N elvt/w31/tt:
+    area 105.16 um2, delay 586.47 ps combinational (the enclosing PE
+    pipelines it; the existing tensor PE already splits its multiply across
+    M1/M2/M3).
+
+Die area at 40,000 lanes, 32 regs x 8 warps pooled: 186.86 mm2 of cell area
+at 70% utilisation -- 25% of a 5090's 750 mm2 die, before L2, NoC and PHYs.

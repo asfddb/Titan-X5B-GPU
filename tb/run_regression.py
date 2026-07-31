@@ -274,6 +274,13 @@ SUITES = {
         toplevel="iso_miter",
         module="test_apex_lane",
     ),
+    # TITAN APEX-X: precision-scalable multiplier core (1x24x24 / 4x12x12 /
+    # 16x6x6). Purely combinational, so it simulates fast despite the size.
+    "multseg": dict(
+        sources=rtl_files("tensor/titan_apex_mult_seg.v"),
+        toplevel="titan_apex_mult_seg",
+        module="test_mult_seg",
+    ),
     # Not a cocotb suite: pytest driving whole-GPU kernel runs. Handled by
     # run_compute_suite(); the dict entry exists so it appears in the suite
     # list and runs by default.
