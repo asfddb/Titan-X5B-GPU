@@ -126,7 +126,15 @@ module titan_x6_banked_l2 #(
                 
                 .resp_valid(slice_resp_valid[i]),
                 .resp_rdata(slice_resp_rdata[i*LINE_SIZE*8 +: LINE_SIZE*8]),
-                
+
+                // titan_x6_gpu_top is a structural scaffold whose GPCs are
+                // not connected to its L2 at all (see the tie-off in that
+                // file), so there is no command processor here to raise a
+                // flush. The working GPU is titan_x5_gpu_top.
+                .flush_req(1'b0),
+                .flush_done(),
+
+
                 .mem_req_valid(slice_mem_req_valid[i]),
                 .mem_req_addr(slice_mem_req_addr[i*ADDR_WIDTH +: ADDR_WIDTH]),
                 .mem_req_write(slice_mem_req_write[i]),

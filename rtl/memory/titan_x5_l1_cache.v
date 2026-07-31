@@ -145,6 +145,15 @@ module titan_x5_l1_cache #(
     reg [INDEX_BITS:0]   fl_set;
     reg [WAY_BITS-1:0]   fl_way;
 
+    // One assertion of flush_req must produce exactly ONE walk. flush_req is
+    // a level and the requester cannot drop it until it has seen flush_done,
+    // by which time the FSM is back in S_IDLE with flush_req still high --
+    // so without this the walk restarts. It is idempotent, so nothing is
+    // corrupted, but it costs a full SETS*WAYS sweep on every fence and it
+    // keeps core_req_ready low while the requester believes the flush is
+    // over. Same fix, same reason, in titan_x5_l2_cache.
+    reg flush_seen;
+
     // ------------------------------------------------------------------
     // Hit detection (latched core request)
     // ------------------------------------------------------------------
@@ -207,6 +216,14 @@ module titan_x5_l1_cache #(
     // core accepts only when idle and no snoop is being serviced this cycle
     // A flush must not race core traffic: the walk mutates every way, and a
     // concurrent fill would re-dirty a set the walk has already passed.
+    // Gated on flush_req itself, NOT on `flush_req && !flush_seen`. This
+    // cache must stay closed to core traffic for as long as the level is
+    // held, which is longer than its own walk: the device-level sequencer
+    // holds flush_req until every L1 has finished, the crossbar has drained
+    // into L2, and L2's own walk is done. Releasing early would let an
+    // already-flushed L1 take a store and re-dirty itself while its
+    // neighbours are still walking -- a line that then reaches L2 after the
+    // L2 walk has passed its set, and is never written back at all.
     assign core_req_ready = (state == S_IDLE) && !snoop_fire && !flush_req;
 
     // ------------------------------------------------------------------
@@ -268,6 +285,7 @@ module titan_x5_l1_cache #(
             fl_set          <= {(INDEX_BITS+1){1'b0}};
             fl_way          <= {WAY_BITS{1'b0}};
             flush_done      <= 1'b0;
+            flush_seen      <= 1'b0;
             // blocking assigns: reset-only array init; keeps the loop within
             // the unroll limit (BLKLOOPINIT-safe pattern).
             // NB: no line of this comment may *begin* with the linter's own
@@ -284,6 +302,7 @@ module titan_x5_l1_cache #(
             core_resp_valid <= 1'b0;
             snp_resp_valid  <= 1'b0;
             flush_done      <= 1'b0;   // single-cycle pulse
+            if (!flush_req) flush_seen <= 1'b0;   // rearm for the next fence
 
             // snoop hand-shake bookkeeping
             if (!snp_req_valid)
@@ -334,7 +353,7 @@ module titan_x5_l1_cache #(
             // ----------------------------------------------------------
             case (state)
                 S_IDLE: begin
-                    if (flush_req) begin
+                    if (flush_req && !flush_seen) begin
                         // Start at (0,0) and walk. core_req_ready is already
                         // held low by flush_req, so nothing new can enter.
                         fl_set <= {(INDEX_BITS+1){1'b0}};
@@ -357,6 +376,7 @@ module titan_x5_l1_cache #(
                 S_FLUSH: begin
                     if (fl_set == SETS[INDEX_BITS:0]) begin
                         flush_done <= 1'b1;
+                        flush_seen <= 1'b1;
                         state      <= S_IDLE;
                     end else if (mesi_array[fl_set[INDEX_BITS-1:0]][fl_way] == MESI_M) begin
                         bus_req_valid <= 1'b1;

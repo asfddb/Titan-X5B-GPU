@@ -35,6 +35,20 @@ module titan_x5_l2_cache #(
     output wire                    resp_valid,
     output wire [LINE_SIZE*8-1:0] resp_rdata,
 
+    // ---- flush / writeback-all -------------------------------------------
+    // Raise flush_req and hold it until flush_done pulses. Every dirty line
+    // is written back to the memory controller and EVERY line is
+    // invalidated, so after flush_done this cache holds nothing and memory
+    // holds the architectural state.
+    //
+    // L1 has had this since the flush suite was written, but L1 flushes to
+    // the coherent bus, which terminates HERE -- the dirty line simply moves
+    // from a Modified L1 line into a dirty L2 line and still never reaches
+    // VRAM. A device-level flush that a host can rely on needs both, in that
+    // order: every L1 first, then L2 once the L1 writebacks have landed.
+    input  wire                    flush_req,
+    output reg                     flush_done,
+
     // memory controller interface
     output wire                    mem_req_valid,
     output wire [ADDR_WIDTH-1:0] mem_req_addr,
@@ -68,9 +82,51 @@ module titan_x5_l2_cache #(
                STATE_COMPARE = 3'd1,
                STATE_ALLOCATE = 3'd2,
                STATE_WRITEBACK = 3'd3,
-               STATE_REFILL = 3'd4;
+               STATE_REFILL = 3'd4,
+               // Flush walks every (bank, set, way). STATE_FLUSH inspects the
+               // current entry; STATE_FLUSH_WB waits for the memory
+               // controller to accept a dirty line's writeback.
+               STATE_FLUSH = 3'd5,
+               STATE_FLUSH_WB = 3'd6;
 
     reg [2:0] state;
+
+    // ---- flush walk position ---------------------------------------------
+    // One extra bit on the outermost (bank) counter so the walk can run past
+    // the last bank to signal completion without wrapping back to 0.
+    localparam WAY_BITS = (WAYS > 1) ? $clog2(WAYS) : 1;
+
+    reg [BANK_BITS:0]    fl_bank;
+    reg [INDEX_BITS-1:0] fl_set;
+    reg [WAY_BITS-1:0]   fl_way;
+
+    // One assertion of flush_req must produce exactly ONE walk. Without this
+    // the walk restarts: flush_req is a level, the requester cannot drop it
+    // until it has seen flush_done, and by then the FSM is back in IDLE
+    // seeing flush_req still high. The extra walk is idempotent, so nothing
+    // is corrupted -- but it costs a full BANKS*SETS*WAYS sweep on every
+    // fence, and it runs concurrently with whatever the requester does next.
+    // Measured: it made a testbench's post-flush residency check read state
+    // that a second, unrequested walk was still clearing underneath it.
+    reg flush_seen;
+
+    wire [BANK_BITS-1:0] fl_b = fl_bank[BANK_BITS-1:0];
+
+    // Next position, way-then-set-then-bank. Computed once and used by both
+    // walk exits (clean entry dropped, dirty entry written back) so the two
+    // cannot drift apart.
+    wire fl_way_last = (fl_way == WAYS - 1);
+    wire fl_set_last = (fl_set == SETS_PER_BANK - 1);
+
+    wire [WAY_BITS-1:0]   fl_way_n  = fl_way_last ? {WAY_BITS{1'b0}} : fl_way + 1'b1;
+    wire [INDEX_BITS-1:0] fl_set_n  = fl_way_last ? (fl_set_last ? {INDEX_BITS{1'b0}}
+                                                                 : fl_set + 1'b1)
+                                                  : fl_set;
+    wire [BANK_BITS:0]    fl_bank_n = (fl_way_last && fl_set_last) ? fl_bank + 1'b1
+                                                                  : fl_bank;
+
+    wire fl_entry_dirty = valid_array[fl_b][fl_set][fl_way] &&
+                          dirty_array[fl_b][fl_set][fl_way];
     reg [2:0] replace_way; // pseudo-random replacement
     reg [2:0] victim_way;  // latched at COMPARE so it is stable across
                            // WRITEBACK/ALLOCATE/REFILL
@@ -109,6 +165,11 @@ module titan_x5_l2_cache #(
             mem_req_valid_reg <= 0;
             resp_valid_reg <= 0;
             req_ready_reg <= 1;
+            flush_done <= 1'b0;
+            flush_seen <= 1'b0;
+            fl_bank <= 0;
+            fl_set <= 0;
+            fl_way <= 0;
             for (b = 0; b < BANKS; b = b + 1) begin
                 for (s = 0; s < SETS_PER_BANK; s = s + 1) begin
                     for (w = 0; w < WAYS; w = w + 1) begin
@@ -122,13 +183,25 @@ module titan_x5_l2_cache #(
         end else begin
             resp_valid_reg <= 1'b0;
             mem_req_valid_reg <= 1'b0;
+            flush_done <= 1'b0;   // single-cycle pulse
+            if (!flush_req) flush_seen <= 1'b0;   // rearm for the next fence
 
             case (state)
                 STATE_IDLE: begin
-                    req_ready_reg <= 1'b1;
+                    // Stop accepting as soon as a flush is asked for, but
+                    // still honour a request that handshook THIS cycle --
+                    // req_ready is registered here, so the requester has
+                    // already seen ready=1 and considers it accepted.
+                    // Dropping it would lose a transaction.
+                    req_ready_reg <= !(flush_req && !flush_seen);
                     if (req_valid && req_ready_reg) begin
                         req_ready_reg <= 1'b0;
                         state <= STATE_COMPARE;
+                    end else if (flush_req && !flush_seen) begin
+                        fl_bank <= 0;
+                        fl_set  <= 0;
+                        fl_way  <= 0;
+                        state   <= STATE_FLUSH;
                     end
                 end
 
@@ -141,7 +214,11 @@ module titan_x5_l2_cache #(
                             resp_rdata_reg <= data_array[req_bank][req_index][hit_way];
                             resp_valid_reg <= 1'b1;
                         end
-                        req_ready_reg <= 1'b1;
+                        // !flush_req, not 1: returning to IDLE with ready
+                        // high would let the next request in ahead of a
+                        // pending flush, and under continuous traffic the
+                        // flush would never start.
+                        req_ready_reg <= !(flush_req && !flush_seen);
                         state <= STATE_IDLE;
                     end else begin
                         // Miss: latch the victim now so it stays stable for
@@ -184,6 +261,53 @@ module titan_x5_l2_cache #(
                         data_array[req_bank][req_index][victim_way] <= mem_resp_rdata;
                         dirty_array[req_bank][req_index][victim_way] <= 1'b0;
                         state <= STATE_COMPARE; // Retry compare
+                    end
+                end
+
+                // ---- flush walk ------------------------------------------
+                // Write back every dirty line, invalidate every line. Clean
+                // and already-invalid entries are dropped silently: L2 is
+                // write-back, so a clean line means memory already holds its
+                // data. Invalidating them too is what makes the flush a
+                // writeback-ALL rather than a writeback-dirty -- a host that
+                // reads memory after this must not be able to hit a stale
+                // cached copy on its next access.
+                STATE_FLUSH: begin
+                    if (fl_bank == BANKS[BANK_BITS:0]) begin
+                        flush_done    <= 1'b1;
+                        flush_seen    <= 1'b1;
+                        req_ready_reg <= 1'b1;
+                        state         <= STATE_IDLE;
+                    end else if (fl_entry_dirty) begin
+                        mem_req_valid_reg <= 1'b1;
+                        mem_req_write_reg <= 1'b1;
+                        mem_req_addr_reg  <= {tag_array[fl_b][fl_set][fl_way],
+                                              fl_set, fl_b, {OFFSET_BITS{1'b0}}};
+                        mem_req_wdata_reg <= data_array[fl_b][fl_set][fl_way];
+                        state             <= STATE_FLUSH_WB;
+                    end else begin
+                        valid_array[fl_b][fl_set][fl_way] <= 1'b0;
+                        dirty_array[fl_b][fl_set][fl_way] <= 1'b0;
+                        fl_way  <= fl_way_n;
+                        fl_set  <= fl_set_n;
+                        fl_bank <= fl_bank_n;
+                    end
+                end
+
+                // Hold the writeback until the memory controller takes it.
+                // addr/wdata were latched on entry and are not re-driven, so
+                // they stay stable across an arbitrarily long stall.
+                STATE_FLUSH_WB: begin
+                    mem_req_valid_reg <= 1'b1;
+                    mem_req_write_reg <= 1'b1;
+                    if (mem_req_valid_reg && mem_req_ready) begin
+                        mem_req_valid_reg <= 1'b0;
+                        valid_array[fl_b][fl_set][fl_way] <= 1'b0;
+                        dirty_array[fl_b][fl_set][fl_way] <= 1'b0;
+                        fl_way  <= fl_way_n;
+                        fl_set  <= fl_set_n;
+                        fl_bank <= fl_bank_n;
+                        state   <= STATE_FLUSH;
                     end
                 end
 

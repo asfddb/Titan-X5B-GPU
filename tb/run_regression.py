@@ -209,6 +209,24 @@ SUITES = {
         toplevel="tb_mesi_top",
         module="test_mesi_flush",
     ),
+    # L1's flush stops at the coherent bus, which terminates at L2 -- also
+    # write-back. Host readback needs both halves, so both are verified.
+    "l2flush": dict(
+        sources=[os.path.join(TB, "tb_l2_flush_top.v")] + rtl_files(
+            "memory/titan_x5_l2_cache.v",
+        ),
+        toplevel="tb_l2_flush_top",
+        module="test_l2_flush",
+    ),
+    # The ordering between the two levels, and the crossbar drain between
+    # them. Getting it wrong loses stores silently.
+    "flushctl": dict(
+        sources=[os.path.join(TB, "tb_flush_ctrl_top.v")] + rtl_files(
+            "control/titan_x5_flush_ctrl.v",
+        ),
+        toplevel="tb_flush_ctrl_top",
+        module="test_flush_ctrl",
+    ),
     # ---- Titan X7: the high-frequency generation ------------------------
     # These target a short-stage, advanced-node budget rather than the x5
     # blocks' single-cycle-everything structure. See

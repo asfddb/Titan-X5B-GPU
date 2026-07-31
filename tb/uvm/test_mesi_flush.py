@@ -239,6 +239,52 @@ async def flush_of_clean_cache_is_harmless(dut):
 
 
 @cocotb.test()
+async def held_flush_req_runs_exactly_one_walk(dut):
+    """One assertion of flush_req = one walk, however long it is held.
+
+    flush_req is a level and the requester cannot drop it until it has seen
+    flush_done, so the L1 is guaranteed to be back in S_IDLE with flush_req
+    still high. Restarting there is idempotent, so no other test in this file
+    can see it -- but it costs a full SETS*WAYS sweep on every fence, and it
+    matters more now that a device-level flush exists: the sequencer holds
+    flush_req to all four L1s until every one has reported done, so a cache
+    that re-arms on the held level walks again while it waits for the others.
+
+    Found in the L2 flush work, where the same bug let a second unrequested
+    walk clear cache entries underneath a testbench's residency check.
+    """
+    await start_clock_and_reset(dut)
+    mem = Memory(dut)
+    cocotb.start_soon(mem.run())
+    await quiesce(dut)
+
+    await write_line(dut, 0x0000_6000, 0x00C0_FFEE)
+
+    dut.flush_req.value = 0b0001
+    dones = 0
+    for _ in range(400):        # >> one 4x2 walk
+        await ReadOnly()
+        if int(dut.flush_done.value) & 0b0001:
+            dones += 1
+        await RisingEdge(dut.clk)
+    assert dones == 1, (
+        f"flush_done pulsed {dones} times while flush_req was held high; "
+        f"expected exactly 1 -- the walk restarts on the held level")
+
+    dut.flush_req.value = 0
+    await ClockCycles(dut.clk, 4)
+    again = await do_flush(dut)
+    assert again is not None, (
+        "no flush_done after re-asserting flush_req -- the one-shot latch "
+        "never rearms and every fence after the first would hang")
+
+    dut._log.info(
+        f"flush_req held high for 400 cycles produced exactly 1 walk; "
+        f"re-asserting it produced another ({again} cycles)")
+    await settle(dut, mem)
+
+
+@cocotb.test()
 async def flush_is_repeatable(dut):
     """A second flush after a second write must work exactly like the first.
 
