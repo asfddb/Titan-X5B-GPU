@@ -290,6 +290,14 @@ SUITES = {
         toplevel="titan_apex_mult_seg",
         module="test_mult_seg",
     ),
+    "dpmac": dict(
+        sources=rtl_files(
+            "tensor/titan_apex_mult_seg.v",
+            "tensor/titan_apex_dp_mac.v",
+        ),
+        toplevel="titan_apex_dp_mac",
+        module="test_dp_mac",
+    ),
     # Not a cocotb suite: pytest driving whole-GPU kernel runs. Handled by
     # run_compute_suite(); the dict entry exists so it appears in the suite
     # list and runs by default.
