@@ -263,13 +263,21 @@ own specifications reproduces its published 104.8 TFLOPS.
 
 | Suite | Result |
 |:--|:--|
-| Full regression | **29 / 29 PASS** |
-| Deep compute kernels | **14 / 14 PASS** (32 min 20 s) |
+| Full regression | **31 / 31 PASS** |
+| Deep compute kernels | **15 / 15 PASS** (45 min 8 s) |
 
 The deep suite runs the whole compiler → ISA → RTL path: loop trip counts
 0/1/2/17/64, all six comparison conditions, predication, and
 **`matmul_bit_exact_vs_numpy` — a matrix multiply matching NumPy word for
 word.**
+
+Every one of those results is now read **out of the AXI memory model**, after
+a real `CMD_FENCE`. Previously they were read out of the cache hierarchy,
+because no flush existed — so the bit-exact matmul proved the compiler and the
+datapath, but never that a single byte had reached memory. The suite got
+slower (32 min 20 s → 45 min 8 s) for exactly that reason: every kernel now
+pays a 3,411-cycle fence, and the harness re-elaborates when sources change
+instead of reusing a stale image.
 
 ### Formal proofs
 
@@ -338,5 +346,5 @@ Stated plainly, because a specification that hides its gaps is marketing.
 | Peak low precision | 3,187 TOPS |
 | Memory | 8 × 1024-bit HBM4, 1 beat per cache line |
 | Die (compute) | 186.86 mm² at 40,000 lanes |
-| Verification | 29/29 suites, 14/14 deep, 4 formal equivalence proofs |
+| Verification | 31/31 suites, 15/15 deep, 4 formal equivalence proofs |
 | Codebase | ~20,800 lines Verilog, ~9,100 lines tests |
