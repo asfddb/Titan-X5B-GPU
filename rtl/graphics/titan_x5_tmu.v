@@ -211,6 +211,8 @@ module titan_x5_tmu (
         .snp_resp_dirty(),
         .snp_resp_data(),
 
+        .flush_req(1'b0),   // no flush path plumbed to this instance yet
+        .flush_done(),
         .dbg_addr(32'd0),
         .dbg_mesi()
     );

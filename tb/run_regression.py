@@ -200,6 +200,15 @@ SUITES = {
         module="test_l2_adapter",
         parameters={"DW": 2048, "LINE_BYTES": 256},
     ),
+    # Flush must run in its own simulation: see the module docstring.
+    "flush": dict(
+        sources=[os.path.join(TB, "tb_mesi_top.v")] + rtl_files(
+            "memory/titan_x5_l1_cache.v",
+            "interconnect/titan_x5_crossbar.v",
+        ),
+        toplevel="tb_mesi_top",
+        module="test_mesi_flush",
+    ),
     # ---- Titan X7: the high-frequency generation ------------------------
     # These target a short-stage, advanced-node budget rather than the x5
     # blocks' single-cycle-everything structure. See

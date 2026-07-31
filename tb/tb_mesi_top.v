@@ -30,6 +30,9 @@ module tb_mesi_top #(
     output wire         m0_resp_valid,
     output wire [LINE_BYTES*8-1:0] m0_resp_rdata,
     output wire [1:0]   m0_dbg_mesi,
+    // flush control, one bit per master
+    input  wire [3:0]   flush_req,
+    output wire [3:0]   flush_done,
 
     // master 1 core port
     input  wire         m1_req_valid,
@@ -143,6 +146,9 @@ module tb_mesi_top #(
                 .bus_resp_valid(bus_resp_valid[gi]),
                 .bus_resp_rdata(bus_resp_rdata),
                 .bus_resp_shared(bus_resp_shared),
+
+                .flush_req(flush_req[gi]),
+                .flush_done(flush_done[gi]),
 
                 .snp_req_valid(snp_req_valid[gi]),
                 .snp_req_type(snp_req_type),

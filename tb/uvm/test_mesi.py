@@ -219,6 +219,7 @@ def rand_be(rng):
 async def test_mesi_directed_producer_consumer(dut):
     rng = random.Random(0x3E51)
     await start_clock_and_reset(dut)
+    dut.flush_req.value = 0   # new L1 input; leaving it X drives core_req_ready X
     l2 = L2Model(dut, rng)
     cocotb.start_soon(l2.run())
     m = [Master(dut, i) for i in range(4)]
@@ -286,6 +287,7 @@ async def test_mesi_directed_producer_consumer(dut):
 async def test_mesi_sequential_consistency(dut):
     rng = random.Random(0x5EC0)
     await start_clock_and_reset(dut)
+    dut.flush_req.value = 0   # new L1 input; leaving it X drives core_req_ready X
     l2 = L2Model(dut, rng)
     cocotb.start_soon(l2.run())
     m = [Master(dut, i) for i in range(4)]
@@ -321,6 +323,7 @@ async def test_mesi_sequential_consistency(dut):
 async def test_mesi_eviction_storm(dut):
     rng = random.Random(0xE71C)
     await start_clock_and_reset(dut)
+    dut.flush_req.value = 0   # new L1 input; leaving it X drives core_req_ready X
     l2 = L2Model(dut, rng)
     cocotb.start_soon(l2.run())
     m = [Master(dut, i) for i in range(4)]
@@ -359,6 +362,7 @@ async def test_mesi_eviction_storm(dut):
 async def test_mesi_concurrent_storm(dut):
     rng = random.Random(0xC0C0)
     await start_clock_and_reset(dut)
+    dut.flush_req.value = 0   # new L1 input; leaving it X drives core_req_ready X
     l2 = L2Model(dut, rng)
     cocotb.start_soon(l2.run())
     m = [Master(dut, i) for i in range(4)]

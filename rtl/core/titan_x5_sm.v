@@ -273,6 +273,8 @@ module titan_x5_sm #(
         .snp_resp_dirty(snp_resp_dirty),
         .snp_resp_data(snp_resp_data),
 
+        .flush_req(1'b0),   // no flush path plumbed to this instance yet
+        .flush_done(),
         .dbg_addr(dbg_mesi_addr),
         .dbg_mesi(dbg_mesi_state)
     );

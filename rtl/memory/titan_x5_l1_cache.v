@@ -76,6 +76,17 @@ module titan_x5_l1_cache #(
     output reg  [LINE_BYTES*8-1:0]     snp_resp_data,
 
     // debug: MESI state lookup for verification
+    // ---- flush / writeback-all -------------------------------------------
+    // Raise flush_req and hold it until flush_done pulses. Every Modified
+    // line is written back and EVERY line is invalidated, so after
+    // flush_done the cache holds nothing and memory holds the architectural
+    // state. Without this a kernel's stores can sit in a Modified line
+    // forever -- measured: a kernel that stores 0xABC and exits left VRAM
+    // reading 0, and tb/tb_compute_top.v had to work around it by reading
+    // the value back out of the cache hierarchy instead of memory.
+    input  wire                        flush_req,
+    output reg                         flush_done,
+
     input  wire [ADDR_WIDTH-1:0]       dbg_addr,
     output wire [1:0]                  dbg_mesi
 );
@@ -104,6 +115,10 @@ module titan_x5_l1_cache #(
     localparam S_REQ    = 3'd3;
     localparam S_FILL   = 3'd4;
     localparam S_RESP   = 3'd5;
+    // Flush walks every (set, way). S_FLUSH inspects the current entry;
+    // S_FLUSH_WB waits for the bus to accept a Modified line's writeback.
+    localparam S_FLUSH    = 3'd6;
+    localparam S_FLUSH_WB = 3'd7;
 
     reg [2:0] state;
 
@@ -124,6 +139,11 @@ module titan_x5_l1_cache #(
 
     // pending bus transaction bookkeeping
     reg [WAY_BITS-1:0] victim_way_q;
+
+    // Flush walk position. One extra bit on the set counter so the walk can
+    // run past the last set to signal completion without wrapping to 0.
+    reg [INDEX_BITS:0]   fl_set;
+    reg [WAY_BITS-1:0]   fl_way;
 
     // ------------------------------------------------------------------
     // Hit detection (latched core request)
@@ -185,7 +205,9 @@ module titan_x5_l1_cache #(
     wire snoop_fire = snp_req_valid && !snp_served && snoop_allowed;
 
     // core accepts only when idle and no snoop is being serviced this cycle
-    assign core_req_ready = (state == S_IDLE) && !snoop_fire;
+    // A flush must not race core traffic: the walk mutates every way, and a
+    // concurrent fill would re-dirty a set the walk has already passed.
+    assign core_req_ready = (state == S_IDLE) && !snoop_fire && !flush_req;
 
     // ------------------------------------------------------------------
     // Debug MESI lookup
@@ -243,6 +265,9 @@ module titan_x5_l1_cache #(
             req_wdata_q     <= {LINE_BYTES*8{1'b0}};
             req_be_q        <= {LINE_BYTES{1'b0}};
             victim_way_q    <= {WAY_BITS{1'b0}};
+            fl_set          <= {(INDEX_BITS+1){1'b0}};
+            fl_way          <= {WAY_BITS{1'b0}};
+            flush_done      <= 1'b0;
             // blocking assigns: reset-only array init; keeps the loop within
             // the unroll limit (BLKLOOPINIT-safe pattern).
             // NB: no line of this comment may *begin* with the linter's own
@@ -258,6 +283,7 @@ module titan_x5_l1_cache #(
         end else begin
             core_resp_valid <= 1'b0;
             snp_resp_valid  <= 1'b0;
+            flush_done      <= 1'b0;   // single-cycle pulse
 
             // snoop hand-shake bookkeeping
             if (!snp_req_valid)
@@ -308,12 +334,61 @@ module titan_x5_l1_cache #(
             // ----------------------------------------------------------
             case (state)
                 S_IDLE: begin
-                    if (core_req_valid && core_req_ready) begin
+                    if (flush_req) begin
+                        // Start at (0,0) and walk. core_req_ready is already
+                        // held low by flush_req, so nothing new can enter.
+                        fl_set <= {(INDEX_BITS+1){1'b0}};
+                        fl_way <= {WAY_BITS{1'b0}};
+                        state  <= S_FLUSH;
+                    end else if (core_req_valid && core_req_ready) begin
                         req_write_q <= core_req_write;
                         req_addr_q  <= core_req_addr;
                         req_wdata_q <= core_req_wdata;
                         req_be_q    <= core_req_be;
                         state       <= S_LOOKUP;
+                    end
+                end
+
+                // ---- flush walk ------------------------------------
+                // Invalidate every way; write back the Modified ones first.
+                // E and S lines are dropped silently, which is sound under
+                // snoop-based MESI -- they are clean by definition, so
+                // memory already holds their data.
+                S_FLUSH: begin
+                    if (fl_set == SETS[INDEX_BITS:0]) begin
+                        flush_done <= 1'b1;
+                        state      <= S_IDLE;
+                    end else if (mesi_array[fl_set[INDEX_BITS-1:0]][fl_way] == MESI_M) begin
+                        bus_req_valid <= 1'b1;
+                        bus_req_type  <= BUS_WB;
+                        bus_req_addr  <= {tag_array[fl_set[INDEX_BITS-1:0]][fl_way],
+                                          fl_set[INDEX_BITS-1:0], {OFFSET_BITS{1'b0}}};
+                        bus_req_wdata <= data_array[fl_set[INDEX_BITS-1:0]][fl_way];
+                        state         <= S_FLUSH_WB;
+                    end else begin
+                        // clean or already invalid: drop it and advance
+                        mesi_array[fl_set[INDEX_BITS-1:0]][fl_way] <= MESI_I;
+                        if (fl_way == (WAYS-1)) begin
+                            fl_way <= {WAY_BITS{1'b0}};
+                            fl_set <= fl_set + 1'b1;
+                        end else begin
+                            fl_way <= fl_way + 1'b1;
+                        end
+                    end
+                end
+
+                S_FLUSH_WB: begin
+                    if (bus_req_ready) begin
+                        bus_req_valid <= 1'b0;
+                        // The line is now in memory; invalidate and advance.
+                        mesi_array[fl_set[INDEX_BITS-1:0]][fl_way] <= MESI_I;
+                        if (fl_way == (WAYS-1)) begin
+                            fl_way <= {WAY_BITS{1'b0}};
+                            fl_set <= fl_set + 1'b1;
+                        end else begin
+                            fl_way <= fl_way + 1'b1;
+                        end
+                        state <= S_FLUSH;
                     end
                 end
 
