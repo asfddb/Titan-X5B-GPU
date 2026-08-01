@@ -87,6 +87,13 @@ module titan_x7_sm #(
     output reg  [WARP_W-1:0]        warp_exit_warp,
     output wire                     all_retired,
 
+    // shader export: the INT writeback port, mirrored out so an enclosing
+    // SM can forward R63 writes to the ROP the way titan_x5_sm does
+    // (shader_wb_valid/reg/data are just its writeback port).
+    output reg                      wb_export_valid,
+    output reg  [5:0]               wb_export_reg,
+    output reg  [LANES*32-1:0]      wb_export_data,
+
     // observability
     output reg  [31:0]              dbg_retired,
     input  wire [WARP_W-1:0]        dbg_warp,
@@ -679,6 +686,7 @@ module titan_x7_sm #(
             wb_int_v <= 1'b0; wb_fp_v <= 1'b0; wb_mem_v <= 1'b0;
             wmma_valid <= 1'b0;
             dbg_retired <= 32'd0;
+            wb_export_valid <= 1'b0;
             warp_exit_valid <= 1'b0;
             warp_exit_warp <= {WARP_W{1'b0}};
         end else begin
@@ -794,6 +802,11 @@ module titan_x7_sm #(
                 iw = (j == 0) ? sel0_w : sel1_w;
                 s_valid[j] <= v;
                 if (v) begin
+`ifdef X7_TRACE
+                    $display("[%0t] ISSUE w%0d pc=%h op=%0d rd=%0d cls=%0d cnt=%0d",
+                             $time, iw, head_pc[iw], d_op[iw], d_rd[iw],
+                             head_class[iw], ib_cnt[iw]);
+`endif
                     s_warp[j] <= iw;
                     s_op[j]   <= d_op[iw];
                     s_rd[j]   <= d_rd[iw];
@@ -960,6 +973,7 @@ module titan_x7_sm #(
             // INT pipe X2 -> WB port 0
             // ----------------------------------------------------------
             wb_int_v <= 1'b0;
+            wb_export_valid <= 1'b0;
             if (x1_v) begin
                 if (x1_setp) begin
                     if (x1_ppos != 2'd0)
@@ -997,6 +1011,9 @@ module titan_x7_sm #(
                         if (x1_mask[i])
                             wword[i*32 +: 32] = r2[i*32 +: 32];
                     rf[{x1_w, x1_rd}] <= wword;
+                    wb_export_valid <= 1'b1;
+                    wb_export_reg   <= x1_rd;
+                    wb_export_data  <= wword;
                 end
             end
 

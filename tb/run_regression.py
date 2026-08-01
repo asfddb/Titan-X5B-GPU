@@ -321,6 +321,25 @@ SUITES = {
         toplevel="titan_apex_hbm4_ctrl",
         module="test_hbm4",
     ),
+    # X7 behind titan_x5_sm's port list, against the REAL LSU and L1 D-cache.
+    # This is the integration path for HANDOFF priority 1.
+    "x7shim": dict(
+        sources=[os.path.join(TB, "tb_x7_shim.v")] + rtl_files(
+            "core/titan_x5_decoder.v",
+            "core/titan_x7_scoreboard.v",
+            "core/titan_x7_branch_predictor.v",
+            "core/titan_x7_warp_scheduler.v",
+            "common/titan_x7_prefix_add.v",
+            "common/titan_x7_lzc.v",
+            "fpu/titan_x7_fp32_fma_pipe.v",
+            "core/titan_x7_sm.v",
+            "memory/titan_x5_lsu.v",
+            "memory/titan_x5_l1_cache.v",
+            "core/titan_x7_sm_shim.v",
+        ),
+        toplevel="tb_x7_shim",
+        module="test_x7_shim",
+    ),
     # Not a cocotb suite: pytest driving whole-GPU kernel runs. Handled by
     # run_compute_suite(); the dict entry exists so it appears in the suite
     # list and runs by default.
@@ -400,7 +419,7 @@ def run_suite(name, cfg):
         # 2.3 s -> >10 min, tensor7 -> 3.56 h). Synthesis never defines it:
         # syn/gt2n/run_gt2n.sh builds the structural RTL, which is what the
         # 2 nm timing numbers are measured on.
-        build_args=["-g2012", "-DTITAN_FAST_SIM"],
+        build_args=["-g2012", "-DTITAN_FAST_SIM"] + (["-DX7_TRACE"] if os.environ.get("X7_TRACE") else []),
         build_dir=build_dir,
         always=True,
         parameters=cfg.get("parameters", {}),
