@@ -42,7 +42,7 @@ NUM_WARPS = 8
 OP = dict(ADD=0, SUB=1, MUL=2, MULHI=3, DIV=4, AND=5, OR=6, XOR=7, SHL=8,
           SHR=9, SRA=10, SLT=11, SLTU=12, MIN=13, MAX=14, FMA=15, FADD=16,
           FMUL=17, FMIN=18, FMAX=19, CVT=20, SETP=21, LOAD=22, STORE=23,
-          BRANCH=24, BARRIER=25, WMMA=26, SIN=27, COS=28, RSQRT=29)
+          BRANCH=24, BARRIER=25, WMMA=26, SIN=27, COS=28, FFMA=29)
 
 
 def enc(op, rd=0, rs1=0, rs2=0, rs3=0, imm=None, pred=0):
@@ -134,6 +134,7 @@ async def sm_x7_registers_are_per_warp(dut):
             enc("ADD", rd=2, rs1=0, imm=0x200 + w),
             enc("ADD", rd=3, rs1=1, rs2=2),          # RAW within the warp
             enc("SUB", rd=4, rs1=2, rs2=1),          # = 0x100 for every warp
+            enc("BARRIER", imm=0xFFF),               # EXIT: stop, don't run on
         ]
         for i, word in enumerate(body):
             prog[base + i * 4] = word
@@ -172,17 +173,29 @@ async def sm_x7_control_flow_is_per_warp(dut):
 
     prog = {}
     bases = []
+    # BRANCH targets are ABSOLUTE INSTRUCTION INDICES in a 12-bit field, so
+    # every warp's program must live within instruction index 0..4095 (byte
+    # 0..16380). 0x100-byte spacing keeps all 8 programs inside that window.
     for w in range(NUM_WARPS):
-        base = 0x1000 * (w + 1)
+        base = 0x100 * (w + 1)
         bases.append(base)
+        loop_idx = base // 4 + 2                     # index of "acc += 3"
         body = [
             enc("ADD", rd=10, rs1=0, imm=w + 1),     # trip count = w+1
             enc("ADD", rd=11, rs1=0, imm=0),         # accumulator
             # loop:
             enc("ADD", rd=11, rs1=11, imm=3),        # acc += 3
             enc("SUB", rd=10, rs1=10, imm=1),
-            enc("BRANCH", rs1=10, imm=(-2) & 0xFFF),  # back to acc += 3
+            enc("BRANCH", rs1=10, imm=loop_idx),     # back to acc += 3
             enc("ADD", rd=12, rs1=0, imm=0x777),     # post-loop marker
+            # EXIT. Without it a warp runs off the end of its program, walks
+            # through the NOP padding and falls into the NEXT warp's code,
+            # overwriting its own results with that warp's. That is exactly
+            # what happened when these programs were packed 0x100 apart --
+            # warp 3 finished correctly (r11=12) and was then corrupted by
+            # warp 4's `ADD r10, r0, 5`. The old 0x1000 spacing only hid it
+            # behind 1024 NOPs of padding, which 600 cycles never crossed.
+            enc("BARRIER", imm=0xFFF),
         ]
         for i, word in enumerate(body):
             prog[base + i * 4] = word
@@ -192,6 +205,14 @@ async def sm_x7_control_flow_is_per_warp(dut):
     dut.warp_pc_in.value = pack_pcs(bases)
     dut.warp_active.value = (1 << NUM_WARPS) - 1
     await ClockCycles(dut.clk, 600)
+
+    obs = {}
+    for w in range(NUM_WARPS):
+        obs[w] = {reg: (await read_reg(dut, w, reg))[0] for reg in (10, 11, 12)}
+    for w in range(NUM_WARPS):
+        dut._log.info(
+            "warp %d trips=%d: r10=%#x r11=%#x (want %#x) r12=%#x",
+            w, w + 1, obs[w][10], obs[w][11], 3 * (w + 1), obs[w][12])
 
     for w in range(NUM_WARPS):
         trips = w + 1
@@ -206,6 +227,48 @@ async def sm_x7_control_flow_is_per_warp(dut):
     dut._log.info(
         f"{NUM_WARPS} warps ran loops of {1}..{NUM_WARPS} trips concurrently, "
         f"each reaching its own accumulator total")
+
+
+@cocotb.test()
+async def sm_x7_branch_target_is_absolute_index(dut):
+    """One warp, one counted loop: BRANCH imm is an ABSOLUTE instruction
+    index, not a PC-relative offset.
+
+    This is the ISA contract shared by compiler/titan_compiler.py (the label
+    fixup ORs `lbl.pc` straight into the immediate), the C oracle
+    (`next_pc = imm`) and titan_x5_pipeline (`pc_redirect_pc = {16'd0,
+    dec_imm}`). Single warp so nothing cross-warp can mask the result.
+    """
+    await boot(dut)
+
+    base = 0x40                       # instruction index 16
+    loop_idx = base // 4 + 2          # index of "acc += 3"
+    body = [
+        enc("ADD", rd=10, rs1=0, imm=3),      # 3 trips
+        enc("ADD", rd=11, rs1=0, imm=0),
+        # loop:
+        enc("ADD", rd=11, rs1=11, imm=3),
+        enc("SUB", rd=10, rs1=10, imm=1),
+        enc("BRANCH", rs1=10, imm=loop_idx),
+        enc("ADD", rd=12, rs1=0, imm=0x777),
+        enc("BARRIER", imm=0xFFF),                # EXIT
+    ]
+    prog = {base + i * 4: word for i, word in enumerate(body)}
+    cocotb.start_soon(imem_model(dut, prog))
+
+    dut.warp_pc_in.value = pack_pcs([base] + [0] * (NUM_WARPS - 1))
+    dut.warp_active.value = 0b1
+    await ClockCycles(dut.clk, 400)
+
+    for reg, want in ((10, 0), (11, 9), (12, 0x777)):
+        lanes = await read_reg(dut, 0, reg)
+        for ln, got in enumerate(lanes):
+            assert got == want, (
+                f"r{reg} lane {ln} = {got:#x}, expected {want:#x} -- a "
+                f"3-trip loop with an absolute-index BRANCH target did not "
+                f"execute the right number of iterations")
+
+    dut._log.info("absolute-index BRANCH: 3-trip loop reached acc=9")
 
 
 @cocotb.test()

@@ -28,7 +28,7 @@ NUM_WARPS = 8
 OP = dict(ADD=0, SUB=1, MUL=2, MULHI=3, DIV=4, AND=5, OR=6, XOR=7, SHL=8,
           SHR=9, SRA=10, SLT=11, SLTU=12, MIN=13, MAX=14, FMA=15, FADD=16,
           FMUL=17, FMIN=18, FMAX=19, CVT=20, SETP=21, LOAD=22, STORE=23,
-          BRANCH=24, BARRIER=25, WMMA=26, SIN=27, COS=28, RSQRT=29)
+          BRANCH=24, BARRIER=25, WMMA=26, SIN=27, COS=28, FFMA=29)
 
 
 def enc(op, rd=0, rs1=0, rs2=0, rs3=0, imm=None, pred=0):
@@ -157,9 +157,12 @@ async def sm_x7_programs(dut):
     a.append(enc("MAX", rd=8, rs1=5, rs2=4))          # r8 = 400
     # countdown loop: r10 = 4; do { r10-- } while (r10 != 0)
     a.append(enc("ADD", rd=10, rs1=0, imm=4))
-    loop_pc = len(a) * 4
+    # ISA BRANCH target is an ABSOLUTE INSTRUCTION INDEX (see the compiler's
+    # fixup, the C model's `next_pc = imm`, and titan_x5_pipeline), not a
+    # PC-relative offset.
+    loop_idx = len(a)
     a.append(enc("SUB", rd=10, rs1=10, imm=1))
-    a.append(enc("BRANCH", rs1=10, imm=(-1) & 0xFFF))  # -> loop_pc
+    a.append(enc("BRANCH", rs1=10, imm=loop_idx))      # -> loop_idx
     a.append(enc("ADD", rd=11, rs1=0, imm=0x123))     # post-loop marker
     # FP phase
     a.append(enc("ADD", rd=20, rs1=0, imm=3))
@@ -168,8 +171,17 @@ async def sm_x7_programs(dut):
     a.append(enc("CVT", rd=23, rs1=22, imm=0))        # r23 = 2.0f
     a.append(enc("FMUL", rd=24, rs1=21, rs2=23))      # 6.0
     a.append(enc("FADD", rd=25, rs1=24, rs2=21))      # 9.0
-    a.append(enc("FMA", rd=26, rs1=21, rs2=23, rs3=25))  # 3*2+9 = 15.0
+    # fp32 fused multiply-add is FFMA (opcode 29). Opcode 15 is the ISA's
+    # INTEGER fma -- this used to be encoded as "FMA" and checked for a
+    # float result, which matched this module's private opcode map rather
+    # than driver/titan_x6_isa.h.
+    a.append(enc("FFMA", rd=26, rs1=21, rs2=23, rs3=25))  # 3*2+9 = 15.0
     a.append(enc("CVT", rd=27, rs1=26, imm=1))        # f2i -> 15
+    # integer FMA (opcode 15): rd = rs1*rs2 + rs3
+    a.append(enc("ADD", rd=50, rs1=0, imm=6))
+    a.append(enc("ADD", rd=51, rs1=0, imm=7))
+    a.append(enc("ADD", rd=52, rs1=0, imm=5))
+    a.append(enc("FMA", rd=53, rs1=50, rs2=51, rs3=52))   # 6*7+5 = 47
     # memory phase: gather distinct lanes, modify, scatter, gather back
     a.append(enc("ADD", rd=30, rs1=0, imm=0x200))
     a.append(enc("LOAD", rd=40, rs1=30, imm=0x40))    # distinct default fill
@@ -206,8 +218,9 @@ async def sm_x7_programs(dut):
     await expect_uniform(dut, 0, 21, f32(3.0), "cvt-i2f")
     await expect_uniform(dut, 0, 24, f32(6.0), "fmul")
     await expect_uniform(dut, 0, 25, f32(9.0), "fadd")
-    await expect_uniform(dut, 0, 26, f32(15.0), "fma")
+    await expect_uniform(dut, 0, 26, f32(15.0), "ffma-fp32")
     await expect_uniform(dut, 0, 27, 15, "cvt-f2i")
+    await expect_uniform(dut, 0, 53, 47, "fma-integer")
     # memory phase (per-lane)
     r40 = await read_reg(dut, 0, 40)
     r42 = await read_reg(dut, 0, 42)

@@ -291,10 +291,18 @@ module titan_x7_sm #(
 
     generate
         for (g = 0; g < NUM_WARPS; g = g + 1) begin : g_cls
-            // FP pipe ops: FMA(15) FADD(16) FMUL(17); FMIN/FMAX/CVT and the
-            // SFU seed run in the INT pipe's comparators/shifters
-            assign is_fp_op[g] = (d_op[g] == 5'd15) || (d_op[g] == 5'd16) ||
-                                 (d_op[g] == 5'd17);
+            // FP pipe ops: FADD(16) FMUL(17) FFMA(29). FMIN/FMAX/CVT run in
+            // the INT pipe's comparators/shifters.
+            //
+            // ISA SEMANTICS: opcode 15 is TX6_OP_FMA, the *INTEGER* fma
+            // (`rd = rs1*rs2 + rs3`), and fp32 fused multiply-add is
+            // TX6_OP_FFMA = 29 (driver/titan_x6_isa.h; titan_x5_alu's
+            // OP_IFMA=15 / OP_FPFMA=29). This module had 15 routed to the FP
+            // pipe and executed 29 as an RSQRT seed -- a transcendental that
+            // the ISA deleted when FP FMA took slot 29 (see the opcode-21
+            // decision in docs/HANDOFF_NEXT_SESSION.md). Both were wrong.
+            assign is_fp_op[g] = (d_op[g] == 5'd16) || (d_op[g] == 5'd17) ||
+                                 (d_op[g] == 5'd29);
 
             // EXIT is BARRIER with use_imm && imm == 0xFFF (TX6_EXIT_IMM,
             // same convention as titan_x5_pipeline). A plain BARRIER is
@@ -453,7 +461,9 @@ module titan_x7_sm #(
                                   (fp_key(a) < fp_key(b)) ? b : a;
                 5'd27: int_alu1 = 32'h7FC00000;               // SIN: SW
                 5'd28: int_alu1 = 32'h7FC00000;               // COS: SW
-                5'd29: int_alu1 = 32'h5F3759DF - (a >> 1);    // RSQRT seed
+                // 29 is FFMA (fp32) and runs in the FP pipe, not here. The
+                // RSQRT seed that used to sit on 29 is not in the ISA: RSQRT
+                // was displaced when FP FMA took slot 29.
                 default: int_alu1 = 32'd0;
             endcase
         end
@@ -520,7 +530,7 @@ module titan_x7_sm #(
     reg [4:0]         x1_op;
     reg [5:0]         x1_rd;
     reg [LANES*32-1:0] x1_res;
-    reg [LANES*32-1:0] x1_a, x1_b;
+    reg [LANES*32-1:0] x1_a, x1_b, x1_c;   // x1_c: rs3, for integer FMA
     reg [LANES-1:0]   x1_mask;
     reg               x1_setp;
     reg [1:0]         x1_ppos;
@@ -540,7 +550,7 @@ module titan_x7_sm #(
     always @(*) begin
         for (fmi = 0; fmi < LANES; fmi = fmi + 1) begin
             case (xf_op)
-                5'd15: begin  // FMA: a*b + c
+                5'd29: begin  // FFMA (fp32): a*b + c
                     fp_a_in[fmi] = xf_a[fmi*32 +: 32];
                     fp_b_in[fmi] = xf_b[fmi*32 +: 32];
                     fp_c_in[fmi] = xf_c[fmi*32 +: 32];
@@ -625,6 +635,11 @@ module titan_x7_sm #(
     // blocking temps for unified per-warp ibuf count accounting
     reg [1:0]        f2_push_n;
     reg [WARP_W-1:0] f2_push_w;
+    // blocking temps for branch resolution
+    reg               mp_flush;
+    reg [WARP_W-1:0]  mp_warp;
+    reg               mp_tk;
+    reg [31:0]        mp_tgt;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -672,6 +687,21 @@ module titan_x7_sm #(
             wmma_valid <= 1'b0;
             f2_push_n = 2'd0;
             f2_push_w = {WARP_W{1'b0}};
+
+            // ----------------------------------------------------------
+            // branch resolution, evaluated early so the outcome is
+            // available to the stages below in the same cycle
+            mp_flush = 1'b0;
+            mp_warp  = {WARP_W{1'b0}};
+            mp_tk    = 1'b0;
+            mp_tgt   = 32'd0;
+            if (xi_v && xi_br) begin
+                mp_tk   = (xi_a[31:0] != 32'd0);
+                mp_tgt  = {18'd0, xi_imm[11:0], 2'b00};
+                mp_warp = xi_w;
+                if (mp_tk != xi_pt || (mp_tk && mp_tgt != xi_ptg))
+                    mp_flush = 1'b1;
+            end
 
             // ----------------------------------------------------------
             // warp activation edges
@@ -885,6 +915,7 @@ module titan_x7_sm #(
                 x1_mask <= xi_mask;
                 x1_a    <= xi_a;
                 x1_b    <= xi_b;
+                x1_c    <= xi_c;
                 x1_setp <= (xi_op == 5'd21);
                 x1_ppos <= xi_rd[1:0];
                 x1_writes <= !(xi_op == 5'd21) && !xi_br;
@@ -896,22 +927,31 @@ module titan_x7_sm #(
                 end
 
                 // branch resolution (lane 0 of rs1)
+                //
+                // ISA SEMANTICS: the target is an ABSOLUTE INSTRUCTION INDEX,
+                // not a PC-relative offset. This module originally computed
+                // `xi_pc + sext(imm12)<<2`, which disagreed with every other
+                // component that defines the ISA:
+                //   compiler/titan_compiler.py  words[idx] |= (lbl.pc & 0xFFF) << 3
+                //   driver/titan_x6_gpu_model.c next_pc = imm
+                //   rtl/core/titan_x5_pipeline.v pc_redirect_pc = {16'd0, dec_imm}
+                // X7 was developed standalone against tests that used its own
+                // relative encoding, so nothing caught the divergence. Every
+                // compiled kernel would have branched to the wrong address.
+                // PCs are bytes inside this module, so index -> byte is <<2.
                 if (xi_br) begin : bres
-                    reg tk;
-                    reg [31:0] tgt, npc;
-                    tk  = (xi_a[31:0] != 32'd0);
-                    tgt = xi_pc + {{18{xi_imm[11]}}, xi_imm[11:0], 2'b00};
-                    npc = tk ? tgt : (xi_pc + 32'd4);
                     branch_shadow[xi_w] <= 1'b0;
                     bru_valid  <= 1'b1;
                     bru_warp   <= xi_w;
                     bru_pc     <= xi_pc;
-                    bru_taken  <= tk;
-                    bru_target <= tgt;
-                    if (tk != xi_pt || (tk && tgt != xi_ptg)) begin
-                        // mispredict: epoch flush + refetch
+                    bru_taken  <= mp_tk;
+                    bru_target <= mp_tgt;
+                    if (mp_flush) begin
+                        // epoch flip still drops the in-flight fetch response
+                        // (F2 checks pend_epoch); the ibuf itself was cleared
+                        // above, which is what makes recovery unambiguous.
                         epoch[xi_w]    <= ~epoch[xi_w];
-                        fetch_pc[xi_w] <= npc;
+                        fetch_pc[xi_w] <= mp_tk ? mp_tgt : (xi_pc + 32'd4);
                     end
                 end
             end
@@ -940,6 +980,10 @@ module titan_x7_sm #(
                             5'd20: r2[i*32 +: 32] =
                                 x1_b[0] ? f2i(x1_a[i*32 +: 32])
                                         : i2f(x1_a[i*32 +: 32]);
+                            // TX6_OP_FMA: INTEGER fma, rd = rs1*rs2 + rs3
+                            5'd15: r2[i*32 +: 32] =
+                                x1_a[i*32 +: 32] * x1_b[i*32 +: 32] +
+                                x1_c[i*32 +: 32];
                             5'd4:  r2[i*32 +: 32] = 32'd0;  // DIV: SW
                             default: r2[i*32 +: 32] = x1_res[i*32 +: 32];
                         endcase
