@@ -7,6 +7,127 @@ Read this first. It is the full context for continuing work on Titan X5.
 
 ---
 
+## 0. STATE AS OF 2026-08-04 — the X7 SM is in the chip, and it is slower
+
+Priority 1 ("wire the X7 SM into `titan_x5_gpu_top`") is **done**. Build it
+with `` -DTITAN_USE_X7_SM ``; leave the define off for the x5 pipeline. Both
+SMs build from one tree. `TITAN_SM=x7` selects it for the compute harness.
+
+**Verified:** regression **32/32**, deep compute **15/15 on both SMs**,
+render test passes on both (181 pixels, 0 out of bounds, 0 poison).
+
+### What landing it found
+
+The swap failed on its first full-chip run — **117 of 181 pixels wrong-path**
+— and the diagnosis found two more ISA divergences in `titan_x7_sm`, on top
+of the three `X7_ISA_CONFORMANCE.md` already recorded:
+
+- **BRANCH was conditional on rs1.** `mp_tk = (xi_a[31:0] != 32'd0)`. This
+  ISA has no register-conditional branch; BRANCH is unconditional and gated
+  only by its predicate. Since its rs1 field is unused, a compiled
+  `BRANCH #target` encodes rs1 = R0 — so X7 **fell through every
+  unconditional branch it was ever given**.
+- **SETP ignored its condition field**, always doing signed less-than, so
+  five of the six `TX6_CMP_*` comparisons silently executed as LT.
+
+Both fixed and mutation-tested. `sm7`/`sm7warp` had passed throughout because
+their loops were written `enc("BRANCH", rs1=10, ...)` — the same invented
+rule the RTL implemented. **That is now three separate times in this project
+that a test written from the same misunderstanding as the RTL failed to
+detect the misunderstanding.**
+
+### THE RENDER TEST CANNOT SCORE AN SM. Do not use it for that.
+
+Its "Total Clock Cycles" is `waited_windows * 1000 + ~9` — the quiesce poll
+loop's window count. It is quantised to 1,000 cycles, includes 3,000 cycles
+of pure waiting, and measures when the framebuffer write stream went quiet.
+**Both SMs report exactly 10,009.** The test now also prints the first/last
+committed framebuffer write, which is the honest figure.
+
+It remains an excellent *correctness* test — its poison trap has now caught a
+wrong-path bug twice, once for x5 and once for X7.
+
+For performance use `tb/compute_runner.py`, which prints an exact per-kernel
+`TITAN_CYCLES` line under `pytest -s`.
+
+### The measurement: 15 matched pairs, exact per-kernel cycles
+
+Both columns from `tb/compute_runner.py`, same harness, same tree, deep suite
+**15/15 PASS on both SMs**.
+
+| Kernel | warps | x5 | X7 | Δ |
+|:--|--:|--:|--:|--:|
+| counted loop, 0 trips | 1 | 4,664 | 4,808 | +3.09% |
+| counted loop, 1 trip | 1 | 4,952 | 5,096 | +2.91% |
+| counted loop, 2 trips | 1 | 5,240 | 5,480 | +4.58% |
+| counted loop, 17 trips | 1 | 9,560 | 10,088 | +5.52% |
+| counted loop, 64 trips | 1 | 23,096 | 23,624 | +2.29% |
+| SETP EQ | 1 | 6,728 | 7,112 | +5.71% |
+| SETP NE | 1 | 6,728 | 7,121 | +5.84% |
+| SETP LT | 1 | 6,728 | 7,217 | +7.27% |
+| SETP GE | 1 | 6,728 | 7,208 | +7.13% |
+| SETP LTU | 1 | 6,728 | 7,121 | +5.84% |
+| SETP GEU | 1 | 6,728 | 7,112 | +5.71% |
+| predicated instruction skipped | 1 | 4,760 | 4,808 | +1.01% |
+| host reads results from memory | 1 | 5,164 | 5,212 | +0.93% |
+| matmul 4x4x4, bit-exact | 1 | 69,022 | 69,646 | +0.90% |
+| **predicates are per-warp** | **8** | **35,864** | **35,249** | **−1.71%** |
+
+**X7 loses all fourteen single-warp kernels and wins the one multi-warp
+kernel.** That is not a coincidence, and it is the most useful thing this
+measurement produced.
+
+### Why: X7's dual-issue is cross-warp only
+
+`titan_x7_warp_scheduler.v:91` requires `sel0_warp != i1` for the second
+issue slot, so **a single warp can never dual-issue**. 14 of the deep suite's
+15 tests run `warp_mask=0x01` — one warp — so in almost every measurement X7
+is a single-issue core paying the shim's pair-fetch overhead, and loses.
+Give it eight warps and the sign flips.
+
+Treat the −1.71% carefully: it is **one data point**, from a test built to
+prove predicate isolation rather than to benchmark, and 1.7% is small. It is
+consistent with the mechanism, not proof of it. The honest reading is
+"the only measurement where X7 *can* dual-issue is also the only one it
+wins" — which says what to measure next, not that X7 is faster.
+
+A practical aside: the X7 build simulates about **twice as fast in wall
+clock** (deep suite 27:06 against 54:43), because it has no per-ALU tensor
+arrays — 17 MB of elaborated image against 32 MB. That matters on a project
+where simulation speed is the binding constraint.
+
+On top of that, `titan_x7_sm_shim` collapses X7's *per-warp* outstanding
+fetch to **one pair at a time globally** (`if_ready = (ifs == IF_IDLE)`), and
+each pair costs two sequential word fetches on the chip's 32-bit port. The
+shim's own header says it makes X7 correct on that port and does not widen
+fetch. That is now measured, not predicted.
+
+**So step 2 (instruction supply) is not merely the next item — it is the
+precondition for step 1 to have been worth doing.** Until fetch is widened
+and multi-warp kernels are the norm, the X7 core cannot show the IPC 1.72 it
+measures standalone. Recommended order from here:
+
+1. Widen fetch: a real I-cache, and let the shim keep more than one fetch in
+   flight. **Widening fetch requires widening the 1-bit wrong-path epoch** in
+   `titan_x5_pipeline.v`; whether X7's own 1-bit epoch is exploitable is
+   still unknown and unmeasured (see `X7_ISA_CONFORMANCE.md`).
+2. Re-measure with `warp_mask=0xFF`, where X7 can actually dual-issue.
+3. Only then judge whether X7 earns its place in the chip.
+
+### Two verification gaps this opened, both live
+
+- **`dbg_pred_divergent` is tied to `1'b0` in the shim**, so the deep suite's
+  five `assert not res.pred_divergent` checks are **vacuous on X7**. It is
+  defensible — X7 applies the predicate as a per-lane write mask, so there is
+  no unimplemented case to flag — but nothing now proves X7's divergent
+  predication is *correct* at full-chip level.
+- **X7 still has no static ISA conformance check** of the kind
+  `compiler/test_compiler_isa.py` gives x5. Five divergences have now been
+  found in this module; three by reading and two by running. There is no
+  reason to believe five is the total.
+
+---
+
 ## 1. Environment setup (do this first — nothing is preinstalled)
 
 ```bash

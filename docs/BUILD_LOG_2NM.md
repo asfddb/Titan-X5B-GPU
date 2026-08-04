@@ -532,6 +532,47 @@ The test now prints the first/last write cycles alongside the old number,
 with the old number labelled. **The honest scoreboard for an SM comparison is
 the compute harness**, which returns an exact per-kernel `cycles`.
 
+### The real scoreboard: X7 is slower, except where it can dual-issue
+
+Deep compute suite, **15/15 PASS on both SMs**, exact per-kernel cycles:
+
+| Kernel | warps | x5 | X7 | Δ |
+|:--|--:|--:|--:|--:|
+| counted loop, 0/1/2 trips | 1 | 4,664 / 4,952 / 5,240 | 4,808 / 5,096 / 5,480 | +3.1 / +2.9 / +4.6% |
+| counted loop, 17 / 64 trips | 1 | 9,560 / 23,096 | 10,088 / 23,624 | +5.5 / +2.3% |
+| SETP, six conditions | 1 | 6,728 each | 7,112 – 7,217 | +5.7 … +7.3% |
+| predicated instruction skipped | 1 | 4,760 | 4,808 | +1.0% |
+| host reads results from memory | 1 | 5,164 | 5,212 | +0.9% |
+| matmul 4x4x4, bit-exact | 1 | 69,022 | 69,646 | +0.9% |
+| **predicates are per-warp** | **8** | **35,864** | **35,249** | **−1.7%** |
+
+**Fourteen single-warp kernels, X7 loses every one. One eight-warp kernel,
+X7 wins it.** The cause is structural:
+`titan_x7_warp_scheduler.v:91` requires `sel0_warp != i1` for the second
+issue slot, so **a single warp can never dual-issue**. With one warp X7 is a
+single-issue core carrying the shim's pair-fetch overhead; the dual-issue
+machinery is inert. The deep suite runs `warp_mask=0x01` in 14 of 15 tests,
+so it structurally cannot show what X7 was built for.
+
+The −1.7% is one data point from a test written to prove predicate isolation,
+not a benchmark. It is consistent with the mechanism rather than proof of it,
+and the useful conclusion is about what to measure next, not about who won.
+
+One more measured detail, and it is a genuine argument in X7's favour that
+has nothing to do with IPC: the X7 build simulates roughly **twice as fast in
+wall clock** — the deep suite takes 27:06 against x5's 54:43, because X7 has
+no per-ALU tensor arrays (17 MB of elaborated image against 32 MB). On a
+project where ~90 clock cycles per wall second is the binding constraint on
+every experiment, halving the iteration time is worth more than 3% of kernel
+cycles.
+
+Two side-signals worth keeping. x5's six SETP tests are **all exactly 6,728
+cycles** while X7's spread across 7,112–7,217: x5 resolves SETP in ID at
+fixed cost, and X7's time moves with the branch outcome, which is its
+predictor visibly doing something. And X7's `test_setp_conditions` results
+are the strongest ISA-conformance evidence this core has — five of those six
+conditions would have failed before today's fix.
+
 The wider lesson matches this project's pattern: the render test is an
 excellent *correctness* test — its poison trap has now caught a wrong-path
 bug twice, once for x5 and once for X7 — and a poor *performance* test. It
