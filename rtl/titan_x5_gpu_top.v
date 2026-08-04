@@ -382,8 +382,33 @@ module titan_x5_gpu_top #(
     genvar gi;
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_gen
+            // ---- which SM this chip is built with ---------------------------
+            // Define TITAN_USE_X7_SM to build the dual-issue, scoreboarded X7
+            // core (via titan_x7_sm_shim, which presents titan_x5_sm's exact
+            // port list -- 39 ports, same names, order and directions).
+            // Undefined, the chip keeps the blocking x5 pipeline. Both stay
+            // buildable from one tree so the before/after comparison is
+            // reproducible.
+            //
+            // WHY `ifdef AND NOT A PARAMETER: a parameter would need a
+            // generate-if, whose block label lands in the hierarchical path
+            // (sm_gen[0].g_x7.u_sm instead of sm_gen[0].u_sm). Both
+            // testbenches reach into this instance by name -- the register
+            // backdoor and tb_compute_top's L1 residency probe -- so keeping
+            // the instance called `u_sm` is what holds those paths valid.
+            //
+            // NOTE FOR SIMULATION: X7 instantiates titan_x7_fp32_fma_pipe per
+            // lane (32 per SM, 128 per chip), which pulls in
+            // titan_x7_prefix_add and titan_x7_lzc. Builds MUST define
+            // TITAN_FAST_SIM or those elaborate structurally, at roughly 250x
+            // the simulation cost. Synthesis must NOT define it.
+`ifdef TITAN_USE_X7_SM
+            titan_x7_sm_shim #(.NUM_WARPS(8), .NUM_ALUS(32), .LINE_BYTES(CXB_LINE),
+                          .ENABLE_TENSOR(ENABLE_TENSOR)) u_sm (
+`else
             titan_x5_sm #(.NUM_WARPS(8), .NUM_ALUS(32), .LINE_BYTES(CXB_LINE),
                           .ENABLE_TENSOR(ENABLE_TENSOR)) u_sm (
+`endif
                 .clk(clk),
                 .rst_n(rst_n),
                 .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_gnt(xbar_m_req_ready[9+gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),

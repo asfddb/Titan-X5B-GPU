@@ -600,6 +600,17 @@ module tb_compute_top();
         integer slot;
         begin
             slot = warp*16 + (regno/4);
+`ifdef TITAN_USE_X7_SM
+            // X7 keeps one flat warp-major array, rf[{warp, reg}], so the
+            // bank/entry split above does not apply -- only the SM select
+            // still has to be spelled out.
+            case (sm)
+            0: dut.sm_gen[0].u_sm.u_x7.rf[warp*64 + regno] = value;
+            1: dut.sm_gen[1].u_sm.u_x7.rf[warp*64 + regno] = value;
+            2: dut.sm_gen[2].u_sm.u_x7.rf[warp*64 + regno] = value;
+            3: dut.sm_gen[3].u_sm.u_x7.rf[warp*64 + regno] = value;
+            endcase
+`else
             case (sm)
             0: case (regno % 4)
                0: dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[slot] = value;
@@ -626,6 +637,7 @@ module tb_compute_top();
                3: dut.sm_gen[3].u_sm.rf_inst.bank_gen[3].bank_mem[slot] = value;
                endcase
             endcase
+`endif
         end
     endtask
 

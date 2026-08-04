@@ -423,6 +423,100 @@ budget** until the enclosing PE pipelines it.
 
 ---
 
+## Landing the X7 SM in the chip, and finding out the render test cannot score it
+
+The handoff's priority 1 was "swap `titan_x5_sm` for `titan_x7_sm_shim` in
+`titan_x5_gpu_top` and report the render test's cycle count before and
+after". Both halves of that turned out to be more interesting than expected:
+the swap failed on its first run, and the metric it was supposed to be judged
+by cannot resolve the difference.
+
+### The swap itself
+
+The shim is a genuine drop-in — 39 ports, identical names, order and
+directions to `titan_x5_sm`, checked programmatically rather than by eye.
+Selection is an `` `ifdef TITAN_USE_X7_SM ``, not a parameter, because a
+parameter needs a generate-`if` whose block label lands in the hierarchical
+path (`sm_gen[0].g_x7.u_sm`), and both testbenches reach into that instance
+by name for the register backdoor and the L1 residency probe.
+
+Three things broke that were not visible in the port list:
+
+- **The register backdoor.** x5 stores registers in 4 banks as
+  `bank_gen[r%4].bank_mem[w*16 + r/4]`; X7 uses one flat warp-major array,
+  `rf[{warp, reg}]`. Both testbenches deposit R2/R3/R4/R62 that way, so
+  without an X7 branch the kernel reads zeroes and computes address 0.
+- **`TITAN_FAST_SIM` was missing from `compute_runner.py`.** Harmless while
+  the chip was x5 — it instantiates neither `titan_x7_prefix_add` nor
+  `titan_x7_lzc` — but X7 instantiates `titan_x7_fp32_fma_pipe` **per lane**,
+  32 per SM and 128 across the chip. Without the define those elaborate
+  structurally, at ~250x simulation cost (section 7.4 of the synthesis doc),
+  which a 45-minute suite cannot absorb.
+- **The compute image cache key.** `_sim_path` keyed only on the warp mask,
+  so flipping the SM changed no source file and the mtime-reuse check would
+  have handed back an image built for the *other* core. That is the same
+  stale-image failure recorded above, and it would have produced a clean
+  before/after comparison of one design against itself. The flavour is now
+  part of the filename.
+
+### It failed on the first run, and that was the point
+
+The full-chip render test came back **117 of 181 pixels wrong-path**. The
+kernel's `BRANCH #7` exists to skip a poison instruction that writes
+`0x0000FF00` to R63; X7 fell through it and executed the poison.
+
+Cause: `titan_x7_sm` computed `mp_tk = (xi_a[31:0] != 32'd0)` — "branch if
+rs1 != 0". **There is no register-conditional branch in this ISA.** BRANCH is
+unconditional, gated only by its predicate, and since its rs1 field is unused
+a compiled `BRANCH #target` encodes rs1 = R0 — so X7 fell through *every*
+unconditional branch it was ever given. A second divergence turned up in the
+same area: SETP ignored the condition field in `rd[4:2]` and always did
+signed less-than, so five of the ISA's six comparisons silently executed as
+LT. Full detail, including why `sm7`/`sm7warp` passed throughout, is in
+[X7_ISA_CONFORMANCE.md](X7_ISA_CONFORMANCE.md).
+
+Both are fixed and both mutations are caught. With them fixed the render test
+passes on X7: 181 pixels, 0 out of bounds, 0 poison, all warps retired.
+
+### The negative result: "Total Clock Cycles" is not a speed
+
+Before and after, the render test reported **exactly 10,009 cycles**. That
+identity is not a coincidence and it is not a measurement.
+
+The test waits for the render to quiesce by polling in `#10000` windows —
+1,000 cycles each — and stopping after 3 consecutive windows with no new
+committed write. So the reported figure is
+
+```
+cycle_count = waited_windows * 1000 + ~9
+```
+
+quantised to 1,000 cycles, and carrying 3,000 cycles of pure waiting after
+the last write. Both builds ran 10 windows, so both printed 10,009.
+
+The framebuffer write timestamps show what it hid:
+
+| | x5 SM | X7 shim |
+|:--|--:|--:|
+| first framebuffer write | cycle 1,227 | cycle 3,051 |
+| **last framebuffer write** | **cycle 6,987** | **cycle 6,843** |
+| reported "Total Clock Cycles" | 10,009 | 10,009 |
+
+A 144-cycle difference rounded to zero. X7 also starts writing **1,824
+cycles later** — the ROP holds `i_ready` low until the shader's first R63
+export, and the shim's fetch adapter is slower to deliver the first
+instructions, which is consistent with it serialising X7's per-warp
+outstanding fetch down to one pair at a time on the chip's 32-bit port.
+
+The test now prints the first/last write cycles alongside the old number,
+with the old number labelled. **The honest scoreboard for an SM comparison is
+the compute harness**, which returns an exact per-kernel `cycles`.
+
+The wider lesson matches this project's pattern: the render test is an
+excellent *correctness* test — its poison trap has now caught a wrong-path
+bug twice, once for x5 and once for X7 — and a poor *performance* test. It
+was being asked to do the second job because it prints a number.
+
 ## What is not done
 
 - **3 GHz.** Floor is 2.49 GHz and I could not move it.

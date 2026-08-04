@@ -164,6 +164,8 @@ module tb_titan_x5_gpu_top();
     reg [511:0] latched_wdata;
     reg [63:0]  latched_wstrb;
     integer     vram_wr_commits; // total committed AXI writes (used by the render-quiesce wait)
+    integer     first_wr_cycle;  // cycle of the first committed framebuffer write
+    integer     last_wr_cycle;   // cycle of the last  committed framebuffer write
     integer     commit_byte;
 
     // Simulate memory latency
@@ -182,6 +184,8 @@ module tb_titan_x5_gpu_top();
             latched_wdata <= 512'h0;
             latched_wstrb <= 64'h0;
             vram_wr_commits <= 0;
+            first_wr_cycle  <= 0;
+            last_wr_cycle   <= 0;
             latency_counter <= 4'h0;
         end else begin
             // Introduce arbitrary random latency
@@ -228,6 +232,12 @@ module tb_titan_x5_gpu_top();
                         vram_mem[{latched_awaddr[22:6], 1'b1}][commit_byte*8 +: 8] <= latched_wdata[256 + commit_byte*8 +: 8];
                 end
                 vram_wr_commits <= vram_wr_commits + 1;
+                // Cycle of the FIRST and LAST committed framebuffer write.
+                // These are the honest performance numbers this test can
+                // report; see the note at the "Total Clock Cycles" display.
+                if (vram_wr_commits == 0)
+                    first_wr_cycle <= cycle_count;
+                last_wr_cycle <= cycle_count;
                 vram_bvalid <= 1'b1;
                 vram_bresp  <= 2'b00;
                 vram_bid    <= vram_awid;
@@ -394,8 +404,17 @@ module tb_titan_x5_gpu_top();
             write_vram_word(RING_BASE + i*4, 32'h0000_0000);
         end
 
-        $dumpfile("blackwell_wave.vcd");
-        $dumpvars(0, tb_titan_x5_gpu_top);
+        // Waveforms on demand only. $dumpvars(0, ...) on this top dumps the
+        // whole chip and was writing ~300 MB before the render even quiesced,
+        // which dominated the run time of a test whose entire output is a
+        // pixel count and a cycle count. Same convention as tb_x7_shim.
+        // Dumping cannot affect the measurement -- it is I/O, not simulated
+        // behaviour -- and that is control-experimented rather than asserted:
+        // see docs/BUILD_LOG_2NM.md for the matched-cycle-count re-run.
+        if ($test$plusargs("dumpvcd")) begin
+            $dumpfile("blackwell_wave.vcd");
+            $dumpvars(0, tb_titan_x5_gpu_top);
+        end
 
         $display("==================================================");
         $display("  TITAN X5 GPU TOP-LEVEL GRAPHICS PIPELINE TEST  ");
@@ -418,12 +437,25 @@ module tb_titan_x5_gpu_top();
         // once: with the old shared file, eight warps stepping through
         // `ADD R6, R6, R3` accumulated into one R6 and walked out of bounds.
         for (w = 0; w < 8; w = w + 1) begin
+`ifdef TITAN_USE_X7_SM
+            // X7 holds its vector registers in one flat warp-major array,
+            // rf[{warp, reg}] = rf[warp*64 + reg], each entry a whole 32-lane
+            // word. Same four architectural registers, same values, same
+            // per-warp replication as the x5 branch below -- only the storage
+            // layout differs, so the kernel sees identical inputs on both SMs
+            // and any cycle-count difference is the core, not the stimulus.
+            dut.sm_gen[0].u_sm.u_x7.rf[w*64 + 2]  = temp_r2;
+            dut.sm_gen[0].u_sm.u_x7.rf[w*64 + 3]  = temp_r3;
+            dut.sm_gen[0].u_sm.u_x7.rf[w*64 + 4]  = temp_r4;
+            dut.sm_gen[0].u_sm.u_x7.rf[w*64 + 62] = temp_r62;
+`else
             // R2 = per-thread gradient colours (bank = reg%4, entry = reg/4)
             dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[w*16 + 0]  = temp_r2;
             dut.sm_gen[0].u_sm.rf_inst.bank_gen[3].bank_mem[w*16 + 0]  = temp_r3;
             dut.sm_gen[0].u_sm.rf_inst.bank_gen[0].bank_mem[w*16 + 1]  = temp_r4;
             // R62 = TX6_REG_TID: bank = 62%4 = 2, entry = 62/4 = 15
             dut.sm_gen[0].u_sm.rf_inst.bank_gen[2].bank_mem[w*16 + 15] = temp_r62;
+`endif
         end
 
         $display("[%0t] Reset done. Queuing CMD_DRAW into ring buffer...", $time);
@@ -552,8 +584,30 @@ module tb_titan_x5_gpu_top();
                 $display("==================================================");
                 $display("  TITAN X5 GPU: RENDERING TEST PASSED (SELF-CHECKING)!");
                 $display("  PERFORMANCE METRICS:");
-                $display("  Total Clock Cycles: %0d", cycle_count);
-                $display("  Estimated Time (at 1 GHz): %0d ns", cycle_count);
+                // READ THIS BEFORE QUOTING "Total Clock Cycles" AS A SPEED.
+                //
+                // It is not one. The wait above polls in #10000 windows (1000
+                // cycles) and stops after 3 consecutive windows with no new
+                // committed write, so this number is
+                //     waited_windows * 1000 + ~9
+                // -- quantised to 1000 cycles, and including 3000 cycles of
+                // pure waiting after the last write. It measures when the
+                // framebuffer write stream went quiet, not how fast the
+                // machine ran.
+                //
+                // Measured: swapping titan_x5_sm for the dual-issue X7 core
+                // moved the last framebuffer write from cycle 6987 to 6843
+                // and BOTH runs still reported 10009 here. A 144-cycle
+                // difference rounded to zero.
+                //
+                // The two lines below are the honest figures. For real
+                // per-kernel cycle counts use the compute harness
+                // (tb/compute_runner.py returns an exact `cycles`), which is
+                // what any SM comparison should be based on.
+                $display("  Total Clock Cycles: %0d  (quiesce-quantised, see RTL note)", cycle_count);
+                $display("  First framebuffer write at cycle: %0d", first_wr_cycle);
+                $display("  Last  framebuffer write at cycle: %0d", last_wr_cycle);
+                $display("  Framebuffer write span (cycles):  %0d", last_wr_cycle - first_wr_cycle);
                 $display("==================================================");
             end
         end

@@ -35,8 +35,28 @@ PARAM_BASE = 0x0060_0000
 _BUILD_DIR = os.path.join(TB, "sim_build", "compute")
 
 
+def sm_flavour():
+    """Which SM titan_x5_gpu_top is built with: "x5" (default) or "x7".
+
+    Set TITAN_SM=x7 to build the dual-issue X7 core in via
+    titan_x7_sm_shim. Kept an environment switch rather than an argument so
+    the whole deep suite can be run both ways without editing any test.
+    """
+    v = os.environ.get("TITAN_SM", "x5").strip().lower()
+    if v not in ("x5", "x7"):
+        raise RuntimeError(f"TITAN_SM must be x5 or x7, got {v!r}")
+    return v
+
+
 def _sim_path(warp_mask):
-    return os.path.join(_BUILD_DIR, f"compute_w{warp_mask:02x}.vvp")
+    # The SM flavour is part of the image identity, not just the warp mask.
+    # Without it, flipping TITAN_SM changes no source file, so the mtime reuse
+    # check below would hand back an image built for the OTHER core and the
+    # suite would silently report the previous SM's results. That is exactly
+    # the stale-image failure recorded in docs/BUILD_LOG_2NM.md, where a
+    # control experiment passed when it should have failed.
+    return os.path.join(_BUILD_DIR,
+                        f"compute_{sm_flavour()}_w{warp_mask:02x}.vvp")
 
 
 def _tool(name):
@@ -83,9 +103,24 @@ def build(warp_mask=0x01, force=False):
         if os.path.getmtime(sim) >= newest:
             return sim
     os.makedirs(_BUILD_DIR, exist_ok=True)
+    # TITAN_FAST_SIM selects the behavioural titan_x7_prefix_add and
+    # titan_x7_lzc. It is unconditional because the X7 build instantiates
+    # titan_x7_fp32_fma_pipe PER LANE -- 32 per SM, 128 across the chip -- and
+    # the structural forms cost roughly 250x simulation time (docs/
+    # GT2N_2NM_SYNTHESIS.md 7.4), which this suite cannot absorb. Both forms
+    # are SAT-proven identical, and run_regression.py already builds this way.
+    # Synthesis never defines it: syn/gt2n/run_gt2n.sh builds the structural
+    # RTL, which is what every 2 nm timing number is measured on.
+    #
+    # For the x5 build this changes nothing -- the x5 chip instantiates
+    # neither primitive -- so the before/after comparison stays matched.
     cmd = [_tool("iverilog"), "-g2012", "-s", "tb_compute_top",
+           "-DTITAN_FAST_SIM",
            "-P", f"tb_compute_top.LAUNCH_MASK={warp_mask}",
-           "-I", RTL, "-o", sim] + sources
+           "-I", RTL, "-o", sim]
+    if sm_flavour() == "x7":
+        cmd.insert(4, "-DTITAN_USE_X7_SM")
+    cmd += sources
     proc = subprocess.run(cmd, capture_output=True, text=True)
     errs = [l for l in (proc.stderr or "").splitlines() if "error" in l.lower()]
     if proc.returncode != 0 or errs:
@@ -161,6 +196,13 @@ def run(program, n_res, data=None, params=None, warp_regs=None,
             lines = [l.strip() for l in f if l.strip()]
         timed_out, cycles, divergent = (int(x) for x in lines[0].split())
         words = [int(l, 16) for l in lines[1:]]
+        # Exact per-kernel cycle count, tagged with the SM it ran on. This is
+        # the honest scoreboard for comparing SMs: the full-chip render test's
+        # "Total Clock Cycles" is quantised to its 1000-cycle quiesce window
+        # and cannot resolve a difference smaller than that (see the note in
+        # tb/tb_titan_x5_gpu_top.v). Visible under `pytest -s`; grep TITAN_CYCLES.
+        print(f"TITAN_CYCLES sm={sm_flavour()} warps={warp_mask:#04x} "
+              f"cycles={cycles} timed_out={bool(timed_out)}", flush=True)
         return Result(words, cycles, bool(timed_out), bool(divergent), log)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
