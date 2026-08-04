@@ -54,6 +54,15 @@ def enc(op, rd=0, rs1=0, rs2=0, rs3=0, imm=None, pred=0):
     return w
 
 
+# SETP's rd field is {cond[2:0], pdst[1:0]} per TX6_CMP_* in
+# driver/titan_x6_isa.h -- see the longer note in test_sm_x7.py.
+CMP_EQ, CMP_NE, CMP_LT, CMP_GE, CMP_LTU, CMP_GEU = range(6)
+
+
+def setp_rd(cond, pdst):
+    return (cond << 2) | pdst
+
+
 # r63 is the scratch the NOP writes, so no test observes it.
 NOP = enc("ADD", rd=63, rs1=63, imm=0)
 
@@ -186,7 +195,13 @@ async def sm_x7_control_flow_is_per_warp(dut):
             # loop:
             enc("ADD", rd=11, rs1=11, imm=3),        # acc += 3
             enc("SUB", rd=10, rs1=10, imm=1),
-            enc("BRANCH", rs1=10, imm=loop_idx),     # back to acc += 3
+            # BRANCH is unconditional and honours only its PREDICATE -- it
+            # does not read rs1. This was `enc("BRANCH", rs1=10, ...)`, a
+            # "branch while r10 != 0" rule that matched titan_x7_sm's own
+            # invented semantics and no other definition of the ISA. See the
+            # note in test_sm_x7.py and docs/X7_ISA_CONFORMANCE.md.
+            enc("SETP", rd=setp_rd(CMP_LT, 1), rs1=0, rs2=10),        # p1 = (0 < r10)
+            enc("BRANCH", imm=loop_idx, pred=1),     # back to acc += 3 if p1
             enc("ADD", rd=12, rs1=0, imm=0x777),     # post-loop marker
             # EXIT. Without it a warp runs off the end of its program, walks
             # through the NOP padding and falls into the NEXT warp's code,
@@ -249,7 +264,9 @@ async def sm_x7_branch_target_is_absolute_index(dut):
         # loop:
         enc("ADD", rd=11, rs1=11, imm=3),
         enc("SUB", rd=10, rs1=10, imm=1),
-        enc("BRANCH", rs1=10, imm=loop_idx),
+        # predicated BRANCH: the ISA has no register-conditional branch.
+        enc("SETP", rd=setp_rd(CMP_LT, 1), rs1=0, rs2=10),         # p1 = (0 < r10)
+        enc("BRANCH", imm=loop_idx, pred=1),
         enc("ADD", rd=12, rs1=0, imm=0x777),
         enc("BARRIER", imm=0xFFF),                # EXIT
     ]
@@ -269,6 +286,63 @@ async def sm_x7_branch_target_is_absolute_index(dut):
                 f"execute the right number of iterations")
 
     dut._log.info("absolute-index BRANCH: 3-trip loop reached acc=9")
+
+
+@cocotb.test()
+async def sm_x7_setp_honours_all_six_conditions(dut):
+    """SETP's condition field selects the comparison; it is not always LT.
+
+    titan_x7_sm used to hardwire signed less-than and ignore rd[4:2], so five
+    of the ISA's six TX6_CMP_* comparisons silently executed as LT. No suite
+    caught it because every SETP in these tests happened to want LT -- which
+    is exactly why this one does not.
+
+    The operands are chosen so a "LT regardless of the condition" defect is
+    visible rather than merely possible: rs1 = -1, rs2 = 1 gives a DIFFERENT
+    answer for four of the six conditions than signed LT does, and it also
+    separates signed from unsigned (LT is true, LTU is false on the same
+    bits). If the condition field were ignored, all six would read 1 and four
+    would be wrong.
+
+        cond  EQ  NE  LT  GE  LTU  GEU
+        want   0   1   1   0    0    1
+
+    Each result is captured by a predicated ADD: r20+c stays at its reset 0
+    unless the predicate came out true, so a false predicate is observable
+    rather than indistinguishable from "did not run".
+    """
+    await boot(dut)
+
+    base = 0x40
+    want = [0, 1, 1, 0, 0, 1]      # EQ, NE, LT, GE, LTU, GEU for (-1, 1)
+    body = [
+        enc("SUB", rd=1, rs1=0, imm=1),       # r1 = 0 - 1 = 0xFFFFFFFF
+        enc("ADD", rd=2, rs1=0, imm=1),       # r2 = 1
+    ]
+    for c in range(6):
+        body.append(enc("SETP", rd=setp_rd(c, 1), rs1=1, rs2=2))
+        body.append(enc("ADD", rd=20 + c, rs1=0, imm=1, pred=1))
+    body.append(enc("BARRIER", imm=0xFFF))    # EXIT
+
+    prog = {base + i * 4: word for i, word in enumerate(body)}
+    cocotb.start_soon(imem_model(dut, prog))
+
+    dut.warp_pc_in.value = pack_pcs([base] + [0] * (NUM_WARPS - 1))
+    dut.warp_active.value = 0b1
+    await ClockCycles(dut.clk, 400)
+
+    names = ("EQ", "NE", "LT", "GE", "LTU", "GEU")
+    for c in range(6):
+        lanes = await read_reg(dut, 0, 20 + c)
+        for ln, got in enumerate(lanes):
+            assert got == want[c], (
+                f"SETP {names[c]}(-1, 1) lane {ln}: r{20 + c} = {got}, "
+                f"expected {want[c]} -- the condition field in rd[4:2] is "
+                f"not selecting the comparison")
+
+    dut._log.info(
+        "SETP: all six TX6_CMP_* conditions on (-1, 1) -> "
+        + ", ".join(f"{n}={w}" for n, w in zip(names, want)))
 
 
 @cocotb.test()

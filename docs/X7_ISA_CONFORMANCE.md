@@ -1,7 +1,99 @@
-# titan_x7_sm vs the Titan ISA — three divergences found before integration
+# titan_x7_sm vs the Titan ISA — five divergences, three found by reading and two by running
 
 *Written 2026-08-01, while starting priority 1 of
 `docs/HANDOFF_NEXT_SESSION.md`: wiring `titan_x7_sm` into `titan_x5_gpu_top`.*
+*Extended 2026-08-04, when the shim actually landed in the chip and the
+full-chip render test found a fourth divergence within one run.*
+
+---
+
+## Update, 2026-08-04: the prediction in this document was correct
+
+The closing section below said reading had found three divergences and that
+"there is no reason to believe reading found all of them". It had not.
+Swapping `titan_x7_sm_shim` into `titan_x5_gpu_top` and running the full-chip
+render test failed **on the first attempt**, and the diagnosis found two more.
+
+### 4. BRANCH was conditional on rs1
+
+```verilog
+mp_tk = (xi_a[31:0] != 32'd0);      // "branch if rs1 != 0"
+```
+
+There is no register-conditional branch in this ISA. BRANCH is
+**unconditional, gated only by its predicate** — that is what SETP and
+P1..P3 exist for. Three definitions agree, and X7 was the outlier:
+
+| Component | Taken when |
+|:--|:--|
+| `driver/titan_x6_isa.h` | `pc = imm`; honors pred |
+| `driver/titan_x6_gpu_model.c:318` | always — `next_pc = imm`, no register read |
+| `rtl/core/titan_x5_pipeline.v:316` | `id_exec && dec_is_branch`, where `id_exec` folds in the predicate and nothing else |
+| **`rtl/core/titan_x7_sm.v`** | **`rs1 != 0`** |
+
+Because BRANCH's rs1 field is unused, a compiled `BRANCH #target` encodes
+rs1 = R0. X7 read zero and **fell through every unconditional branch it was
+ever given**. In the render test that meant executing the poison instruction
+the branch exists to skip: **117 of 181 pixels came back wrong-path.**
+
+Fixed: `mp_tk = &xi_mask`, where `xi_mask` is the instruction's per-lane
+predicate. That reproduces x5's rule exactly — x5 executes only on a
+uniformly-true predicate (`id_pred_ok = id_pred_all_true`), so a divergent or
+all-false mask falls through.
+
+### 5. SETP ignored its condition field
+
+```verilog
+x1_pval[i] <= ($signed(xi_a) < $signed(xi_b));   // always LT
+```
+
+SETP's `rd` is `{cond[2:0], pdst[1:0]}`, and `cond` selects one of six
+`TX6_CMP_*` comparisons. X7 implemented signed less-than and discarded
+`cond`, so **five of the six conditions silently executed as LT**.
+`titan_x5_pipeline.v`'s `setp_lane_gen` implements all six; so does the C
+oracle; and `tb/test_compute_kernels.py::test_setp_conditions` sweeps all
+six — so this would have failed the moment X7 ran the deep suite.
+
+Fixed with a `setp_cmp` function mirroring x5's mux.
+
+### Why the suites still did not catch either one
+
+The same hole, for the third time. `test_sm_x7.py` and `test_sm_x7_warps.py`
+wrote their loops as `enc("BRANCH", rs1=10, imm=loop_idx)` — "branch while
+r10 != 0" — which is the invented rule, not the ISA. The tests and the RTL
+agreed with each other and with nothing else.
+
+Both suites now use the idiom the compiler actually emits: `SETP` writes a
+predicate, `BRANCH` is predicated on it.
+
+**And fixing the tests exposed a second-order trap.** Every SETP in those
+suites passed `rd=1`, written meaning "less than" but encoding
+`{cond=EQ, pdst=P1}`. It only behaved as LT because the RTL ignored `cond`.
+Once `cond` was honoured, a bare `rd=1` silently became EQ. The suites now
+build the field explicitly via `setp_rd(CMP_LT, 1)`.
+
+### Mutation tests
+
+| Mutation | Result |
+|:--|:--|
+| BRANCH back to `xi_a[31:0] != 0` | **caught** — `sm7` and `sm7warp` both FAIL |
+| SETP condition field ignored (forced LT) | **caught** — `SETP EQ(-1, 1) lane 0: r20 = 1, expected 0` |
+
+The SETP mutation needed a new test to catch it: every pre-existing SETP in
+these suites wanted LT, so forcing LT was invisible.
+`sm_x7_setp_honours_all_six_conditions` compares `(-1, 1)`, chosen because
+four of the six conditions disagree with signed LT on those operands and it
+also separates signed from unsigned (LT true, LTU false on the same bits).
+If `cond` is ignored all six read 1 and four are wrong.
+
+### The generalisable lesson, restated
+
+Reading found three divergences. **Running the design inside the chip found
+two more in a single test.** The static opcode-map check recommended below is
+still worth having, but it would have caught neither of these — both are
+semantic, not encoding. What caught them was a self-checking full-chip test
+with a deliberate trap in it. That trap (the poison instruction) was written
+for the x5 pipeline years of commits ago and has now earned its keep twice.
 
 ---
 

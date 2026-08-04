@@ -40,6 +40,20 @@ def enc(op, rd=0, rs1=0, rs2=0, rs3=0, imm=None, pred=0):
     return w
 
 
+# SETP packs its operands into the rd field: rd[4:2] is the comparison, per
+# TX6_CMP_* in driver/titan_x6_isa.h, and rd[1:0] is the destination
+# predicate. Spelling that out matters -- these tests used to pass rd=1,
+# which reads as {cond=EQ, pdst=P1} but was written meaning "less than". It
+# only behaved as LT because titan_x7_sm hardwired signed less-than and
+# ignored the condition field. With the condition honoured, a bare rd=1
+# silently becomes EQ.
+CMP_EQ, CMP_NE, CMP_LT, CMP_GE, CMP_LTU, CMP_GEU = range(6)
+
+
+def setp_rd(cond, pdst):
+    return (cond << 2) | pdst
+
+
 NOP = enc("ADD", rd=63, rs1=63, imm=0)
 
 
@@ -155,14 +169,27 @@ async def sm_x7_programs(dut):
     a.append(enc("XOR", rd=6, rs1=5, rs2=4))          # r6 = 400^100
     a.append(enc("MIN", rd=7, rs1=5, rs2=4))          # r7 = 100
     a.append(enc("MAX", rd=8, rs1=5, rs2=4))          # r8 = 400
-    # countdown loop: r10 = 4; do { r10-- } while (r10 != 0)
+    # countdown loop: r10 = 4; do { r10-- } while (0 < r10)
     a.append(enc("ADD", rd=10, rs1=0, imm=4))
     # ISA BRANCH target is an ABSOLUTE INSTRUCTION INDEX (see the compiler's
     # fixup, the C model's `next_pc = imm`, and titan_x5_pipeline), not a
     # PC-relative offset.
+    #
+    # BRANCH IS UNCONDITIONAL, GATED ONLY BY ITS PREDICATE. This loop used to
+    # be written `enc("BRANCH", rs1=10, imm=loop_idx)`, i.e. "branch while
+    # r10 != 0" -- a register condition that appears in no definition of this
+    # ISA. titan_x7_sm.v implemented that same invented rule, so the test and
+    # the RTL agreed with each other and with nothing else; a test written
+    # from the same misunderstanding as the RTL cannot detect the
+    # misunderstanding. The full-chip render test is what caught it, by
+    # executing the poison instruction its BRANCH exists to skip.
+    #
+    # The ISA's loop idiom is the one the compiler emits: SETP writes a
+    # predicate, BRANCH is predicated on it.
     loop_idx = len(a)
     a.append(enc("SUB", rd=10, rs1=10, imm=1))
-    a.append(enc("BRANCH", rs1=10, imm=loop_idx))      # -> loop_idx
+    a.append(enc("SETP", rd=setp_rd(CMP_LT, 1), rs1=0, rs2=10))  # p1 = 0 < r10
+    a.append(enc("BRANCH", imm=loop_idx, pred=1))     # -> loop_idx if p1
     a.append(enc("ADD", rd=11, rs1=0, imm=0x123))     # post-loop marker
     # FP phase
     a.append(enc("ADD", rd=20, rs1=0, imm=3))
@@ -190,7 +217,8 @@ async def sm_x7_programs(dut):
     a.append(enc("LOAD", rd=42, rs1=40, imm=0x10))    # r42 = r41
     # predication: p1 = (r40 < thresh); [p1] r46 = 9 else stays 7
     a.append(enc("ADD", rd=46, rs1=0, imm=7))
-    a.append(enc("SETP", rd=1, rs1=40, imm=0x800))    # p1 = r40 < 0x800
+    # p1 = (r40 < 0x800), signed. rd=1 alone would encode cond=EQ.
+    a.append(enc("SETP", rd=setp_rd(CMP_LT, 1), rs1=40, imm=0x800))
     a.append(enc("ADD", rd=46, rs1=0, imm=9, pred=1))
     for pc, w in enumerate(a):
         prog[pc * 4] = w

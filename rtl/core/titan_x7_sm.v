@@ -31,15 +31,24 @@
  * AGU/REQ/RESP) | WB (3 ports).
  *
  * ISA: Titan X5 v2 (shared decoder titan_x5_decoder). Notes:
- *   - BRANCH: taken if lane0(rs1) != 0; target = pc + (sext(imm12) << 2).
+ *   - BRANCH: UNCONDITIONAL, gated only by its predicate. rs1 is not read.
+ *     target = absolute instruction index (imm12), scaled <<2 to a byte PC.
  *   - LOAD/STORE: addr(lane) = rs1(lane) + (use_imm ? zext(imm) : rs2);
  *     STORE data = rs3.
- *   - SETP: preds[rd[1:0]] = per-lane signed (rs1 < rs2); p0 is
- *     hardwired all-ones. Predicated ops write only enabled lanes.
+ *   - SETP: rd = {cond[2:0], pdst[1:0]}. cond selects one of the six
+ *     TX6_CMP_* comparisons (EQ/NE/LT/GE/LTU/GEU); the result is a per-lane
+ *     mask in preds[pdst]. p0 is hardwired all-ones. Predicated ops write
+ *     only enabled lanes.
  *   - CVT: imm[0]=0 int->float (RNE); imm[0]=1 float->int (truncate).
- *   - RSQRT: fast inverse-sqrt seed (0x5F3759DF trick), refine in SW.
  *   - DIV, SIN, COS, atomics: not implemented in hardware (DIV/SIN/COS
  *     are compiler-expanded on real GPUs too); they retire with rd=0.
+ *
+ * This comment block described the pre-conformance semantics for a while
+ * after the RTL had moved on -- BRANCH as a register test, SETP as a bare
+ * signed less-than, and an RSQRT on opcode 29 that is not in this ISA at
+ * all. Four divergences from driver/titan_x6_isa.h have now been found in
+ * this module; see docs/X7_ISA_CONFORMANCE.md before trusting any statement
+ * about what an opcode here does.
  */
 module titan_x7_sm #(
     parameter NUM_WARPS = 8,
@@ -476,6 +485,34 @@ module titan_x7_sm #(
         end
     endfunction
 
+    // SETP comparison, per TX6_CMP_* in driver/titan_x6_isa.h. The condition
+    // travels in rd[4:2] and the predicate destination in rd[1:0].
+    //
+    // This module used to hardwire signed less-than and ignore the condition
+    // field entirely, so five of the ISA's six comparisons silently executed
+    // as LT. titan_x5_pipeline.v implements all six (its setp_lane_gen block
+    // is the reference this mirrors), the C oracle implements all six, and
+    // tb/test_compute_kernels.py::test_setp_conditions sweeps all six -- so
+    // the divergence would have shown up as five failing conditions the
+    // moment X7 ran that suite. 6 and 7 are unassigned and read false, which
+    // is x5's behaviour too.
+    function setp_cmp;
+        input [2:0]  cond;
+        input [31:0] a;
+        input [31:0] b;
+        begin
+            case (cond)
+                3'd0: setp_cmp = (a == b);                      // EQ
+                3'd1: setp_cmp = (a != b);                      // NE
+                3'd2: setp_cmp = ($signed(a) <  $signed(b));    // LT  (signed)
+                3'd3: setp_cmp = ($signed(a) >= $signed(b));    // GE  (signed)
+                3'd4: setp_cmp = (a <  b);                      // LTU
+                3'd5: setp_cmp = (a >= b);                      // GEU
+                default: setp_cmp = 1'b0;
+            endcase
+        end
+    endfunction
+
     // int -> float, round-to-nearest-even
     function [31:0] i2f;
         input [31:0] x;
@@ -704,7 +741,35 @@ module titan_x7_sm #(
             mp_tk    = 1'b0;
             mp_tgt   = 32'd0;
             if (xi_v && xi_br) begin
-                mp_tk   = (xi_a[31:0] != 32'd0);
+                // ISA SEMANTICS: BRANCH is UNCONDITIONAL, gated only by its
+                // PREDICATE. It does not read rs1. This module used to compute
+                //     mp_tk = (xi_a[31:0] != 32'd0);
+                // a "branch if rs1 != 0" rule that exists nowhere in the ISA
+                // -- the fourth divergence found in this core, and the first
+                // one caught by a test rather than by reading (see
+                // docs/X7_ISA_CONFORMANCE.md). The other three definitions
+                // agree with each other and not with that:
+                //   driver/titan_x6_isa.h      pc = imm; honors pred
+                //   driver/titan_x6_gpu_model.c  next_pc = imm  (no reg read)
+                //   rtl/core/titan_x5_pipeline.v pc_redirect_valid =
+                //                                  id_exec && dec_is_branch,
+                //                                where id_exec folds in the
+                //                                predicate and nothing else
+                //
+                // The condition mechanism in this ISA is SETP writing P1..P3,
+                // not a register compare. BRANCH's rs1 field is unused, so a
+                // compiled `BRANCH #target` encodes rs1 = R0 -- which reads
+                // zero, so the old rule made every compiled unconditional
+                // branch fall through. In the full-chip render test that ran
+                // the poison instruction the branch exists to skip: 117 of
+                // 181 pixels came back wrong-path.
+                //
+                // x5 takes the branch iff the predicate is uniformly true
+                // (titan_x5_pipeline.v: id_pred_ok = id_pred_all_true); a
+                // divergent or all-false mask falls through. xi_mask is this
+                // instruction's per-lane predicate (P0 is all-ones), so the
+                // reduction AND reproduces that rule exactly.
+                mp_tk   = &xi_mask;
                 mp_tgt  = {18'd0, xi_imm[11:0], 2'b00};
                 mp_warp = xi_w;
                 if (mp_tk != xi_pt || (mp_tk && mp_tgt != xi_ptg))
@@ -935,8 +1000,10 @@ module titan_x7_sm #(
                 for (i = 0; i < LANES; i = i + 1) begin
                     x1_res[i*32 +: 32] <= int_alu1(xi_op, xi_a[i*32 +: 32],
                                                    xi_b[i*32 +: 32]);
-                    x1_pval[i] <= ($signed(xi_a[i*32 +: 32]) <
-                                   $signed(xi_b[i*32 +: 32]));
+                    // SETP condition code lives in rd[4:2]; rd[1:0] is the
+                    // predicate destination and is latched into x1_ppos.
+                    x1_pval[i] <= setp_cmp(xi_rd[4:2], xi_a[i*32 +: 32],
+                                                       xi_b[i*32 +: 32]);
                 end
 
                 // branch resolution (lane 0 of rs1)
