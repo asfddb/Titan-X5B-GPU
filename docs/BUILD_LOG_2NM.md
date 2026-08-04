@@ -494,19 +494,39 @@ cycle_count = waited_windows * 1000 + ~9
 quantised to 1,000 cycles, and carrying 3,000 cycles of pure waiting after
 the last write. Both builds ran 10 windows, so both printed 10,009.
 
-The framebuffer write timestamps show what it hid:
+The framebuffer write timestamps show what it hid. Both columns below come
+from the *same* build of the testbench, counting *committed* AXI writes:
 
 | | x5 SM | X7 shim |
 |:--|--:|--:|
-| first framebuffer write | cycle 1,227 | cycle 3,051 |
-| **last framebuffer write** | **cycle 6,987** | **cycle 6,843** |
+| first framebuffer write | cycle 1,171 | cycle 2,035 |
+| last framebuffer write | cycle 6,989 | cycle 6,979 |
+| **write span** | **5,818** | **4,944** |
 | reported "Total Clock Cycles" | 10,009 | 10,009 |
 
-A 144-cycle difference rounded to zero. X7 also starts writing **1,824
-cycles later** — the ROP holds `i_ready` low until the shader's first R63
-export, and the shim's fetch adapter is slower to deliver the first
-instructions, which is consistent with it serialising X7's per-warp
-outstanding fetch down to one pair at a time on the chip's 32-bit port.
+Read that carefully, because it is not the result the swap was hoped to
+produce. **The render finishes at essentially the same cycle either way** —
+6,989 against 6,979, a 10-cycle difference across a ~7,000-cycle render,
+which is noise, not a speedup. What actually changed is the shape: X7 starts
+painting **864 cycles later** and then compresses the same 181 pixels into a
+span **874 cycles shorter**.
+
+The late start is explained and expected: the ROP holds `i_ready` low until
+the shader's first R63 export, and the shim serialises X7's per-warp
+outstanding fetch down to one pair at a time on the chip's 32-bit port, so
+the first instructions arrive later. The shorter span is the dual-issue core
+doing its work faster once it is fed. The two cancel.
+
+**A measurement discipline note, because the first version of this table was
+wrong.** An earlier pass reported "last write 6,987 vs 6,843, a 144-cycle
+win" from the `$display` on the AW *handshake* (`vram_awvalid &&
+vram_awready`), taken from two builds that were not identical — the X7 one
+predated the SETP fix. Two different events counted on two different trees is
+not a comparison. The counters above fire on the write *commit*, in one
+build, and they say 10 cycles, not 144. The lesson is the one this project
+keeps relearning: a matched control is not a formality, and a number that
+flatters the change you just made deserves more suspicion than one that
+does not.
 
 The test now prints the first/last write cycles alongside the old number,
 with the old number labelled. **The honest scoreboard for an SM comparison is
