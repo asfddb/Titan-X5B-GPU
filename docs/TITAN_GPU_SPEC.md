@@ -263,7 +263,7 @@ own specifications reproduces its published 104.8 TFLOPS.
 
 | Suite | Result |
 |:--|:--|
-| Full regression | **31 / 31 PASS** |
+| Full regression | **32 / 32 PASS** |
 | Deep compute kernels | **15 / 15 PASS** (45 min 8 s) |
 
 The deep suite runs the whole compiler → ISA → RTL path: loop trip counts
@@ -346,5 +346,5 @@ Stated plainly, because a specification that hides its gaps is marketing.
 | Peak low precision | 3,187 TOPS |
 | Memory | 8 × 1024-bit HBM4, 1 beat per cache line |
 | Die (compute) | 186.86 mm² at 40,000 lanes |
-| Verification | 31/31 suites, 15/15 deep, 4 formal equivalence proofs |
+| Verification | 32/32 suites, 15/15 deep, 4 formal equivalence proofs |
 | Codebase | ~20,800 lines Verilog, ~9,100 lines tests |
