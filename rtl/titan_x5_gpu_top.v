@@ -118,6 +118,16 @@ module titan_x5_gpu_top #(
     // helper wires for modules
     wire [31:0] sm_icache_addr [0:3];
     wire [3:0]  sm_icache_req;
+    // Fetch-side return path. With the I-cache in place these come from it
+    // rather than straight off the crossbar; see the icache_gen block.
+    wire [3:0]  sm_icache_gnt;
+    wire [3:0]  sm_icache_rvalid;
+    wire [31:0] sm_icache_rdata [0:3];
+    // I-cache -> crossbar master 9+i (word reads for line fills)
+    wire [31:0] ic_mem_addr [0:3];
+    wire [3:0]  ic_mem_req;
+    wire [31:0] ic_dbg_hits [0:3];
+    wire [31:0] ic_dbg_misses [0:3];
 
     // ---- kernel launch ----------------------------------------------------
     // One-shot launch pulse the cycle after reset is released: every warp of
@@ -232,11 +242,69 @@ module titan_x5_gpu_top #(
         end
     endgenerate
 
-    // masters 9-12: sm i-caches
+    // masters 9-12: sm instruction fetch
+    //
+    // Each SM's fetch port now goes through a titan_x5_icache, and it is the
+    // CACHE that talks to the crossbar. Before this, every instruction cost a
+    // full crossbar round trip, one outstanding per SM -- the dominant cost in
+    // the design (8 warps vs 1 moved the render test 8,009 -> 10,009 cycles on
+    // fetch contention alone, and it is why the dual-issue X7 SM measured
+    // SLOWER than x5 on every single-warp kernel).
+    //
+    // The cache does NOT increase the number of outstanding fetches the SM
+    // has in flight -- that stays at exactly one, which is what keeps
+    // titan_x5_pipeline's 1-bit wrong-path epoch sound. It attacks the
+    // latency of that one fetch instead. See titan_x5_icache.v.
+    //
+    // OPT-IN, AND OFF BY DEFAULT -- THERE IS AN OPEN BUG. Define
+    // TITAN_USE_ICACHE to build it in. Standalone the block is correct (suite
+    // `icache`, 6 tests including line reuse, line-boundary crossing and loop
+    // re-fetch) and the full-chip render test is 26.9% faster with it: the
+    // last framebuffer write moves from cycle 6,989 to 5,107. But every
+    // multi-line COMPUTE kernel then returns 0:
+    //
+    //   trip=2, icache off : 5,240 cycles, correct (matches the baseline)
+    //   trip=2, icache on  : 4,827 cycles, produces 0x0, expected 0xe
+    //
+    // Note the shape of that failure -- it looks like a 7.9% speedup and is
+    // actually work not being done. The render test cannot catch it: its only
+    // branch is forward and it fetches each address exactly once, so it never
+    // exercises a backward branch through the cache. Root cause not yet
+    // found; it is an integration/timing interaction, since every access
+    // pattern reproduced standalone passes.
     generate
         for (gi = 0; gi < 4; gi = gi + 1) begin : sm_i_xbar_assign
+`ifndef TITAN_USE_ICACHE
+            assign sm_icache_gnt[gi]    = xbar_m_req_ready[9+gi];
+            assign sm_icache_rvalid[gi] = xbar_m_resp_valid[9+gi];
+            assign sm_icache_rdata[gi]  = xbar_m_resp_rdata[(9+gi)*32 +: 32];
             assign xbar_m_req_valid[9+gi] = sm_icache_req[gi];
             assign xbar_m_req_addr[(9+gi)*32 +: 32] = sm_icache_addr[gi];
+            assign ic_dbg_hits[gi]   = 32'd0;
+            assign ic_dbg_misses[gi] = 32'd0;
+`else
+            titan_x5_icache #(
+                .ADDR_WIDTH(32),
+                .LINE_BYTES(64),        // 16 instructions per line
+                .SETS(64)               // 4 KiB per SM, direct-mapped
+            ) u_icache (
+                .clk(clk), .rst_n(rst_n),
+                .core_addr  (sm_icache_addr[gi]),
+                .core_req   (sm_icache_req[gi]),
+                .core_gnt   (sm_icache_gnt[gi]),
+                .core_rdata (sm_icache_rdata[gi]),
+                .core_rvalid(sm_icache_rvalid[gi]),
+                .mem_addr   (ic_mem_addr[gi]),
+                .mem_req    (ic_mem_req[gi]),
+                .mem_gnt    (xbar_m_req_ready[9+gi]),
+                .mem_rdata  (xbar_m_resp_rdata[(9+gi)*32 +: 32]),
+                .mem_rvalid (xbar_m_resp_valid[9+gi]),
+                .dbg_hits   (ic_dbg_hits[gi]),
+                .dbg_misses (ic_dbg_misses[gi])
+            );
+            assign xbar_m_req_valid[9+gi] = ic_mem_req[gi];
+            assign xbar_m_req_addr[(9+gi)*32 +: 32] = ic_mem_addr[gi];
+`endif
             assign xbar_m_req_wdata[(9+gi)*32 +: 32] = 32'h0;
             assign xbar_m_req_write[9+gi] = 1'b0;
         end
@@ -411,7 +479,7 @@ module titan_x5_gpu_top #(
 `endif
                 .clk(clk),
                 .rst_n(rst_n),
-                .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_gnt(xbar_m_req_ready[9+gi]), .l1_icache_rdata(xbar_m_resp_rdata[(9+gi)*32 +: 32]), .l1_icache_rvalid(xbar_m_resp_valid[9+gi]),
+                .l1_icache_addr(sm_icache_addr[gi]), .l1_icache_req(sm_icache_req[gi]), .l1_icache_gnt(sm_icache_gnt[gi]), .l1_icache_rdata(sm_icache_rdata[gi]), .l1_icache_rvalid(sm_icache_rvalid[gi]),
 
                 .dbus_req_valid(cxb_m_req_valid[gi]),
                 .dbus_req_ready(cxb_m_req_ready[gi]),

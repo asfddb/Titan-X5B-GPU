@@ -48,6 +48,18 @@ def sm_flavour():
     return v
 
 
+def icache_on():
+    """Whether the build includes the per-SM instruction cache.
+
+    TITAN_ICACHE=0 restores the pre-cache behaviour (every instruction fetch
+    is its own crossbar round trip) so the two can be measured against each
+    other on one tree.
+    """
+    # Default OFF: the block has an open bug in the chip (multi-line compute
+    # kernels return 0). See the note in rtl/titan_x5_gpu_top.v.
+    return os.environ.get("TITAN_ICACHE", "0").strip() in ("1", "on", "yes")
+
+
 def _sim_path(warp_mask):
     # The SM flavour is part of the image identity, not just the warp mask.
     # Without it, flipping TITAN_SM changes no source file, so the mtime reuse
@@ -55,8 +67,9 @@ def _sim_path(warp_mask):
     # suite would silently report the previous SM's results. That is exactly
     # the stale-image failure recorded in docs/BUILD_LOG_2NM.md, where a
     # control experiment passed when it should have failed.
+    ic = "ic" if icache_on() else "noic"
     return os.path.join(_BUILD_DIR,
-                        f"compute_{sm_flavour()}_w{warp_mask:02x}.vvp")
+                        f"compute_{sm_flavour()}_{ic}_w{warp_mask:02x}.vvp")
 
 
 def _tool(name):
@@ -120,6 +133,8 @@ def build(warp_mask=0x01, force=False):
            "-I", RTL, "-o", sim]
     if sm_flavour() == "x7":
         cmd.insert(4, "-DTITAN_USE_X7_SM")
+    if icache_on():
+        cmd.insert(4, "-DTITAN_USE_ICACHE")
     cmd += sources
     proc = subprocess.run(cmd, capture_output=True, text=True)
     errs = [l for l in (proc.stderr or "").splitlines() if "error" in l.lower()]
@@ -201,8 +216,10 @@ def run(program, n_res, data=None, params=None, warp_regs=None,
         # "Total Clock Cycles" is quantised to its 1000-cycle quiesce window
         # and cannot resolve a difference smaller than that (see the note in
         # tb/tb_titan_x5_gpu_top.v). Visible under `pytest -s`; grep TITAN_CYCLES.
-        print(f"TITAN_CYCLES sm={sm_flavour()} warps={warp_mask:#04x} "
-              f"cycles={cycles} timed_out={bool(timed_out)}", flush=True)
+        print(f"TITAN_CYCLES sm={sm_flavour()} "
+              f"icache={'on' if icache_on() else 'off'} "
+              f"warps={warp_mask:#04x} cycles={cycles} "
+              f"timed_out={bool(timed_out)}", flush=True)
         return Result(words, cycles, bool(timed_out), bool(divergent), log)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
