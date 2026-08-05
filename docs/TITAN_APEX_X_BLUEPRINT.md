@@ -110,7 +110,7 @@ module; ports / cells / wire bits are the largest such variant.
 | `titan_x5_dma_engine` | 1 | 1 | 19 | 28 | 1,185 |
 | `titan_x5_flush_ctrl` | 1 | 1 | 10 | 9 | 73 |
 | `titan_x5_gddr7_pam3_phy` | 1 | 1 | 9 | 1 | 4,793 |
-| `titan_x5_gpu_top` | 1 | 1 | 43 | 31 | 55,848 |
+| `titan_x5_gpu_top` | 1 | 1 | 43 | 31 | 56,756 |
 | `titan_x5_l2_cache` | 1 | 1 | 18 | 184 | 4,322,482 |
 | `titan_x5_l2_mem_adapter` | 1 | 1 | 16 | 29 | 30,109 |
 | `titan_x5_mem_controller` | 1 | 1 | 50 | 41 | 4,094 |
@@ -242,7 +242,7 @@ Parsed from the master-assignment comments in the top level.
 | 0 | command processor |
 | 1-4 | tmus |
 | 5-8 | rops |
-| 9-12 | sm i-caches |
+| 9-12 | sm instruction fetch |
 | 13 | now free. L2 backing-store traffic used to be serialised into |
 | 14-16 | reserved (previously per-SM scalar D-cache ports) |
 | 17 | dma engine |
@@ -335,7 +335,7 @@ the predicate as a per-lane write mask.
 
 ## 8. In `rtl/`, but NOT in the chip
 
-**31 of 81 modules** in `rtl/` are not reachable
+**31 of 82 modules** in `rtl/` are not reachable
 from the top level in either SM build. Some are verified blocks waiting
 to be connected, some are scaffolding for a larger part. A reader
 looking at the directory listing would reasonably assume otherwise,
