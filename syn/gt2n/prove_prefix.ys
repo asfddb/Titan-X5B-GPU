@@ -1,0 +1,7 @@
+# titan_x7_prefix_add == a + b + cin, W=106, all inputs.
+# No -DTITAN_FAST_SIM: the structural Kogge-Stone tree is what synthesis
+# builds, so it is what must be proven.
+read_verilog rtl/common/titan_x7_prefix_add.v syn/gt2n/prove_prefix.v
+hierarchy -top prefix_equiv
+proc; opt -full; flatten; opt -full
+sat -verify -prove diff 1'b0 prefix_equiv

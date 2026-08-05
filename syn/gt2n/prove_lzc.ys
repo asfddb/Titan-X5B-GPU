@@ -1,0 +1,7 @@
+# titan_x7_lzc == the 128-deep linear priority scan it replaced, all inputs.
+# No -DTITAN_FAST_SIM: with it defined the DUT *becomes* the reference loop
+# and the proof passes vacuously.
+read_verilog rtl/common/titan_x7_lzc.v syn/gt2n/prove_lzc.v
+hierarchy -top lzc_equiv
+proc; opt -full; flatten; opt -full
+sat -verify -prove diff 1'b0 lzc_equiv

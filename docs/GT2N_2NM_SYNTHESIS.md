@@ -431,12 +431,59 @@ simulates in reasonable time: 16 PEs already exceeds 9 minutes under Icarus
 (section 7.4). Simulating 20,000 lanes is not feasible here and is not
 claimed.
 
+## 9.5 The published 2.49 GHz was not reproducible from this repo (2026-08-04)
+
+Re-running the headline synthesis as a check found the committed tooling
+could not produce the committed number. Two separate faults:
+
+**The documented command did not run at all.** It passed only
+`rtl/fpu/titan_x7_fp32_fma_pipe.v`, but that module instantiates
+`titan_x7_prefix_add` and `titan_x7_lzc`, so `hierarchy -check` aborts:
+
+```
+ERROR: Module `\titan_x7_lzc' referenced in module
+       `\titan_x7_fp32_fma_pipe' in cell `\u_e6_lzc' is not part of the design.
+```
+
+`run_gt2n.sh` reports that as `FAIL` in every one of the ten VT/width rows,
+with area 0.00 — so the failure looked like a tool or PDK problem rather than
+a missing argument.
+
+**`run_gt2n.sh` was missing the buffering pass.** With the dependencies
+supplied it ran, but produced **572.18 ps / 457.78 µm²** at elvt/w31,
+TARGET_PS=200 — not 401.81 ps / 476.85 µm². Comparing against the ABC command
+echo preserved in `results/lzc_elvt.log`, the flow that produced the published
+number had one extra step:
+
+```
+committed:  ... &put; topo;               upsize -D 200; dnsize -D 200; stime
+original:   ... &put; topo; buffer -N 4;  upsize -D 200; dnsize -D 200; stime
+```
+
+`buffer -N 4` is exactly the pass section 7.2 credits: logic levels fell 58 →
+31 while delay fell only 13% at matched effort, which says the remaining path
+is load- and fanout-dominated, "and that is what the buffering pass then
+attacks". It was described in the prose and dropped from the script.
+
+Restored, and the number reproduces **exactly**: 476.85 µm², 401.81 ps,
+2.49 GHz at elvt/w31 — identical to the figure in section 7.2, to the
+hundredth of a picosecond.
+
+Worth stating plainly: the project's single most-quoted result was, until
+now, **not reproducible from its own tree**. Nothing was wrong with the
+measurement or the RTL; the recipe was incomplete. Re-running published
+numbers occasionally is cheap, and this is what it is for.
+
 ## 10. Reproducing
 
 ```bash
 export GT2N_ROOT=/path/to/GT2N
 export OSS_CAD=/path/to/oss-cad-suite
-./syn/gt2n/run_gt2n.sh titan_x7_fp32_fma_pipe rtl/fpu/titan_x7_fp32_fma_pipe.v
+# The FMA instantiates titan_x7_prefix_add and titan_x7_lzc, so all three
+# files must be passed or hierarchy -check fails. TARGET_PS=200 plus the
+# buffer pass in run_gt2n.sh is what produces the published 401.81 ps;
+# the default 333 gives 572.18 ps.
+TARGET_PS=200 ./syn/gt2n/run_gt2n.sh titan_x7_fp32_fma_pipe "rtl/common/titan_x7_prefix_add.v rtl/common/titan_x7_lzc.v rtl/fpu/titan_x7_fp32_fma_pipe.v"
 ```
 
 Downloads: oss-cad-suite Windows x64 363 MB (YosysHQ release 2026-07-29),

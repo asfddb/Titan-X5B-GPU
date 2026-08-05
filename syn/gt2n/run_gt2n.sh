@@ -31,7 +31,7 @@ read_verilog $SRCS
 hierarchy -check -top $TOP
 synth -top $TOP -flatten
 dfflibmap -liberty $LIB
-abc -liberty $LIB -script +strash;dc2;strash;&get,-n;&dch,-f;&nf,-D,$TARGET_PS;&put;topo;upsize,-D,$TARGET_PS;dnsize,-D,$TARGET_PS;stime
+abc -liberty $LIB -script +strash;dc2;strash;&get,-n;&dch,-f;&nf,-D,$TARGET_PS;&put;topo;buffer,-N,4;upsize,-D,$TARGET_PS;dnsize,-D,$TARGET_PS;stime
 opt_clean -purge
 stat -liberty $LIB
 EOF

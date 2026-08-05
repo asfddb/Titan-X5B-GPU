@@ -628,7 +628,11 @@ gates are expensive for an event-driven simulator.
 ```bash
 export GT2N_ROOT=/path/to/GT2N
 export OSS_CAD=/path/to/oss-cad-suite
-./syn/gt2n/run_gt2n.sh titan_x7_fp32_fma_pipe rtl/fpu/titan_x7_fp32_fma_pipe.v
+# The FMA instantiates titan_x7_prefix_add and titan_x7_lzc, so all three
+# files must be passed or hierarchy -check fails. TARGET_PS=200 plus the
+# buffer pass in run_gt2n.sh is what produces the published 401.81 ps;
+# the default 333 gives 572.18 ps.
+TARGET_PS=200 ./syn/gt2n/run_gt2n.sh titan_x7_fp32_fma_pipe "rtl/common/titan_x7_prefix_add.v rtl/common/titan_x7_lzc.v rtl/fpu/titan_x7_fp32_fma_pipe.v"
 python syn/gt2n/die_budget.py 20000 32 8
 python tb/run_regression.py
 ```
