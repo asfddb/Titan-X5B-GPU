@@ -687,9 +687,21 @@ def main():
         for name, (body, path) in module_bodies(f).items():
             bodies[name] = (body, path)
 
-    # TITAN_FAST_SIM only swaps two SAT-proven-identical primitives for
-    # behavioural ones; it changes no structure. TITAN_USE_X7_SM does.
-    defines = ["TITAN_FAST_SIM"] + (["TITAN_USE_X7_SM"] if args.sm == "x7" else [])
+    # TITAN_FAST_SIM IS DELIBERATELY NOT DEFINED HERE.
+    #
+    # It swaps titan_x7_prefix_add and titan_x7_lzc for behavioural `+` and a
+    # loop. The two forms are SAT-proven identical in BEHAVIOUR, so it is
+    # sound for simulation -- but they are nothing alike in STRUCTURE, and a
+    # blueprint is a structural document. Defining it made the X7 build
+    # report 512 prefix adders of 2 cells each and 512 leading-zero counters
+    # of 1 cell each, for a whole-chip total of 59,212 RTL cells against the
+    # x5 build's 659,284. That reads as "X7 is a tenth the size", which is
+    # false: a 106-bit Kogge-Stone adder is hundreds of gates, and it is the
+    # structural form that every 2 nm timing number in this project is
+    # measured on. syn/gt2n/run_gt2n.sh never defines it either.
+    #
+    # It costs generation time and buys a number that means something.
+    defines = ["TITAN_USE_X7_SM"] if args.sm == "x7" else []
     design_files, reachable = reachable_files(bodies, TOP)
     mods, design_cells = run_yosys_stat(design_files, defines)
 
