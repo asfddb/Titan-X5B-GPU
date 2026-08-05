@@ -166,6 +166,13 @@ module titan_x5_noc_router #(
     reg [PTR_W:0] grant_vc  [0:4];        // winning VC on each output
     reg [2:0]     grant_in  [0:4];        // winning input port
     reg           grant_vld [0:4];
+    // Flat index of the winning input buffer, (in_port * N_VC + vc). The two
+    // halves above name the winner; this is the single number that addresses
+    // head_flit[], head_vld[] and pop[], all of which are flat. It was used in
+    // eight places before ever being declared, which Verilog's implicit-net
+    // rule quietly turned into a 1-bit wire -- simulation tolerated it,
+    // synthesis did not.
+    reg [PTR_W:0] grant     [0:4];
 
     reg [PTR_W+1:0] vc_i;
     always @(*) begin
@@ -173,6 +180,7 @@ module titan_x5_noc_router #(
             grant_vc[i]  = {(PTR_W+1){1'b0}};
             grant_in[i]  = 3'd0;
             grant_vld[i] = 1'b0;
+            grant[i]     = {(PTR_W+1){1'b0}};
             for (gi = 0; gi < N_VC; gi = gi + 1) begin
                 vc_i = {1'b0, vrr[i]} + gi;
                 if (vc_i >= N_VC) vc_i = vc_i - N_VC;
@@ -180,6 +188,10 @@ module titan_x5_noc_router #(
                     grant_vc[i]  = vc_i[PTR_W:0];
                     grant_in[i]  = vc_cand[i*N_VC + vc_i];
                     grant_vld[i] = 1'b1;
+                    // The VC is preserved across the router: an input VC lands
+                    // on the same VC of the output (see the candidate stage,
+                    // which matches head_vld[cand*N_VC + i%N_VC]).
+                    grant[i]     = vc_cand[i*N_VC + vc_i] * N_VC + vc_i[PTR_W:0];
                 end
             end
         end
@@ -249,12 +261,25 @@ module titan_x5_noc_router #(
                     out_valid[i] <= 1'b1;
                     out_vc[i*N_VC +: N_VC] <=
                         {{(N_VC-1){1'b0}}, 1'b1} << (grant[i] % N_VC);
-                    // wormhole lock follows head/tail
-                    olock[i] <= !head_flit[grant[i]][PAYLOAD_W+10]; // !tail
-                    owner[i] <= grant[i];
-                    if (!olock[i])
-                        rr[i] <= (grant[i] == 5*N_VC-1)
-                                 ? {(PTR_W+1){1'b0}} : grant[i] + 1'b1;
+                    // Wormhole lock follows head/tail.
+                    //
+                    // olock, owner and rr are all declared with 5*N_VC entries
+                    // and are read flat by the candidate stage, which indexes
+                    // them with i%N_VC and i/N_VC. Writing them at [i] here --
+                    // where i is only the output port, 0..4 -- left entries
+                    // 5..5*N_VC-1 never updated while still being read. The
+                    // slot this grant actually occupies is (out_port, vc).
+                    olock[i*N_VC + grant_vc[i]] <=
+                        !head_flit[grant[i]][PAYLOAD_W+10];      // !tail
+                    // owner holds an input PORT, per its declaration -- not a
+                    // flat index, which is what grant[i] carries.
+                    owner[i*N_VC + grant_vc[i]] <= grant_in[i];
+                    if (!olock[i*N_VC + grant_vc[i]])
+                        // rr is [2:0] and round-robins over the 5 input ports,
+                        // so it must wrap at 4. Wrapping at 5*N_VC-1 (9 when
+                        // N_VC=2) does not fit in three bits and truncated.
+                        rr[i*N_VC + grant_vc[i]] <=
+                            (grant_in[i] == 3'd4) ? 3'd0 : grant_in[i] + 3'd1;
                 end else begin
                     out_valid[i] <= 1'b0;
                     out_vc[i*N_VC +: N_VC] <= {N_VC{1'b0}};
