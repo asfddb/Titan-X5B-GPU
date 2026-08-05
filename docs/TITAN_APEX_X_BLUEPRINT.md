@@ -58,6 +58,17 @@ Three caveats attach to every physical number here:
 | Word crossbar | 20 masters, 2 slaves, 32-bit |
 | Coherent crossbar | 4 masters, MESI, 128 B lines |
 
+**"RTL cells" is not a gate count.** It is what Yosys counts after
+elaboration and before technology mapping: `$add`, `$mux`, `$dff`,
+whole memories as single cells. Mapping onto GT2N turns each of
+those into some number of standard cells, and a memory into a very
+large number of flip-flops, because **GT2N has no SRAM**. The
+mapped gate count for the whole chip is **unmeasured**: a full-chip
+`synth` run was attempted for this document and was still running
+at a 50-minute timeout, so no figure is quoted for it. The per-block
+GT2N areas that ARE measured are in
+[GT2N_2NM_SYNTHESIS.md](GT2N_2NM_SYNTHESIS.md).
+
 ---
 
 ## 2. Every module in the chip

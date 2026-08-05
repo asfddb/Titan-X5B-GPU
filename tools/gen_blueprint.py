@@ -534,6 +534,9 @@ def build_report(sm, mods, bodies, files, orphans, design_cells):
     A(f"| Total module instances | **{fmt_int(sum(tot.values()))}** |")
     if design_cells:
         A(f"| RTL cells, whole chip | **{fmt_int(design_cells)}** |")
+        rtl_cell_note = True
+    else:
+        rtl_cell_note = False
     A(f"| Top-level ports | **{len(ports)}** ({n_in} in, {n_out} out), {fmt_int(top['port_bits'])} bits |")
     A(f"| Shader cores (SM) | **{n_sm}** |")
     A(f"| Lanes per SM | **{lanes_per_sm}** |")
@@ -548,6 +551,18 @@ def build_report(sm, mods, bodies, files, orphans, design_cells):
     A(f"| Word crossbar | {geti(xbar, 'NUM_MASTERS')} masters, {geti(xbar, 'NUM_SLAVES')} slaves, {geti(xbar, 'DATA_WIDTH', 32)}-bit |")
     A(f"| Coherent crossbar | {geti(cxb, 'NUM_MASTERS')} masters, MESI, {line_b} B lines |")
     A("")
+    if rtl_cell_note:
+        A("**\"RTL cells\" is not a gate count.** It is what Yosys counts after")
+        A("elaboration and before technology mapping: `$add`, `$mux`, `$dff`,")
+        A("whole memories as single cells. Mapping onto GT2N turns each of")
+        A("those into some number of standard cells, and a memory into a very")
+        A("large number of flip-flops, because **GT2N has no SRAM**. The")
+        A("mapped gate count for the whole chip is **unmeasured**: a full-chip")
+        A("`synth` run was attempted for this document and was still running")
+        A("at a 50-minute timeout, so no figure is quoted for it. The per-block")
+        A("GT2N areas that ARE measured are in")
+        A("[GT2N_2NM_SYNTHESIS.md](GT2N_2NM_SYNTHESIS.md).")
+        A("")
     A("---")
     A("")
     A("## 2. Every module in the chip")
