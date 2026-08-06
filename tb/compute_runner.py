@@ -72,7 +72,10 @@ def _sim_path(warp_mask):
     # flavour is: they change no source file, so without them in the name the
     # mtime reuse check below would hand back an image built without them.
     xd = extra_defines()
-    suffix = ("_" + "_".join(sorted(xd))) if xd else ""
+    # `=` and other punctuation from -DNAME=value defines are stripped so the
+    # image name stays a plain filename on every platform.
+    safe = ["".join(c if c.isalnum() else "_" for c in d) for d in sorted(xd)]
+    suffix = ("_" + "_".join(safe)) if safe else ""
     return os.path.join(_BUILD_DIR,
                         f"compute_{sm_flavour()}_{ic}_w{warp_mask:02x}"
                         f"{suffix}.vvp")

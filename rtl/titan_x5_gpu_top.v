@@ -283,10 +283,22 @@ module titan_x5_gpu_top #(
             assign ic_dbg_hits[gi]   = 32'd0;
             assign ic_dbg_misses[gi] = 32'd0;
 `else
+            // Geometry is overridable so it can be swept without editing RTL:
+            // `-DTITAN_ICACHE_LINE_BYTES=32 -DTITAN_ICACHE_SETS=128` keeps the
+            // same 4 KiB with half the cold-miss fill. The fill is sequential
+            // and blocking, so LINE_BYTES/4 is exactly the number of crossbar
+            // round trips an SM waits through before it sees ANY instruction
+            // from a new line -- which is what makes short kernels pay.
+`ifndef TITAN_ICACHE_LINE_BYTES
+  `define TITAN_ICACHE_LINE_BYTES 64
+`endif
+`ifndef TITAN_ICACHE_SETS
+  `define TITAN_ICACHE_SETS 64
+`endif
             titan_x5_icache #(
                 .ADDR_WIDTH(32),
-                .LINE_BYTES(64),        // 16 instructions per line
-                .SETS(64)               // 4 KiB per SM, direct-mapped
+                .LINE_BYTES(`TITAN_ICACHE_LINE_BYTES),
+                .SETS(`TITAN_ICACHE_SETS)
             ) u_icache (
                 .clk(clk), .rst_n(rst_n),
                 .core_addr  (sm_icache_addr[gi]),

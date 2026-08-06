@@ -3,128 +3,257 @@
 Read this first. It is the full context for continuing work on Titan X5.
 
 **Repo:** `asfddb/Titan-X5B-GPU`
-**Branch:** `claude/titan-x5-gpu-conversion-lf6udk` (all work goes here)
+**Working branch:** `fix/idreg-forwarding-hole`, cut from local `master`.
+Note that local `master` is ahead of `origin/master`; `git push` still does not
+work here (see section 5).
 
 ---
 
-## 0. STATE AS OF 2026-08-04 — the X7 SM is in the chip, and it is slower
+## 0. STATE AS OF 2026-08-06 — the I-cache bug is fixed, and it was never an I-cache bug
 
-Priority 1 ("wire the X7 SM into `titan_x5_gpu_top`") is **done**. Build it
-with `` -DTITAN_USE_X7_SM ``; leave the define off for the x5 pipeline. Both
-SMs build from one tree. `TITAN_SM=x7` selects it for the compute harness.
+The previous session left the instruction cache **disabled** with an open bug:
+26.9% faster on the render test, but every multi-line compute kernel returned
+0. The note at the instantiation site said "root cause not yet found; it is an
+integration/timing interaction."
 
-**Verified:** regression **32/32**, deep compute **15/15 on both SMs**,
-render test passes on both (181 pixels, 0 out of bounds, 0 poison).
+It is neither an integration issue nor an I-cache bug. It is a **one-cycle
+forwarding hole in `titan_x5_pipeline.v` that has been there the whole time**,
+and the cache is simply the first thing fast enough to expose it.
 
-### What landing it found
+### The bug
 
-The swap failed on its first full-chip run — **117 of 181 pixels wrong-path**
-— and the diagnosis found two more ISA divergences in `titan_x7_sm`, on top
-of the three `X7_ISA_CONFORMANCE.md` already recorded:
+An instruction spends one cycle in the ID *register* (`id_valid_reg`, `id_rd`)
+between being popped from the instruction FIFO and launching into EX. During
+that cycle it is in **none** of the three forwarding sources — `ex_*`, `mem_*`
+and `wb_*` all describe stages it has not reached — and no interlock covered
+it. A consumer popped in that same cycle read its operand from the register
+file and got the pre-write value.
 
-- **BRANCH was conditional on rs1.** `mp_tk = (xi_a[31:0] != 32'd0)`. This
-  ISA has no register-conditional branch; BRANCH is unconditional and gated
-  only by its predicate. Since its rs1 field is unused, a compiled
-  `BRANCH #target` encodes rs1 = R0 — so X7 **fell through every
-  unconditional branch it was ever given**.
-- **SETP ignored its condition field**, always doing signed less-than, so
-  five of the six `TX6_CMP_*` comparisons silently executed as LT.
+Caught with a new `TITAN_ID_TRACE` build on the trip=1 counted loop:
 
-Both fixed and mutation-tested. `sm7`/`sm7warp` had passed throughout because
-their loops were written `enc("BRANCH", rs1=10, ...)` — the same invented
-rule the RTL implemented. **That is now three separate times in this project
-that a test written from the same misunderstanding as the RTL failed to
-detect the misunderstanding.**
+```
+IDTRACE  op=21 rs1=2(00000000) rs2=4(00000000) cond=3 res=ffffffff
+IDTRACE+ idreg(v=1 rd=4) ex(v=0 rd=3) mem(v=1 rd=3) wb(v=0 rd=2)
+```
 
-### THE RENDER TEST CANNOT SCORE AN SM. Do not use it for that.
+`SETP.GE p1, i, bound` read `bound` as 0 while `li bound, 1` sat in the ID
+register with `rd=4`. `GE(0,0)` is true, so the loop-exit branch fired on
+iteration zero and the kernel stored 0 — exactly the reported symptom.
 
-Its "Total Clock Cycles" is `waited_windows * 1000 + ~9` — the quiesce poll
-loop's window count. It is quantised to 1,000 cycles, includes 3,000 cycles
-of pure waiting, and measures when the framebuffer write stream went quiet.
-**Both SMs report exactly 10,009.** The test now also prints the first/last
-committed framebuffer write, which is the honest figure.
+**Why it hid for the entire project:** without a cache, every fetch is a full
+crossbar round trip, so consecutive instructions reached ID roughly 48 cycles
+apart and every producer had long since written back. The hole needs a
+producer-consumer distance of one cycle, and nothing in this design could
+produce that until the cache removed the latency. It is not SETP-specific
+either — the same trace shows the `end:` block's address computation reading a
+stale R5.
 
-It remains an excellent *correctness* test — its poison trap has now caught a
-wrong-path bug twice, once for x5 and once for X7.
+**This is the fourth time in this project that slow fetch or a shared
+misunderstanding hid a real defect.** The pattern is worth naming: a test that
+passes only because the machine is slow is not passing.
 
-For performance use `tb/compute_runner.py`, which prints an exact per-kernel
-`TITAN_CYCLES` line under `pytest -s`.
+### The fix
 
-### The measurement: 15 matched pairs, exact per-kernel cycles
+An interlock, not a new forwarding path — the producer's result does not exist
+yet, so there is nothing to forward. `id_ready` splits in two:
 
-Both columns from `tb/compute_runner.py`, same harness, same tree, deep suite
-**15/15 PASS on both SMs**.
+```
+id_issue_ok = !ex_busy && !hazard            -- EX may take the ID register
+id_ready    = id_issue_ok && !idreg_hazard   -- the FIFO head may pop
+```
 
-| Kernel | warps | x5 | X7 | Δ |
-|:--|--:|--:|--:|--:|
-| counted loop, 0 trips | 1 | 4,664 | 4,808 | +3.09% |
-| counted loop, 1 trip | 1 | 4,952 | 5,096 | +2.91% |
-| counted loop, 2 trips | 1 | 5,240 | 5,480 | +4.58% |
-| counted loop, 17 trips | 1 | 9,560 | 10,088 | +5.52% |
-| counted loop, 64 trips | 1 | 23,096 | 23,624 | +2.29% |
-| SETP EQ | 1 | 6,728 | 7,112 | +5.71% |
-| SETP NE | 1 | 6,728 | 7,121 | +5.84% |
-| SETP LT | 1 | 6,728 | 7,217 | +7.27% |
-| SETP GE | 1 | 6,728 | 7,208 | +7.13% |
-| SETP LTU | 1 | 6,728 | 7,121 | +5.84% |
-| SETP GEU | 1 | 6,728 | 7,112 | +5.71% |
-| predicated instruction skipped | 1 | 4,760 | 4,808 | +1.01% |
-| host reads results from memory | 1 | 5,164 | 5,212 | +0.93% |
-| matmul 4x4x4, bit-exact | 1 | 69,022 | 69,646 | +0.90% |
-| **predicates are per-warp** | **8** | **35,864** | **35,249** | **−1.71%** |
+`ex_launch` uses `id_issue_ok`. **Using `id_ready` there deadlocks** — it would
+hold back the very instruction whose departure clears the hazard. The ID
+register is cleared when it drains without a replacement, so the hazard
+self-clears in exactly one cycle.
 
-**X7 loses all fourteen single-warp kernels and wins the one multi-warp
-kernel.** That is not a coincidence, and it is the most useful thing this
-measurement produced.
+### Measured
 
-### Why: X7's dual-issue is cross-warp only
+**Control experiment**, trip=1, I-cache on:
 
-`titan_x7_warp_scheduler.v:91` requires `sel0_warp != i1` for the second
-issue slot, so **a single warp can never dual-issue**. 14 of the deep suite's
-15 tests run `warp_mask=0x01` — one warp — so in almost every measurement X7
-is a single-issue core paying the shim's pair-fetch overhead, and loses.
-Give it eight warps and the sign flips.
+| | result | cycles |
+|:--|:--|--:|
+| with the interlock | `0x7` correct | 5,220 |
+| interlock mutated out | `0x0` | 4,827 |
 
-Treat the −1.71% carefully: it is **one data point**, from a test built to
-prove predicate isolation rather than to benchmark, and 1.7% is small. It is
-consistent with the mechanism, not proof of it. The honest reading is
-"the only measurement where X7 *can* dual-issue is also the only one it
-wins" — which says what to measure next, not that X7 is faster.
+4,827/`0x0` is the original failure reproduced exactly. The fix is
+load-bearing.
 
-A practical aside: the X7 build simulates about **twice as fast in wall
-clock** (deep suite 27:06 against 54:43), because it has no per-ALU tensor
-arrays — 17 MB of elaborated image against 32 MB. That matters on a project
-where simulation speed is the binding constraint.
+**Matched baseline, I-cache OFF.** All 15 deep-suite kernels are
+byte-identical to the pre-fix numbers — 4,664 / 4,952 / 5,240 / 9,560 /
+23,096 / 6,728×6 / 4,760 / 5,164 / 69,022 / 35,864 — and the render test is
+byte-identical too (181 pixels, 0 poison, last write 6,989, span 5,818). The
+interlock never fires when fetch is slow, so it costs **nothing** on the old
+default path. That makes every comparison below clean.
 
-On top of that, `titan_x7_sm_shim` collapses X7's *per-warp* outstanding
-fetch to **one pair at a time globally** (`if_ready = (ifs == IF_IDLE)`), and
-each pair costs two sequential word fetches on the chip's 32-bit port. The
-shim's own header says it makes X7 correct on that port and does not widen
-fetch. That is now measured, not predicted.
+**Deep compute suite, x5, I-cache ON: 15/15 — the first time it has passed.**
 
-**So step 2 (instruction supply) is not merely the next item — it is the
-precondition for step 1 to have been worth doing.** Until fetch is widened
-and multi-warp kernels are the norm, the X7 core cannot show the IPC 1.72 it
-measures standalone. Recommended order from here:
+| kernel | I-cache off | I-cache on | Δ |
+|:--|--:|--:|--:|
+| counted loop, 0 trips | 4,664 | 5,201 | +11.51% |
+| counted loop, 1 trip | 4,952 | 5,220 | +5.41% |
+| counted loop, 2 trips | 5,240 | 5,230 | −0.19% |
+| counted loop, 17 trips | 9,560 | 5,441 | **−43.09%** |
+| counted loop, 64 trips | 23,096 | 6,104 | **−73.57%** |
+| SETP EQ | 6,728 | 7,208 | +7.13% |
+| SETP NE | 6,728 | 7,217 | +7.27% |
+| SETP LT | 6,728 | 7,217 | +7.27% |
+| SETP GE | 6,728 | 7,188 | +6.84% |
+| SETP LTU | 6,728 | 7,208 | +7.13% |
+| SETP GEU | 6,728 | 7,208 | +7.13% |
+| predicated instruction skipped | 4,760 | 5,211 | +9.47% |
+| host reads results from memory | 5,164 | 5,653 | +9.47% |
+| matmul 4×4×4, bit-exact | 69,022 | 13,476 | **−80.48%** |
+| predicates are per-warp (8 warps) | 35,864 | 6,324 | **−82.37%** |
 
-1. Widen fetch: a real I-cache, and let the shim keep more than one fetch in
-   flight. **Widening fetch requires widening the 1-bit wrong-path epoch** in
-   `titan_x5_pipeline.v`; whether X7's own 1-bit epoch is exploitable is
-   still unknown and unmeasured (see `X7_ISA_CONFORMANCE.md`).
-2. Re-measure with `warp_mask=0xFF`, where X7 can actually dual-issue.
-3. Only then judge whether X7 earns its place in the chip.
+**Full-chip render test**, self-checking, both with the interlock:
 
-### Two verification gaps this opened, both live
+| | off | on | Δ |
+|:--|--:|--:|--:|
+| first framebuffer write | 1,171 | 1,085 | −7.34% |
+| last framebuffer write | 6,989 | 5,126 | **−26.66%** |
+| write span | 5,818 | 4,041 | **−30.54%** |
+| wrong-path poison pixels | 0 | 0 | — |
 
-- **`dbg_pred_divergent` is tied to `1'b0` in the shim**, so the deep suite's
-  five `assert not res.pred_divergent` checks are **vacuous on X7**. It is
-  defensible — X7 applies the predicate as a per-lane write mask, so there is
-  no unimplemented case to flag — but nothing now proves X7's divergent
-  predication is *correct* at full-chip level.
-- **X7 still has no static ISA conformance check** of the kind
-  `compiler/test_compiler_isa.py` gives x5. Five divergences have now been
-  found in this module; three by reading and two by running. There is no
-  reason to believe five is the total.
+Regression: **34/34**.
+
+### The regressions are real — read them
+
+Six kernels got 5–11% **slower** with the cache on. That is not noise and it
+is not a measurement artefact. The fill is **sequential and blocking**: a cold
+miss costs `LINE_BYTES/4` = 16 crossbar round trips before the SM sees any
+instruction at all. A kernel that runs straight through one line once pays for
+16 words it never reuses. Anything with a loop or reuse wins enormously; a
+15-instruction straight-line kernel loses.
+
+This is a known, understood cost with a known fix — see task 2 below.
+
+### THE X7 HYPOTHESIS IN THE PREVIOUS HANDOFF IS WRONG
+
+That handoff concluded X7 lost 14 of 15 kernels because dual-issue is
+cross-warp only (`titan_x7_warp_scheduler.v:91` requires `sel0_warp != i1`),
+and predicted the sign would flip with eight warps. **It does not.**
+
+X7 also passes **15/15 with the I-cache on** — `titan_x7_sm` does not share the
+x5 pipeline's hole. Matched, both SMs, cache on:
+
+| kernel | x5 | X7 | Δ |
+|:--|--:|--:|--:|
+| counted loop, 64 trips | 6,104 | 6,756 | +10.68% |
+| SETP (six cases) | ~7,208 | ~7,240 | +0.26…+0.81% |
+| predicated skip | 5,211 | 5,211 | 0.00% |
+| host reads results | 5,653 | 5,653 | 0.00% |
+| **predicates per-warp (8 warps)** | 6,324 | 6,449 | **+1.98%** |
+| **matmul 4×4×4** | 13,476 | **10,971** | **−18.59%** |
+
+The 8-warp kernel went from **−1.71% (X7 ahead)** to **+1.98% (X7 behind)**
+once fetch was fixed. So X7's one previous win was not dual-issue at all — X7
+was merely *less starved* by the fetch port than x5, and fixing fetch removed
+that advantage.
+
+What X7 actually wins is **matmul, by 18.59%**: the one kernel with real
+instruction-level parallelism in its instruction stream. The mechanism is ILP,
+not warp count. **The thing to benchmark next is kernels with independent work
+in the instruction stream, not simply more warps.**
+
+For reference, X7 against its own pre-cache numbers: matmul 69,646 → 10,971
+(−84.25%), 8 warps 35,249 → 6,449 (−81.71%), 64-trip loop 23,624 → 6,756
+(−71.40%).
+
+### Simulation is no longer one core out of sixteen
+
+`tools/run_compute_parallel.py` runs the deep suite across every core. The
+cases are independent — each is its own `vvp` process with its own temp
+directory — so only elaboration is shared, and that is done serially up front
+(concurrent builds of the same `.vvp` path would interleave writes, and the
+mtime reuse check cannot see that happening).
+
+The x5 I-cache-on suite took **21:43 serial**. The x5 I-cache-off suite ran in
+**1,000 s wall at `-j 10`** while sharing the machine with another full run.
+The X7 suite finished in **138 s**.
+
+Every document in this project called simulation speed the binding constraint
+while using 1/16th of the machine. Use this runner.
+
+```bash
+python tools/run_compute_parallel.py            # cores-1 jobs
+python tools/run_compute_parallel.py -j 8 -k matmul
+TITAN_ICACHE=1 TITAN_SM=x7 python tools/run_compute_parallel.py
+```
+
+### New diagnostics
+
+- `TITAN_ID_TRACE` — every ID commit with the operand values SETP and BRANCH
+  actually saw, plus which stage holds which `rd`. Tagged with `%m`, so the
+  four SMs can be told apart. This is what found the bug; reach for it before
+  reading RTL.
+- `TITAN_ICACHE_TRACE` — the cache's core-side handshake.
+- `TITAN_DEFINES=A,B` in `compute_runner` adds arbitrary defines **and folds
+  them into the image identity**, without which the mtime reuse check hands
+  back an image built without them.
+- I-cache geometry is overridable:
+  `TITAN_DEFINES=TITAN_ICACHE_LINE_BYTES=32,TITAN_ICACHE_SETS=128`.
+
+---
+
+## 0b. TASKS, IN ORDER
+
+**1. Turn the I-cache on by default.** It is verified on both SMs (15/15
+each), on the render test (0 poison pixels), and regression is 34/34. The win
+is 26.7% on the render test and 43–82% on every kernel with reuse. Flip the
+``ifndef TITAN_USE_ICACHE`` sense in `rtl/titan_x5_gpu_top.v`, keep an
+opt-*out* define for bisection, and rerun the full regression plus both
+suites. **If this is already done when you read this, check `git log`.**
+
+**2. Critical-word-first, then per-word valid bits.** This is the fix for the
+5–11% short-kernel regression, and it is the single biggest remaining
+front-end win.
+   - *Critical-word-first:* fill starting at the requested word and wrap, and
+     answer the core the moment that word arrives instead of at `S_DONE`.
+     Cold-miss latency to the first instruction drops from 16 round trips to 1.
+   - *Per-word valid bits:* the real prize. Today `core_gnt` requires
+     `st == S_IDLE`, so the SM cannot fetch **anything** during a fill even if
+     the word it wants has already landed. With per-word valid, sequential
+     code streams at fill speed instead of fill-then-run.
+   - The existing `icache` suite (6 tests) asserts on **read counts, not
+     order**, so it still guards the change. Add a test that asserts the
+     critical word is returned before the fill completes — otherwise a
+     correct-but-slow implementation passes silently.
+   - Do the line-size sweep first (below); it is nearly free and tells you how
+     much of the regression is fill width versus fill latency.
+
+**3. Line-size sweep.** 32-byte lines with 128 sets keep the same 4 KiB and
+halve the cold-miss fill. Sweepable now without editing RTL. Measure before
+assuming 64 is right — it was never justified by measurement.
+
+**4. Re-benchmark X7 on ILP, not warp count.** matmul is the only kernel in
+the suite with dual-issuable ILP and X7 wins it by 18.59%. Write two or three
+more kernels with independent instruction chains and measure. That is the
+evidence that decides whether X7 earns its place in the chip — the warp-count
+theory is now falsified, so do not lean on it.
+
+**5. Widen the fetch epoch, carefully.** `titan_x5_pipeline.v`'s wrong-path
+epoch is 1 bit and is sound *only* because there is a single outstanding fetch
+per SM. Task 2's per-word valid bits do **not** change that (the SM still has
+one request in flight; the cache answers it faster). Anything that lets the SM
+have two fetches in flight requires widening the epoch first, or wrong-path
+instructions will retire. Do not do these together.
+
+### Two verification gaps still open from the previous session
+
+- `dbg_pred_divergent` is tied to `1'b0` in the X7 shim, so the deep suite's
+  five `assert not res.pred_divergent` checks are **vacuous on X7**.
+- X7 still has **no static ISA conformance check** of the kind
+  `compiler/test_compiler_isa.py` gives x5. Five divergences have been found
+  in that module so far — three by reading, two by running. There is no reason
+  to believe five is the total.
+
+### Standing working rules (from the user, still in force)
+
+No invented numbers — say "unknown and unmeasured". Mutation-test every new
+test. Control-experiment every fix. Commits end with
+`Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>`. No PRs unless asked.
+Keep this file updated; it is the living handoff.
 
 ---
 
