@@ -198,12 +198,26 @@ TITAN_ICACHE=1 TITAN_SM=x7 python tools/run_compute_parallel.py
 
 ## 0b. TASKS, IN ORDER
 
-**1. Turn the I-cache on by default.** It is verified on both SMs (15/15
-each), on the render test (0 poison pixels), and regression is 34/34. The win
-is 26.7% on the render test and 43–82% on every kernel with reuse. Flip the
-``ifndef TITAN_USE_ICACHE`` sense in `rtl/titan_x5_gpu_top.v`, keep an
-opt-*out* define for bisection, and rerun the full regression plus both
-suites. **If this is already done when you read this, check `git log`.**
+**1. Resolve the replay bug below, THEN turn the I-cache on by default.**
+
+The cache itself is ready and the evidence is strong: 15/15 on x5, 15/15 on
+X7, render test clean with **0 poison pixels**, regression 34/34, and an
+I-cache-off control that is byte-identical on all 15 kernels and the render
+test. The win is 26.7% on the render test and 43–82% on every kernel with
+reuse.
+
+**It was nevertheless left OFF by default on 2026-08-06**, and the reason is
+deliberate rather than cautious-by-default: the line-size sweep uncovered a
+**spurious instruction replay in the x5 pipeline** (next section). Enabling
+the cache changes fetch timing globally, and that timing is exactly what
+governs whether that replay is reachable. Every test the project has passes
+at 64 B — but the ID-register hole also passed every test for months, so
+"our tests pass" is weaker evidence here than it looks.
+
+Once the replay is understood: flip the ``ifndef TITAN_USE_ICACHE`` sense in
+`rtl/titan_x5_gpu_top.v`, keep an opt-*out* define for bisection, rerun the
+full regression plus both suites and the render test. **If this is already
+done when you read this, check `git log`.**
 
 **2. Critical-word-first, then per-word valid bits.** This is the fix for the
 5–11% short-kernel regression, and it is the single biggest remaining
@@ -238,6 +252,87 @@ per SM. Task 2's per-word valid bits do **not** change that (the SM still has
 one request in flight; the cache answers it faster). Anything that lets the SM
 have two fetches in flight requires widening the epoch first, or wrong-path
 instructions will retire. Do not do these together.
+
+### OPEN BUG, FOUND 2026-08-06: 16-byte I-cache lines break multi-warp predicates
+
+**Do not adopt a 16-byte line until this is understood.** The line-size sweep
+found it, and it is a correctness failure, not a performance one.
+
+```bash
+TITAN_ICACHE=1 TITAN_SM=x5 \
+TITAN_DEFINES=TITAN_ICACHE_LINE_BYTES=16,TITAN_ICACHE_SETS=256 \
+python -m pytest tb/test_compute_kernels.py::test_predicates_are_per_warp -q
+```
+
+```
+RTL      ['0xe','0x23','0x38','0x4d','0x62','0xcb','0x8c','0xa1']
+expected ['0xe','0x23','0x38','0x4d','0x62','0x77','0x8c','0xa1']
+```
+
+Warp 5 ran **29 loop trips instead of 17** (0xcb = 7×29, 0x77 = 7×17). Every
+other warp is correct. Deterministic — reproduced three times, same value.
+
+What is already known, and what it rules out:
+
+| configuration | result |
+|:--|:--|
+| 64 B / 64 sets, x5 | PASS, 6,324 cycles |
+| 32 B / 128 sets, x5 | PASS, 6,209 cycles |
+| **16 B / 256 sets, x5** | **FAIL** |
+| 16 B / 256 sets, **X7** | **PASS** |
+
+X7 passing at the same geometry **exonerates the cache, the crossbar and the
+memory path** — `titan_x7_sm` does not use `titan_x5_pipeline.v`. The bug is in
+the x5 pipeline, exposed by fill timing.
+
+It is not known whether this is pre-existing or was introduced by the
+`idreg_hazard` interlock in `cb79dab`. That interlock is verified at 64 B and
+32 B (15/15 each, plus a byte-identical I-cache-off control on all 15 kernels
+and the render test), so if it is the cause, the trigger is specific to 16 B
+fill timing. **Determine this first** — it decides whether this is a new
+regression or the fifth timing-hidden defect in this project.
+
+**The mechanism is known — it is a spurious instruction replay, not bad
+arithmetic.** `TITAN_ID_TRACE` on the failing run, warp 5's SETP sequence per
+SM:
+
+| SM | acc adds | i adds | trips |
+|:--|--:|--:|--:|
+| 0 | 18 | 18 | 17 |
+| 1 | 18 | 18 | 17 |
+| **2** | **30** | **30** | **29** |
+| 3 | 18 | 18 | 17 |
+
+Only SM2 diverges, on the same program. Its warp-5 trace:
+
+```
+12: rs1=2(0000000b) res=00000000     i = 11
+13: rs1=2(00000000) res=00000000     i = 0   <-- reset mid-loop
+```
+
+`i` resets to 0 after 12 iterations and then runs the full 17: 12 + 17 = 29,
+and 7×29 = 203 = 0xcb, the exact observed value. **`acc` does not reset.** So
+`li i, 0` re-executed on its own while `li acc, 0` did not — a single stale
+instruction retiring in the middle of the loop, long after the pre-loop
+prologue.
+
+That points squarely at the **1-bit wrong-path epoch**, which
+`titan_x5_pipeline.v` documents as sound *"only because there is a single
+outstanding fetch per SM"*. Start there. Widening `warp_epoch`, `if_epoch` and
+`fifo_epoch` to 2 bits (counters rather than a toggle) is a contained
+experiment: if 16 B then passes, the mechanism is confirmed. Note the
+in-order-FIFO argument in that comment claims ABA is impossible; either the
+argument or the implementation is wrong, and finding out which is the task.
+
+**Not yet ruled out:** whether the `idreg_hazard` interlock from `cb79dab`
+enables this. It does not touch epoch tagging or FIFO push order, but it does
+delay pops by a cycle. Control-experiment it before assuming either way.
+
+Reproduction notes: `compute_runner` captures simulator stdout into `res.log`,
+which pytest never prints — call the test function directly and dump the log
+(see the harness used for this, which wraps `cr.run`). Filter the trace by
+`%m` to separate the four SMs; the failure was invisible until SM2 was looked
+at on its own.
 
 ### Two verification gaps still open from the previous session
 
