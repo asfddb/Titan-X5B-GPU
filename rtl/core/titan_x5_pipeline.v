@@ -160,6 +160,21 @@ module titan_x5_pipeline #(
         end
     end
 
+`ifdef TITAN_FETCH_TRACE
+    // Diagnostic only, never built by default. The fetch stream as the core
+    // sees it, so an I-cache build can be diffed against a bypassed one.
+    always @(posedge clk) if (rst_n) begin
+        if (if_req && if_gnt)
+            $display("FTRACE %0t ACC pc=%08x warp=%0d ep=%0d", $time, if_pc,
+                     sched_warp_id, warp_epoch[sched_warp_id]);
+        if (if_inst_valid)
+            $display("FTRACE %0t RET inst=%08x warp=%0d ep=%0d", $time,
+                     if_inst, if_warp, if_epoch);
+        if (pc_redirect_valid)
+            $display("FTRACE %0t RDR warp=%0d", $time, pc_redirect_warp);
+    end
+`endif
+
     // instruction fifo (8 entries)
     reg [2:0]  fifo_warp [0:7];
     reg [31:0] fifo_inst [0:7];
@@ -309,6 +324,22 @@ module titan_x5_pipeline #(
     end
     assign dbg_pred_divergent = pred_divergent;
 
+`ifdef TITAN_ID_TRACE
+    // Diagnostic only, never built by default. Every ID-stage commit with the
+    // operand values SETP and BRANCH actually saw, tagged with %m so the four
+    // SMs can be told apart.
+    always @(posedge clk) if (rst_n && id_commit) begin
+        $display("IDTRACE %0t %m op=%0d warp=%0d rs1=%0d(%08x) rs2=%0d(%08x) imm=%04x setp=%0d cond=%0d pdst=%0d res=%08x predsel=%0d predval=%08x exec=%0d br=%0d",
+                 $time, dec_opcode, id_warp_raw,
+                 dec_rs1, fwd_data1[31:0], dec_rs2, fwd_data2[31:0], dec_imm,
+                 dec_is_setp, setp_cond, setp_pdst, setp_result,
+                 id_pred_sel, id_pred_val, id_exec, dec_is_branch);
+        $display("IDTRACE+ %0t %m idreg(v=%0d rd=%0d) ex(v=%0d rd=%0d) mem(v=%0d rd=%0d) wb(v=%0d rd=%0d)",
+                 $time, id_valid_reg, id_rd, ex_valid, ex_rd,
+                 mem_valid, mem_rd, wb_valid, wb_rd);
+    end
+`endif
+
     // TX6_OP_BRANCH: pc = imm (absolute instruction index).
     // Now genuinely conditional: id_exec folds in the predicate, so a branch
     // whose predicate is false falls through instead of redirecting. That is
@@ -371,8 +402,53 @@ module titan_x5_pipeline #(
     wire hazard_rs3 = fwd_rs3_ex && (ex_is_load || ex_busy);
     
     wire hazard = hazard_rs1 || hazard_rs2 || hazard_rs3;
-    
-    assign id_ready = !ex_busy && !hazard;
+
+    // ---- the ID-register forwarding hole ----------------------------------
+    // An instruction spends one cycle in the ID *register* (id_valid_reg,
+    // id_rd) between being popped from the FIFO and launching into EX. During
+    // that cycle it appears in NONE of the three forwarding sources -- ex_*,
+    // mem_* and wb_* all describe stages it has not reached -- and its result
+    // does not exist yet, so it cannot be forwarded at all. A consumer popped
+    // in that same cycle therefore read its operand from the register file and
+    // got the pre-write value.
+    //
+    // This was invisible for the whole life of the project because fetch was
+    // slow enough to hide it. With no instruction cache every fetch was a full
+    // crossbar round trip, so consecutive instructions reached ID roughly 48
+    // cycles apart and the producer had long since written back. Turning the
+    // I-cache on closes that gap to one cycle and the hole opens. That is the
+    // whole of the "I-cache breaks every multi-line compute kernel" bug
+    // recorded at the instantiation site in titan_x5_gpu_top.v: measured on
+    // the trip=1 counted loop, `SETP.GE p1, i, bound` read bound as 0 instead
+    // of 1 while `li bound, 1` sat in the ID register, so the loop-exit branch
+    // was taken on iteration zero and the kernel stored 0.
+    //
+    // It is not an I-cache bug, and it is not specific to SETP: any consumer
+    // one cycle behind its producer reads stale. The cache only removed the
+    // latency that was hiding it.
+    //
+    // The fix is a one-cycle interlock, not a forwarding path: the value does
+    // not exist to forward. `id_rd` is only a real write for the instruction
+    // classes that reach EX and produce a writeback, which is exactly the
+    // condition id_valid_out uses to set the scheduler's scoreboard.
+    wire idreg_writes = id_valid_reg && (id_rd != 6'd0) &&
+                        (id_is_alu || id_is_load || id_is_store || id_is_wmma);
+    wire idreg_hazard = idreg_writes && (id_warp_reg == id_warp_raw) &&
+                        (((dec_rs1  != 6'd0) && (id_rd == dec_rs1)) ||
+                         ((dec_rs2  != 6'd0) && (id_rd == dec_rs2)) ||
+                         ((dec_src3 != 6'd0) && (id_rd == dec_src3)));
+
+    // Split what used to be one signal. `id_issue_ok` is "EX can accept the
+    // instruction in the ID register" and must NOT include idreg_hazard: the
+    // ID register is the producer, and holding it back would stall the very
+    // instruction whose departure clears the hazard -- a deadlock. `id_ready`
+    // is "the FIFO head may be popped into the ID register", and does include
+    // it. The hazard is therefore self-clearing in exactly one cycle: the
+    // producer leaves for EX, id_valid_reg drops, and the consumer pops next
+    // cycle with fwd_*_ex covering it (or hazard_rs* stalling it if it is a
+    // load, as before).
+    wire id_issue_ok = !ex_busy && !hazard;
+    assign id_ready = id_issue_ok && !idreg_hazard;
 
     wire [1023:0] fwd_data1 = fwd_rs1_ex ? ex_res : (fwd_rs1_mem ? mem_res : (fwd_rs1_wb ? wb_res : rf_rd_data1));
     wire [1023:0] fwd_data2 = fwd_rs2_ex ? ex_res : (fwd_rs2_mem ? mem_res : (fwd_rs2_wb ? wb_res : rf_rd_data2));
@@ -452,6 +528,13 @@ module titan_x5_pipeline #(
             id_is_store  <= dec_is_store;
             id_is_alu    <= dec_is_alu;
             id_is_wmma   <= dec_is_wmma;
+        end else if (id_issue_ok) begin
+            // Held back by idreg_hazard, so nothing was popped -- but EX did
+            // take what was here. Mark the ID register empty, which is what
+            // clears the hazard. Without this it would latch its own producer
+            // forever. When id_issue_ok is also low (ex_busy) the register
+            // holds, exactly as it did before.
+            id_valid_reg <= 1'b0;
         end
     end
 
@@ -479,7 +562,9 @@ module titan_x5_pipeline #(
     assign id_dest_reg_out = id_rd;
 
     // ex stage
-    wire ex_launch = id_valid_reg && id_ready && (id_is_alu || id_is_load || id_is_store || id_is_wmma);
+    // id_issue_ok, not id_ready: see the idreg_hazard note above. Using
+    // id_ready here would stall the producer that the hazard is waiting on.
+    wire ex_launch = id_valid_reg && id_issue_ok && (id_is_alu || id_is_load || id_is_store || id_is_wmma);
     
     reg ex_valid_reg;
     reg [2:0] ex_warp_reg;

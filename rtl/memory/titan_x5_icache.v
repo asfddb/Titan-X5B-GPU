@@ -205,4 +205,16 @@ module titan_x5_icache #(
         end
     end
 
+`ifdef TITAN_ICACHE_TRACE
+    // Diagnostic only, never built by default. Prints the core-side handshake
+    // so the fetch stream through the cache can be diffed against the stream
+    // the crossbar produces with the cache bypassed.
+    always @(posedge clk) if (rst_n) begin
+        if (core_gnt)
+            $display("ICTRACE %0t GNT  addr=%08x hit=%0d", $time, core_addr, in_hit);
+        if (core_rvalid)
+            $display("ICTRACE %0t RVAL data=%08x", $time, core_rdata);
+    end
+`endif
+
 endmodule

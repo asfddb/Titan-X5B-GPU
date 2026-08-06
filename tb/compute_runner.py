@@ -68,8 +68,24 @@ def _sim_path(warp_mask):
     # the stale-image failure recorded in docs/BUILD_LOG_2NM.md, where a
     # control experiment passed when it should have failed.
     ic = "ic" if icache_on() else "noic"
+    # Extra defines are part of the image identity for the same reason the SM
+    # flavour is: they change no source file, so without them in the name the
+    # mtime reuse check below would hand back an image built without them.
+    xd = extra_defines()
+    suffix = ("_" + "_".join(sorted(xd))) if xd else ""
     return os.path.join(_BUILD_DIR,
-                        f"compute_{sm_flavour()}_{ic}_w{warp_mask:02x}.vvp")
+                        f"compute_{sm_flavour()}_{ic}_w{warp_mask:02x}"
+                        f"{suffix}.vvp")
+
+
+def extra_defines():
+    """Extra `define names for the build, from TITAN_DEFINES (comma separated).
+
+    For diagnostics that must not be in the default image, e.g.
+    TITAN_DEFINES=TITAN_FETCH_TRACE to dump the fetch stream.
+    """
+    raw = os.environ.get("TITAN_DEFINES", "").strip()
+    return [d.strip() for d in raw.split(",") if d.strip()]
 
 
 def _tool(name):
@@ -135,6 +151,8 @@ def build(warp_mask=0x01, force=False):
         cmd.insert(4, "-DTITAN_USE_X7_SM")
     if icache_on():
         cmd.insert(4, "-DTITAN_USE_ICACHE")
+    for d in extra_defines():
+        cmd.insert(4, f"-D{d}")
     cmd += sources
     proc = subprocess.run(cmd, capture_output=True, text=True)
     errs = [l for l in (proc.stderr or "").splitlines() if "error" in l.lower()]
