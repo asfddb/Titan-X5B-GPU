@@ -122,6 +122,18 @@ module titan_x5_rop #(
             flush_state <= FLUSH_IDLE;
             mem_req <= 0;
             mem_we <= 0;
+            // Delta-colour-compression metadata interface: DECLARED BUT NOT
+            // IMPLEMENTED. Nothing in this module ever assigned these four
+            // outputs, so they drove X for the life of the chip -- the top
+            // level leaves them unconnected and ties cfg_dcc_en low, which
+            // hid it in simulation but would not hide it in silicon.
+            // Driven to their inactive state here so the pins are defined.
+            // If DCC is ever built, this reset branch is the right place to
+            // start; until then the interface does nothing.
+            dcc_req <= 1'b0;
+            dcc_we <= 1'b0;
+            dcc_addr <= 32'h0;
+            dcc_wdata <= 8'h0;
             tile_active <= 0;
             current_tile_x <= 0;
             current_tile_y <= 0;

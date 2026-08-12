@@ -38,14 +38,49 @@ module titan_x5_gddr7_pam3_phy (
 
     // pam3 encoder: maps 3 bits of nrz data to 2 pam3 symbols (pins)
     // 3 bits = 8 states. 2 PAM3 symbols = 9 states. 
+    // ------------------------------------------------------------------
+    // Reset into the clk_28g domain.
+    //
+    // rst_n is generated in the core clock domain. Every other clocked block
+    // in this design resets asynchronously; these two used `rst_n`
+    // synchronously, which is what SYNCASYNCNET flags -- a reset used both
+    // ways across a design is a genuine hazard, not a style inconsistency.
+    //
+    // Simply adding `or negedge rst_n` here would swap one defect for
+    // another: the release edge would then land at an arbitrary point
+    // relative to clk_28g, which is a reset-domain crossing and metastable.
+    // So the reset is asserted asynchronously and released synchronously to
+    // clk_28g, which is the standard construction and the same fix the
+    // display path needs (FPGA_BRINGUP_NO_BOARD.md, finding 1).
+    // ------------------------------------------------------------------
+    // The waiver below is scoped to these five lines and is not a suppression
+    // of the check. A reset synchroniser is asynchronously reset and
+    // synchronously released by construction, so the linter sees its own flop
+    // chain used "both ways" and flags it. Every correct synchroniser in every
+    // design looks like this. The check stays enabled everywhere else, where a
+    // hit means a real reset-domain hazard.
+    /* verilator lint_off SYNCASYNCNET */
+    reg [1:0] rst28_sync;
+    always @(posedge clk_28g or negedge rst_n) begin
+        if (!rst_n) rst28_sync <= 2'b00;
+        else        rst28_sync <= {rst28_sync[0], 1'b1};
+    end
+    /* verilator lint_on SYNCASYNCNET */
+    wire rst28_n = rst28_sync[1];
+
     genvar i;
     generate
         for (i = 0; i < 171; i = i + 1) begin : pam3_encoder
             wire [2:0] nrz_chunk = tx_data_nrz_padded[(i*3)+2 : i*3];
             reg  [3:0] pam3_chunk; // 2 symbols (2 bits each)
-            
-            always @(posedge clk_28g) begin
-                if (tx_valid) begin
+
+            // This flop had no reset at all: on silicon it powers up
+            // undefined and the encoder drives X onto the DQ pins until the
+            // first tx_valid. Reset added.
+            always @(posedge clk_28g or negedge rst28_n) begin
+                if (!rst28_n) begin
+                    pam3_chunk <= 4'b0000;
+                end else if (tx_valid) begin
                     case (nrz_chunk)
                         3'b000: pam3_chunk <= 4'b00_00; // -1, -1
                         3'b001: pam3_chunk <= 4'b00_01; // -1,  0
@@ -63,8 +98,8 @@ module titan_x5_gddr7_pam3_phy (
     endgenerate
 
     // pam3 decoder: maps 2 pam3 symbols back to 3 nrz bits
-    always @(posedge clk_28g) begin
-        if (!rst_n) begin
+    always @(posedge clk_28g or negedge rst28_n) begin
+        if (!rst28_n) begin
             rx_data_nrz <= 0;
             rx_valid <= 0;
         end else begin

@@ -191,7 +191,6 @@ module titan_x5_gpu_top #(
     wire        cmd_mem_req;
     wire [31:0] cmd_mem_addr;
     wire        cmd_mem_ack;
-    wire [63:0] cmd_mem_data;
 
     // ---- device-level cache flush -----------------------------------------
     // Both cache levels are write-back, so without this a kernel's stores sit
@@ -218,8 +217,13 @@ module titan_x5_gpu_top #(
     // master 0: command processor
     assign xbar_m_req_valid[0] = cmd_mem_req;
     assign xbar_m_req_addr[31:0] = cmd_mem_addr;
-    assign xbar_m_req_wdata[31:0] = cmd_mem_data[31:0];
-    assign xbar_m_req_write[0] = 1'b0; // cmdproc currently only reads in this test
+    // The command processor has no write-data output -- it only fetches
+    // command packets -- so xbar_m_req_write[0] is tied low and the write data
+    // is a defined constant. It used to be driven from `cmd_mem_data`, a wire
+    // nothing assigned, which put X on the crossbar's write bus even though
+    // the write strobe was low.
+    assign xbar_m_req_wdata[31:0] = 32'h0;
+    assign xbar_m_req_write[0] = 1'b0; // cmdproc only reads
     // cmd_mem_ack is handled by xbar_m_req_ready[0]
 
     // masters 1-4: tmus
@@ -412,6 +416,10 @@ module titan_x5_gpu_top #(
         .mem_data       ({32'h0, xbar_m_resp_rdata[31:0]}),
         .cmd_valid      (cmd_valid),
         .cmd_opcode     (cmd_opcode),
+        // cmd_payload was left unconnected here while the top-level wire of
+        // the same name fed the RT core's ray_root_ptr. The wire therefore had
+        // no driver at all: X on silicon, and the RT core was reading it.
+        .cmd_payload    (cmd_payload),
         .vt_payload     (vt_payload),
         .cmd_ready      (cmd_ready),
         .intr_req       (host_intr)
@@ -1022,7 +1030,10 @@ module titan_x5_gpu_top #(
     );
     // project blackwell: gddr7 pam3 phy integration
     wire [683:0] gddr7_tx_pins;
-    wire [683:0] gddr7_rx_pins;
+    // No GDDR7 device is modelled, so the PHY's receive path has nothing
+    // driving it. Tied to a defined value rather than left floating: on
+    // silicon these are input pads and would come from the DRAM package.
+    wire [683:0] gddr7_rx_pins = 684'b0;
     
     titan_x5_gddr7_pam3_phy gddr7_phy (
         .clk_28g(clk),

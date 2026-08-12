@@ -687,8 +687,13 @@ module titan_x7_sm #(
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            // blocking assigns: reset-only array init (see L2 note on
-            // Verilator BLKLOOPINIT)
+            // blocking assigns: reset-only array init (see the L1 cache note
+            // on the BLKLOOPINIT warning).
+            // NB: no line of this comment may *begin* with the linter's own
+            // name -- v5 parses such a comment as a metacomment pragma and
+            // aborts the whole lint with "Unknown verilator comment". That is
+            // exactly what this line used to do, and it is why nothing in
+            // this design had ever been linted by v5.
             for (i = 0; i < NUM_WARPS*64; i = i + 1)
                 rf[i] = {LANES*32{1'b0}};
             for (i = 0; i < NUM_WARPS; i = i + 1) begin
