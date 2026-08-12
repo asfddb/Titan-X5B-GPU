@@ -28,16 +28,39 @@ integer datapath.
 | wall time (1 core) | 577 s | 865 s |
 | rate | 1.19M instr/s | 1.47M instr/s |
 
+A higher-quality path trace, split across 14 cores by
+`tools/titan_trace_parallel.py`:
+
+| | |
+|---|---:|
+| resolution | 320x200 |
+| samples / bounces | **40 spp, 4 bounces** |
+| instructions retired | **30,661,249,940** |
+| wall time, 14 workers | **45.6 min** |
+
+Thirty billion instructions -- 24x the 10-spp frame above -- for one 320x200
+image. That is the honest cost of Monte Carlo integration on a 32-bit integer
+ISA with a software square root.
+
+A first attempt at 480x300 / 64 spp was abandoned: it had run 2.2 hours without
+a single one of its fourteen bands completing. The lesson was in the
+projection, not the render -- fourteen workers contend for memory bandwidth and
+each runs at roughly half its single-threaded rate, so the sizing above was
+taken from the *measured* per-worker rate rather than from the single-core
+figure divided by fourteen.
+
 ![Ray traced on Titan](assets/titan_raytrace_640x400.png)
 
 *640x400. Four spheres, hard shadows, checkered plane, sky gradient. Every
 sphere edge is a software square root; every conditional is a mask.*
 
-![Path traced on Titan](assets/titan_pathtrace_160x100.png)
+![Path traced on Titan](assets/titan_pathtrace_320x200_40spp.png)
 
-*160x100 at 10 samples/pixel, shown 4x nearest so the pixels are exactly what
-the kernel produced. Lit entirely by the sky -- there is no light source in the
-scene. The grain is Monte Carlo noise, not an artefact.*
+*320x200 at 40 samples/pixel, 4 bounces. Lit entirely by the sky -- there is no
+light source in the scene. The soft contact shadows, the darkening where the
+spheres meet the floor and the colour bleeding onto the checkerboard are all
+emergent from the sampling; none of them is shaded in. The remaining grain is
+Monte Carlo noise, not an artefact.*
 
 ## What the ISA does not give you, and what replaces it
 
