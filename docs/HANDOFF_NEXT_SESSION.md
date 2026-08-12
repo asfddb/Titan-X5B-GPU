@@ -196,6 +196,121 @@ TITAN_ICACHE=1 TITAN_SM=x7 python tools/run_compute_parallel.py
 
 ---
 
+## 0a. NEW 2026-08-12 — FPGA bring-up rig, and the reset bug it found
+
+There is now a way to bring the display path up on a Basys 3 without owning a
+Basys 3. Full write-up in **`docs/FPGA_BRINGUP_NO_BOARD.md`**; one command:
+
+```bash
+python tools/run_fpga_bringup.py
+```
+
+It runs `tb/tb_board_bringup.v` against the RTL, synthesises the display path
+to Artix-7 cells, runs the *same* testbench against the netlist with yosys's
+Xilinx primitive models, and diffs the two captured frames.
+
+**The rule that makes it work: that testbench has no hierarchical reference
+into the design.** Only the 100 MHz pin, the buttons, the switches, the 16 LEDs
+and the five VGA wires. A `vga_monitor` model measures sync from the pins,
+recovers the pixel grid the way a monitor's PLL does, and captures frames to
+PPM. `tb/tb_display_top.v` stays as the RTL unit test.
+
+**Measured, synthesis:** 1,605 LUT / 2,883 FF / 32 RAMB36 / 1 DSP48 against the
+xc7a35t's 20,800 / 41,600 / 50 / 90. It fits, BRAM tightest at 64%. First
+whole-design fit number for any Titan configuration.
+
+**Measured, at the connector:** 449 lines, 32.000 us line period, 96-pixel
+hsync, 2-line vsync, 14.368 ms frame, 25.0000 MHz recovered pixel clock — all
+matching the 640x400@70 mode. All five captured frames are **100.0000% correct
+against the expected pattern**, 0 X pixels.
+
+### It found a real bug, and it is the fifth of the same kind
+
+**Cold power-on with nothing pressed produces no video at all** — 0 hsync edges
+in 5 ms. The core domain is fine (VRAM fills, `led[0]` lights at 101 us); the
+VGA connector is dead.
+
+`rst_n` is built by a synchroniser on `clk_core` (100 MHz) and handed to the
+display engine, whose counters run on the 25 MHz `pclk`. Out of configuration
+`rst_n` releases on the same edge that `pclk_div` first produces a pixel clock
+edge. Measured with a counter on pclk edges taken while `rst_n` is low:
+
+| | pclk edges while `rst_n` low | `h_counter` after |
+|:--|--:|:--|
+| cold boot, nothing pressed | **0** | **x** |
+| after a btnC press | 70,400 | 0 |
+
+The display engine's reset branch never executes, so `h_counter` stays X.
+
+**`tb/tb_display_top.v` starts with `reg btnC = 1;` — it holds reset for you.**
+That one line is why this was never seen. Same pattern as the four already
+named in section 0: a test that passes because the harness helped.
+
+On the Basys 3 this is masked — configuration loads INIT into every flop, so
+`h_counter` starts at 0 regardless. **On the GT2N ASIC target there is no
+configuration and no INIT**, so this design would come up with garbage counters
+and no video, permanently. It is also a genuine reset-domain crossing: `rst_n`
+is released in `clk_core` and used as an async reset in `pclk` with no
+re-synchronisation — the `SYNCASYNCNET` hazard section 5 already lists.
+
+**Not fixed here.** The fix is a pixel-domain reset synchroniser (assert async
+from `rst_n`, release synchronous to `pclk`), which needs a second reset port
+on `titan_x5_display_engine` and therefore touches `titan_x5_gpu_top` too.
+Changing the reset architecture of a shared module is a deliberate design call,
+and this session built the instrument rather than making it. **Do this next —
+see task 6.**
+
+Also found: **hsync polarity is active-high, and IBM VGA assigns 640x400@70
+negative hsync** (the polarity pair is how a monitor tells this mode from
+640x350 and 720x400 at the same line rate). And the picture sits **+1 pixel**
+right of the sync pulses, measured from the connector — the same skew
+`tb_display_top.v` compensates for internally, now quantified externally.
+
+## 0a2. NEW 2026-08-12 — a DOOM-style renderer, end to end
+
+`docs/DOOM_ON_TITAN.md`. Not DOOM — DOOM needs a CPU and Titan is a GPU — but
+the rendering half, which is what a GPU is for.
+
+`compiler/kernels/doom_raycast.py` is a raycaster in the Titan kernel language,
+compiled by this project's compiler to **201 Titan ISA instructions**, executed
+by `titan_compiler.simulate()` (**18,286,662 retired per frame**), checked
+against an independent Python reference (**32,000/32,000 framebuffer words
+identical**), then scanned out by the real display path and captured off the
+VGA connector: **255,600/255,600 pixels, 100.0000%**, at the same +1 px skew
+the bring-up rig measures.
+
+```bash
+python tools/doom_titan.py --x 28.5 --y 24.0 --angle -1.5708 --check
+```
+
+Two things worth carrying forward:
+
+- **The kernel language has no `if`.** `ScalarCodegen.gen_stmt` takes
+  assignment, augmented assignment and `for ... in range(...)`, nothing else.
+  Every conditional is `(a - b) >> 31` used as a full-width mask. This is a
+  genuinely usable technique for this compiler and it is written up in the doc.
+- **Rendering is constant-time** — four camera positions retired an identical
+  instruction count, because nothing is data-dependent. That also means no
+  branch divergence, which matters given the pipeline skips instructions whose
+  predicate lanes disagree.
+
+**The ray cast now runs on the actual SM cores, bit-exact.**
+`compiler/kernels/doom_raycast_tile.py` is the same cast with the loop bounds
+parameterised; `tools/doom_rtl_tile.py` runs it both ways and compares.
+**142 instructions, 13,450 retired, 76,731 RTL clock cycles, 12/12 words
+identical to the functional model** — four distinct answers across three wall
+types at four depths, so a constant-returning or mis-masked kernel could not
+match by accident.
+
+That is **5.7 cycles per instruction**, I-cache on, one warp, for a tight
+integer loop with a dependent load. First measured CPI figure for a real kernel
+on this design; it is the number to beat, and the fetch work in task 2 is what
+should move it.
+
+The *full frame* is still model-only: 18.3M instructions at ~90 cycles per wall
+second does not finish. But the arithmetic in it is now verified on the RTL,
+not merely against a model of the machine.
+
 ## 0b. TASKS, IN ORDER
 
 **1. Resolve the replay bug below, THEN turn the I-cache on by default.**

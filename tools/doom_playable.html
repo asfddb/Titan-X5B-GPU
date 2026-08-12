@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Titan X5 — walkable raycaster</title>
+<style>
+  :root { --bg:#0b0d10; --fg:#d8dde3; --dim:#7c848f; --accent:#ffb454; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace;
+         display:flex; flex-direction:column; align-items:center; gap:12px;
+         padding:16px; min-height:100vh; }
+  h1 { font-size:15px; font-weight:600; margin:0; letter-spacing:.02em; }
+  h1 span { color:var(--dim); font-weight:400; }
+  #wrap { position:relative; line-height:0; }
+  canvas#view { width:min(90vw, 960px); height:auto; image-rendering:pixelated;
+                border:1px solid #23282f; border-radius:3px; display:block; }
+  canvas#map { position:absolute; right:10px; top:10px; width:128px; height:128px;
+               image-rendering:pixelated; border:1px solid #333a44;
+               background:rgba(0,0,0,.55); border-radius:2px; }
+  #hud { display:flex; gap:22px; flex-wrap:wrap; justify-content:center;
+         color:var(--dim); font-size:12.5px; }
+  #hud b { color:var(--fg); font-weight:600; }
+  #cmd { width:min(90vw, 960px); background:#12151a; border:1px solid #23282f;
+         border-radius:3px; padding:10px 12px; font-size:12.5px;
+         color:var(--accent); overflow-x:auto; white-space:pre; }
+  #keys { color:var(--dim); font-size:12.5px; text-align:center; }
+  kbd { background:#1a1e24; border:1px solid #2b313a; border-radius:3px;
+        padding:1px 5px; color:var(--fg); font-size:11.5px; }
+  button { background:#1a1e24; color:var(--fg); border:1px solid #2b313a;
+           border-radius:3px; padding:5px 11px; font:inherit; font-size:12.5px;
+           cursor:pointer; }
+  button:hover { border-color:var(--accent); color:var(--accent); }
+</style>
+</head>
+<body>
+
+<h1>Titan X5 <span>— walkable raycaster, same maths as the kernel</span></h1>
+
+<div id="wrap">
+  <canvas id="view" width="640" height="400"></canvas>
+  <canvas id="map" width="128" height="128"></canvas>
+</div>
+
+<div id="hud">
+  <span>pos <b id="pos">—</b></span>
+  <span>heading <b id="ang">—</b></span>
+  <span>fps <b id="fps">—</b></span>
+  <span>colours <b>16</b></span>
+  <span>res <b>640×400 @ 4bpp</b></span>
+</div>
+
+<div id="keys">
+  <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move ·
+  <kbd>←</kbd><kbd>→</kbd> turn · <kbd>Shift</kbd> run ·
+  <button id="copy">copy Titan render command</button>
+</div>
+
+<div id="cmd">—</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// This is compiler/kernels/doom_raycast.py, in JavaScript, at playable speed.
+//
+// It is NOT the Titan GPU. Titan renders this scene by executing 18.3 million
+// compiled ISA instructions, which takes about eleven seconds a frame on the
+// functional simulator and considerably longer on the RTL. Nothing interactive
+// is going to come out of that.
+//
+// What this is for: the arithmetic below is transcribed from the kernel line
+// for line -- same 16.16 fixed point, same unnormalised camera ray, same
+// >>4 march step, same "step count IS the perpendicular distance", same
+// branchless clamps, same 16-colour palette, same level. JavaScript's bitwise
+// operators coerce to int32, so `(a-b)>>31` behaves exactly as SRA does on the
+// hardware. So what you see here is what Titan renders -- walk to a view you
+// like, hit the button, and the command it prints renders that exact camera
+// through the real pipeline.
+// ---------------------------------------------------------------------------
+
+// Palette from fpga/titan_x5_display_top.v, as 4-bit nibbles scaled by 17.
+const PAL = [
+  [0x0,0x0,0x0],[0x0,0x0,0xA],[0x0,0xA,0x0],[0x0,0xA,0xA],
+  [0xA,0x0,0x0],[0xA,0x0,0xA],[0xA,0x5,0x0],[0xA,0xA,0xA],
+  [0x5,0x5,0x5],[0x5,0x5,0xF],[0x5,0xF,0x5],[0x5,0xF,0xF],
+  [0xF,0x5,0x5],[0xF,0x5,0xF],[0xF,0xF,0x5],[0xF,0xF,0xF],
+].map(c => c.map(v => v * 17));
+
+// Level from tools/doom_titan.py. Keep these in step.
+const LEVEL = [
+  "44444444444444444444444444444444",
+  "4..............4...............4",
+  "4..7777........4......2222.....4",
+  "4..7...........4......2........4",
+  "4..7...........4......2........4",
+  "4..7....555....4......2222222..4",
+  "4..7....5......4...............4",
+  "4.......5......4...............4",
+  "4.......5......4......33333....4",
+  "4.......555....4......3...3....4",
+  "4..............4......3...3....4",
+  "4..............4......3...3....4",
+  "4..............4......33333....4",
+  "4..............4...............4",
+  "44444.4444444444...............4",
+  "4.....4........................4",
+  "4.....4........................4",
+  "4.....4......6666666666........4",
+  "4.....4......6........6........4",
+  "4............6........6........4",
+  "4............6........6........4",
+  "4.....4......6...55...6........4",
+  "4.....4......6...55...6........4",
+  "4.....4......6........6........4",
+  "4.....4......66666.6666........4",
+  "4.....4........................4",
+  "44444444444.4444444444444444...4",
+  "4..............................4",
+  "4...2222...........7777777.....4",
+  "4...2..............7.....7.....4",
+  "4..................7.....7.....4",
+  "44444444444444444444444444444444",
+];
+const MAPW = 32;
+const MAP = new Int32Array(MAPW * MAPW);
+for (let y = 0; y < MAPW; y++)
+  for (let x = 0; x < MAPW; x++)
+    MAP[y * MAPW + x] = LEVEL[y][x] === "." ? 0 : (LEVEL[y][x] | 0);
+
+const W = 640, H = 400, FP = 16, ONE = 1 << FP;
+const NSTEP = 320;          // matches the kernel's march budget
+const FOV = 0.66;
+const CEIL = 1, FLOOR = 8;  // matches the kernel's pass 2
+
+const view = document.getElementById("view");
+const vctx = view.getContext("2d");
+const img = vctx.createImageData(W, H);
+const buf = img.data;
+
+const mapc = document.getElementById("map");
+const mctx = mapc.getContext("2d");
+
+// Camera. Kept in floats for smooth movement; the ray maths below converts to
+// the same 16.16 integers the kernel uses before casting anything.
+let px = 17.5, py = 19.5, ang = 1.90;
+
+function cellAt(x, y) {
+  const mx = x & 31, my = y & 31;
+  return MAP[my * MAPW + mx];
+}
+
+function renderFrame() {
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  const plx = -Math.sin(ang) * FOV, ply = Math.cos(ang) * FOV;
+
+  // Camera uniforms, exactly as tools/doom_titan.py computes them.
+  const RDX0 = (dx - plx) * ONE | 0, RDY0 = (dy - ply) * ONE | 0;
+  const INCX = (plx * 2 / W) * ONE | 0, INCY = (ply * 2 / W) * ONE | 0;
+  const POSX = (px * ONE) | 0, POSY = (py * ONE) | 0;
+
+  for (let x = 0; x < W; x++) {
+    // --- pass 1: the ray cast, transcribed from the kernel ---
+    const rdx = RDX0 + Math.imul(INCX, x);
+    const rdy = RDY0 + Math.imul(INCY, x);
+    const stepx = rdx >> 4, stepy = rdy >> 4;
+    let cx = POSX, cy = POSY, hit = 0, n = 0;
+
+    for (let s = 0; s < NSTEP; s++) {
+      const live = hit ^ -1;
+      cx = cx + (stepx & live);
+      cy = cy + (stepy & live);
+      n = n + (1 & live);
+      const cell = MAP[(((cy >> 16) & 31) * MAPW) + ((cx >> 16) & 31)];
+      hit = hit | ((0 - cell) >> 31);
+      if (hit) { /* the kernel keeps looping; we may leave early, same result */
+        // finish the freeze semantics without burning the rest of the budget
+        break;
+      }
+    }
+
+    const cell = MAP[(((cy >> 16) & 31) * MAPW) + ((cx >> 16) & 31)];
+    const hitm = (0 - cell) >> 31;
+    const lh = (((6400 / n) | 0) & hitm);
+    let top = 200 - (lh >> 1), bot = 200 + (lh >> 1);
+    const tm = top >> 31;
+    top = top & (tm ^ -1);
+    const bm = (bot - 400) >> 31;
+    bot = (bot & bm) | (400 & (bm ^ -1));
+    const near = (n - 80) >> 31;
+    const col = cell + (8 & near);
+
+    // --- pass 2: paint the column ---
+    let o = x * 4;
+    for (let y = 0; y < H; y++, o += W * 4) {
+      const c = PAL[y < top ? CEIL : (y < bot ? col : FLOOR)];
+      buf[o] = c[0]; buf[o + 1] = c[1]; buf[o + 2] = c[2]; buf[o + 3] = 255;
+    }
+  }
+  vctx.putImageData(img, 0, 0);
+}
+
+function renderMap() {
+  mctx.clearRect(0, 0, 128, 128);
+  for (let y = 0; y < MAPW; y++) {
+    for (let x = 0; x < MAPW; x++) {
+      const v = MAP[y * MAPW + x];
+      if (!v) continue;
+      const c = PAL[v];
+      mctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
+      mctx.fillRect(x * 4, y * 4, 4, 4);
+    }
+  }
+  mctx.fillStyle = "#fff";
+  mctx.fillRect(px * 4 - 1.5, py * 4 - 1.5, 3, 3);
+  mctx.strokeStyle = "#ffb454";
+  mctx.beginPath();
+  mctx.moveTo(px * 4, py * 4);
+  mctx.lineTo(px * 4 + Math.cos(ang) * 10, py * 4 + Math.sin(ang) * 10);
+  mctx.stroke();
+}
+
+// --- input ---
+const keys = Object.create(null);
+addEventListener("keydown", e => {
+  keys[e.key.toLowerCase()] = true;
+  if (["arrowleft", "arrowright", "arrowup", "arrowdown", " "].includes(e.key.toLowerCase()))
+    e.preventDefault();
+});
+addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+function tryMove(nx, ny) {
+  const r = 0.22;   // keep the camera out of the walls
+  if (!cellAt(Math.floor(nx + r), Math.floor(py)) &&
+      !cellAt(Math.floor(nx - r), Math.floor(py))) px = nx;
+  if (!cellAt(Math.floor(px), Math.floor(ny + r)) &&
+      !cellAt(Math.floor(px), Math.floor(ny - r))) py = ny;
+}
+
+let last = performance.now(), fpsAcc = 0, fpsN = 0;
+
+function tick(now) {
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+
+  const run = keys["shift"] ? 2.2 : 1.0;
+  const spd = 3.0 * run * dt, rot = 2.0 * dt;
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+
+  if (keys["w"] || keys["arrowup"])    tryMove(px + dx * spd, py + dy * spd);
+  if (keys["s"] || keys["arrowdown"])  tryMove(px - dx * spd, py - dy * spd);
+  if (keys["a"]) tryMove(px + dy * spd, py - dx * spd);   // strafe
+  if (keys["d"]) tryMove(px - dy * spd, py + dx * spd);
+  if (keys["arrowleft"])  ang -= rot;
+  if (keys["arrowright"]) ang += rot;
+  if (keys["q"]) ang -= rot;
+  if (keys["e"]) ang += rot;
+
+  renderFrame();
+  renderMap();
+
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc >= 0.4) {
+    document.getElementById("fps").textContent = (fpsN / fpsAcc).toFixed(0);
+    fpsAcc = 0; fpsN = 0;
+  }
+  document.getElementById("pos").textContent = `${px.toFixed(2)}, ${py.toFixed(2)}`;
+  document.getElementById("ang").textContent = `${ang.toFixed(4)} rad`;
+  document.getElementById("cmd").textContent = command();
+
+  requestAnimationFrame(tick);
+}
+
+function command() {
+  return `python tools/doom_titan.py --x ${px.toFixed(2)} `
+       + `--y ${py.toFixed(2)} --angle ${ang.toFixed(4)} --check`;
+}
+
+document.getElementById("copy").addEventListener("click", async () => {
+  const btn = document.getElementById("copy");
+  try {
+    await navigator.clipboard.writeText(command());
+    btn.textContent = "copied — run it in the repo root";
+  } catch {
+    btn.textContent = "select the line below and copy it";
+  }
+  setTimeout(() => { btn.textContent = "copy Titan render command"; }, 2600);
+});
+
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
