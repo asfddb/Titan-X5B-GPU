@@ -77,3 +77,24 @@ Expected result: **603,664 logic cells** for the Tensor Core alone.
 | No assertion failures during simulation | ✅ |
 | VCD waveform generated successfully | ✅ |
 | Yosys synthesis completes with 0 errors | ✅ |
+
+## FPGA bring-up, without an FPGA board
+
+The tests above drive the RTL. This one drives the *board connectors* — the
+100 MHz pin, the buttons, the switches, the LEDs and the five wires of a VGA
+cable — and contains no hierarchical reference into the design, because none of
+those exist on a bench.
+
+```bash
+python tools/run_fpga_bringup.py            # RTL, synthesis, netlist, frame diff
+python tools/run_fpga_bringup.py --quick    # power-on frame only
+python tools/run_fpga_bringup.py --stage rtl
+```
+
+It captures what a monitor plugged into the Basys 3 would display, as a PPM,
+and checks it against the pattern the design was asked to store. It also runs
+the identical testbench against the post-synthesis netlist, which is where
+assumptions the synthesiser does not share show up.
+
+Full write-up, measured results and the defects it found:
+**`docs/FPGA_BRINGUP_NO_BOARD.md`**.

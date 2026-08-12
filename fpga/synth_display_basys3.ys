@@ -1,0 +1,32 @@
+# ============================================================================
+# Titan X5 display path -> Artix-7 (xc7a35t, Digilent Basys 3)
+#
+# Produces the structural netlist that tb/tb_board_bringup.v is run against in
+# gate-level mode. The point of that run is not the cell count -- it is that
+# the netlist carries the INIT values configuration will load into every flop,
+# so it shows what the board does at power-on and the RTL does not.
+#
+# Run from the repository root:
+#   yosys -q fpga/synth_display_basys3.ys
+# Yosys needs both bin/ and lib/ of oss-cad-suite on PATH (it loads DLLs from
+# lib) and wants Windows-style paths.
+# ============================================================================
+
+read_verilog rtl/memory/titan_x5_vram_ctrl.v
+read_verilog rtl/display/titan_x5_async_fifo.v
+read_verilog rtl/display/titan_x5_display_engine.v
+read_verilog fpga/titan_x5_display_top.v
+
+# BUFG comes from the Xilinx cell library that synth_xilinx reads, so
+# rtl/xilinx_stubs.v is deliberately NOT read here -- the stub is for
+# simulation of the RTL, not for synthesis.
+
+# synth_xilinx reads the Xilinx cell library and runs `hierarchy -check`
+# itself; doing hierarchy first would fail on BUFG not yet being defined.
+synth_xilinx -family xc7 -top titan_x5_display_top
+
+# Measured utilisation, to be read against the xc7a35t budget:
+#   20,800 LUT   41,600 FF   50 BRAM36   90 DSP48
+stat -tech xilinx
+
+write_verilog -noattr syn/netlists/titan_x5_display_top_xc7.v
