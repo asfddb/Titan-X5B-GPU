@@ -4,7 +4,7 @@
 
 ```bash
 python tools/titan_trace.py raytrace --width 640 --height 400
-python tools/titan_trace_parallel.py --width 480 --height 300 --samples 64
+python tools/titan_trace_parallel.py --width 320 --height 200 --samples 40
 ```
 
 Both renderers are Titan ISA kernels. `tools/titan_trace.py` emits the kernel
