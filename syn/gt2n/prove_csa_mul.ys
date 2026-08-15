@@ -1,0 +1,12 @@
+# Direct miter: (s + c) == a*b at the real 24x24 width.
+#
+# THIS DOES NOT CONVERGE. Recorded so nobody re-derives it: killed after
+# 10 minutes still "Solving problem with 35709 variables and 98457 clauses".
+# Multiplier equivalence is a known hard case for SAT and the project already
+# hit the same wall on titan_apex_mult_seg (docs/BUILD_LOG_2NM.md, "Where
+# formal beat simulation"). Same remedy applies -- prove_csa_parts.ys for the
+# tractable decomposition, tb/tb_csa_mul.v for full width by simulation.
+read_verilog rtl/common/titan_x7_csa_mul.v syn/gt2n/prove_csa_mul.v
+hierarchy -top csa_mul_equiv
+proc; opt -full; flatten; opt -full
+sat -verify -prove diff 1'b0 csa_mul_equiv

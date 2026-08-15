@@ -242,8 +242,11 @@ module titan_x7_fp32_fma_pipe (
     // ------------------------------------------------------------------
     // E3: multiplier half 1 - two 24x12 partial products
     // ------------------------------------------------------------------
-    wire [35:0] pp_lo = e2_ma * e2_mb[11:0];
-    wire [35:0] pp_hi = e2_ma * e2_mb[23:12];
+    // Carry-save: no completed product, and therefore no CPA, in this stage.
+    // The single carry propagation happens once, in E4's prefix adder, which
+    // this stage was feeding anyway. See titan_x7_csa_mul.v.
+    wire [47:0] pp_s, pp_c;
+    titan_x7_csa_mul24 u_e3_mul (.a(e2_ma), .b(e2_mb), .s(pp_s), .c(pp_c));
 
     reg               e3_valid;
     reg               e3_special, e3_invalid;
@@ -251,7 +254,7 @@ module titan_x7_fp32_fma_pipe (
     reg               e3_ps, e3_sc;
     reg signed [11:0] e3_Ep;
     reg signed [7:0]  e3_s;
-    reg  [35:0]       e3_pp_lo, e3_pp_hi;
+    reg  [47:0]       e3_pp_s, e3_pp_c;
     reg  [23:0]       e3_mc;
     reg  [1:0]        e3_rm;
 
@@ -261,7 +264,7 @@ module titan_x7_fp32_fma_pipe (
             e3_special <= 1'b0; e3_invalid <= 1'b0; e3_special_res <= 32'd0;
             e3_ps <= 1'b0; e3_sc <= 1'b0;
             e3_Ep <= 12'sd0; e3_s <= 8'sd0;
-            e3_pp_lo <= 36'd0; e3_pp_hi <= 36'd0;
+            e3_pp_s <= 48'd0; e3_pp_c <= 48'd0;
             e3_mc <= 24'd0; e3_rm <= 2'd0;
         end else if (en) begin
             e3_valid       <= e2_valid;
@@ -272,8 +275,8 @@ module titan_x7_fp32_fma_pipe (
             e3_sc          <= e2_sc;
             e3_Ep          <= e2_Ep;
             e3_s           <= e2_s;
-            e3_pp_lo       <= pp_lo;
-            e3_pp_hi       <= pp_hi;
+            e3_pp_s        <= pp_s;
+            e3_pp_c        <= pp_c;
             e3_mc          <= e2_mc;
             e3_rm          <= e2_rm;
         end
@@ -285,7 +288,7 @@ module titan_x7_fp32_fma_pipe (
     // Partial-product CPA, prefix rather than ripple (see E5 note below).
     wire [47:0] prod;
     titan_x7_prefix_add #(.W(48), .LEVELS(6)) u_e4_cpa (
-        .a({12'd0, e3_pp_lo}), .b({e3_pp_hi, 12'd0}), .cin(1'b0),
+        .a(e3_pp_s), .b(e3_pp_c), .cin(1'b0),
         .sum(prod), .cout());
 
     reg [103:0] c_frame_c;
@@ -472,6 +475,13 @@ module titan_x7_fp32_fma_pipe (
     reg               e7_g, e7_st;
     reg signed [11:0] e7_exp;
     reg  [1:0]        e7_rm;
+    // Hoisted out of E8: `1 - exp` and its clamp were the head of the E8
+    // critical path (start-point e7_exp[10]). e7_exp is a pure register copy
+    // of e6_exp, and E7's own path is the 106-bit `norm` shift, so computing
+    // these here is free and removes a 12-bit subtract plus a 12-bit compare
+    // from E8.
+    reg               e7_tiny;
+    reg  [4:0]        e7_den_amt;
 
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -480,6 +490,7 @@ module titan_x7_fp32_fma_pipe (
             e7_sign <= 1'b0; e7_zero <= 1'b0;
             e7_mant <= 24'd0; e7_g <= 1'b0; e7_st <= 1'b0;
             e7_exp <= 12'sd0; e7_rm <= 2'd0;
+            e7_tiny <= 1'b0; e7_den_amt <= 5'd0;
         end else if (en) begin
             e7_valid       <= e6_valid;
             e7_special     <= e6_special;
@@ -492,55 +503,68 @@ module titan_x7_fp32_fma_pipe (
             e7_st          <= |norm[80:0];
             e7_exp         <= e6_exp;
             e7_rm          <= e6_rm;
+            e7_tiny        <= (e6_exp < 12'sd1);
+            e7_den_amt     <= (12'sd1 - e6_exp > 12'sd26)
+                              ? 5'd26
+                              : (12'sd1 - e6_exp) < 12'sd0 ? 5'd0
+                              : (12'sd1 - e6_exp);
         end
     end
 
     // ------------------------------------------------------------------
     // E8: denormalize / round / pack / flags
     // ------------------------------------------------------------------
+    // Split prepare -> adders -> finish. The original single always block
+    // chained a 25-bit `+`, then a 12-bit `+` gated on that sum's carry, then
+    // a compare on the result: three dependent ripples on a PDK with no adder
+    // cells. Both adds are prefix adders now and run in parallel, because the
+    // mantissa carry-out that gates the exponent increment IS the adder's own
+    // `cout` -- it does not need the sum.
     reg  [25:0]       den_src, den_shifted;
-    reg signed [11:0] den_amt;
     reg  [23:0]       mant_d;
     reg               rb, st;
     reg               rnd_inc;
     reg  [24:0]       mant_r;
-    reg signed [11:0] exp_r;
+    reg signed [11:0] exp_base, exp_r;
     reg  [31:0]       res_c;
     reg               inv_c, ovf_c, unf_c, inx_c;
     reg               tiny;
 
-    always @(*) begin
-        den_src = 26'd0; den_shifted = 26'd0; den_amt = 12'sd0;
-        mant_d = 24'd0; rb = 1'b0; st = 1'b0; rnd_inc = 1'b0;
-        mant_r = 25'd0; exp_r = 12'sd0;
-        res_c = 32'd0; inv_c = 1'b0; ovf_c = 1'b0; unf_c = 1'b0; inx_c = 1'b0;
-        tiny = 1'b0;
+    // Bits shifted out by the denormalising right shift. A vector plus one
+    // reduction OR, rather than a serial `st = st | ...` accumulate, so the
+    // OR maps to a balanced tree instead of a 26-long chain. This is NOT the
+    // decoder-and-mask form that lost at E4 (401.81 -> 460.39 ps): there is
+    // no barrel shift added in series here, only the OR shape changed.
+    wire [25:0] den_src_w = {e7_mant, e7_g, e7_st};
+    wire [25:0] st_bits;
+    genvar sq;
+    generate
+        for (sq = 0; sq < 26; sq = sq + 1) begin : sticky_bit
+            assign st_bits[sq] = den_src_w[sq] & (sq < e7_den_amt);
+        end
+    endgenerate
+    wire st_shifted_out = |st_bits;
 
-        if (e7_special) begin
-            res_c = e7_special_res;
-            inv_c = e7_invalid;
-        end else if (e7_zero) begin
-            res_c = {(e7_rm == RM_RDN), 31'd0};
-        end else begin
-            tiny = (e7_exp < 12'sd1);
+    // --- prepare: denormalise, extract guard/sticky, decide the round -----
+    always @(*) begin
+        den_src = 26'd0; den_shifted = 26'd0;
+        mant_d = 24'd0; rb = 1'b0; st = 1'b0; rnd_inc = 1'b0;
+        exp_base = 12'sd0; tiny = 1'b0;
+
+        if (!e7_special && !e7_zero) begin
+            tiny = e7_tiny;
             if (tiny) begin
-                den_amt = 12'sd1 - e7_exp;
-                if (den_amt > 12'sd26) den_amt = 12'sd26;
-                den_src = {e7_mant, e7_g, e7_st};
-                den_shifted = den_src >> den_amt[4:0];
-                st = e7_st;
-                for (j = 0; j < 26; j = j + 1) begin
-                    if (j < den_amt) st = st | den_src[j];
-                end
-                mant_d = den_shifted[25:2];
-                rb     = den_shifted[1];
-                st     = st | den_shifted[0];
-                exp_r  = 12'sd1;
+                den_src     = den_src_w;
+                den_shifted = den_src_w >> e7_den_amt;
+                mant_d      = den_shifted[25:2];
+                rb          = den_shifted[1];
+                st          = e7_st | st_shifted_out | den_shifted[0];
+                exp_base    = 12'sd1;
             end else begin
-                mant_d = e7_mant;
-                rb     = e7_g;
-                st     = e7_st;
-                exp_r  = e7_exp;
+                mant_d   = e7_mant;
+                rb       = e7_g;
+                st       = e7_st;
+                exp_base = e7_exp;
             end
 
             case (e7_rm)
@@ -550,15 +574,51 @@ module titan_x7_fp32_fma_pipe (
                 RM_RUP: rnd_inc = !e7_sign && (rb || st);
                 default: rnd_inc = 1'b0;
             endcase
-            mant_r = {1'b0, mant_d} + {24'd0, rnd_inc};
-            if (mant_r[24]) begin
-                mant_r = mant_r >> 1;
-                exp_r  = exp_r + 12'sd1;
+        end
+    end
+
+    // --- adders: both prefix, both independent of each other --------------
+    wire [23:0] mant_sum;
+    wire        mant_ovf;
+    titan_x7_prefix_add #(.W(24), .LEVELS(5)) u_e8_round (
+        .a(mant_d), .b({23'd0, rnd_inc}), .cin(1'b0),
+        .sum(mant_sum), .cout(mant_ovf));
+
+    wire [11:0] exp_p1;
+    titan_x7_prefix_add #(.W(12), .LEVELS(4)) u_e8_expinc (
+        .a(exp_base), .b(12'd1), .cin(1'b0),
+        .sum(exp_p1), .cout());
+
+    // Both overflow comparisons precomputed, so the compare is not sitting
+    // behind the exponent mux.
+    wire ge255_base = ($signed(exp_base) >= 12'sd255);
+    wire ge255_p1   = ($signed(exp_p1)   >= 12'sd255);
+
+    // --- finish: select, pack, flags --------------------------------------
+    always @(*) begin
+        mant_r = 25'd0; exp_r = 12'sd0;
+        res_c = 32'd0; inv_c = 1'b0; ovf_c = 1'b0; unf_c = 1'b0; inx_c = 1'b0;
+
+        if (e7_special) begin
+            res_c = e7_special_res;
+            inv_c = e7_invalid;
+        end else if (e7_zero) begin
+            res_c = {(e7_rm == RM_RDN), 31'd0};
+        end else begin
+            // Carry out of the 24-bit mantissa add can only happen when every
+            // mantissa bit is 1 and the round increments; the shifted-down
+            // result is then exactly 2**23, a constant.
+            if (mant_ovf) begin
+                mant_r = 25'h0800000;
+                exp_r  = $signed(exp_p1);
+            end else begin
+                mant_r = {1'b0, mant_sum};
+                exp_r  = exp_base;
             end
 
             inx_c = rb | st;
 
-            if (exp_r >= 12'sd255 && mant_r[23]) begin
+            if ((mant_ovf ? ge255_p1 : ge255_base) && mant_r[23]) begin
                 ovf_c = 1'b1;
                 inx_c = 1'b1;
                 case (e7_rm)

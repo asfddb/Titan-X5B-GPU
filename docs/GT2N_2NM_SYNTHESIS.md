@@ -348,6 +348,13 @@ Only the feed-forward multiply front-end and drain path can be cut at all.
 
 ### 9.1 2.49 GHz is a structural floor, not a tool setting
 
+> **Superseded by section 11 (2026-08-15).** The conclusion in this section --
+> that the tool has nothing left to give -- is correct. The inference drawn
+> from it, that the remaining gain needs 10-11 pipeline stages, is not. The
+> floor was two independent ~400 ps paths in different stages; fixing both in
+> RTL reached **294.12 ps (3.400 GHz)** at the same 8 stages. Read this section
+> for the method, section 11 for the outcome.
+
 Sweeping ABC's delay target on the FMA:
 
 | target | delay | area |
@@ -489,3 +496,138 @@ TARGET_PS=200 ./syn/gt2n/run_gt2n.sh titan_x7_fp32_fma_pipe "rtl/common/titan_x7
 Downloads: oss-cad-suite Windows x64 363 MB (YosysHQ release 2026-07-29),
 GT2N 116 MB cloned / 252 MB on disk. Each synthesis run takes well under a
 minute; the ten-point sweep above is a few minutes total.
+
+---
+
+## 11. Past 3 GHz at eight stages: 401.81 ps -> 294.12 ps (2026-08-15)
+
+Section 9.1 established that 401.81 ps was structural, not a tool setting, and
+concluded the rest had to come from re-partitioning 8 stages into 10-11. That
+conclusion was wrong, and the reason is worth keeping.
+
+**It was never one path.** `stime -p` on the baseline names the start-point
+`e7_exp[10]` -- the E8 denormal chain. Take that path away and the next one is
+already there at almost the same delay, starting at `e2_ma[2]` in the E3
+multiplier. Two independent paths, different stages, ~5 ps apart. Remove either
+alone and the tool simply spends its effort on the other, which is exactly why
+the delay target sweep looked like a wall.
+
+### 11.1 Measured, elvt/w31/tt, `-D 200`
+
+| RTL | delay | GHz | area | critical path starts at |
+|:--|--:|--:|--:|:--|
+| baseline | 401.81 ps | 2.489 | 476.85 um2 | `e7_exp[10]` (E8 denormal) |
+| + E7 hoist of `tiny`/`den_amt` | 406.20 ps | 2.462 | 474.32 um2 | `e2_ma[2]` (E3 multiplier) |
+| + carry-save E3 | 397.27 ps | 2.517 | 478.24 um2 | `e7_den_amt[1]` (E8 round) |
+| **+ E8 prepare/adders/finish split** | **294.12 ps** | **3.400** | **482.55 um2** | `e7_den_amt[1]` |
+
+**Delay -26.80%, frequency +36.63%, area +1.19%.** Still 8 pipeline stages.
+
+Note the second row: the E7 hoist on its own measures *worse* than doing
+nothing. It is a prerequisite, not a gain -- it only pays once E3 is fixed too.
+Anyone bisecting this work will land on that commit and see a regression.
+
+### 11.2 The three changes
+
+**E7 hoist.** `1 - e7_exp` and its clamp to 26 moved out of E8 into E7. Free:
+`e7_exp <= e6_exp` was a pure register copy and E7's own path is the 106-bit
+`norm` shift, so a 12-bit subtract hides completely underneath it.
+
+**Carry-save E3** (`rtl/common/titan_x7_csa_mul.v`). E3 was two `*` operators,
+each building an array multiplier that finished with its own internal CPA --
+two ripple adders on a PDK with no adder cells, in a stage that hands its
+result to a prefix adder in E4 anyway. Now the 24 partial-product rows are
+reduced by seven 3:2 carry-save layers to a (sum, carry) pair, and E4's
+existing `titan_x7_prefix_add` does the one carry propagation the design
+actually needs.
+
+**E8 split.** The old E8 was one always block chaining a 25-bit `+`, then a
+12-bit `+` gated on that sum's carry, then a compare on the result: three
+dependent ripples. Both adds are prefix adders now and run in parallel, because
+the mantissa carry-out that gates the exponent increment IS the adder's own
+`cout` -- it does not need the sum. Both `>= 255` comparisons are precomputed
+and muxed, so the compare no longer sits behind the exponent mux. The sticky
+OR became a vector plus one reduction, so it maps to a tree rather than a
+26-long chain.
+
+This is the third instance of the same root cause as section 7: **GT2N has no
+adder cells, so anything that ends in a carry chain is expensive, and the fix
+is always to make the structure explicit in RTL.**
+
+### 11.3 Measured dead ends -- do not re-run these
+
+| attempt | delay |
+|:--|--:|
+| `synth -booth`, baseline | 453.92 ps |
+| `synth -booth`, + E7 hoist | 429.24 ps |
+| `-D 150` / `-D 390` on the hoist | 406.20 ps (unchanged) |
+| ABC `retime` + `async2sync`, baseline | 407.92 ps |
+| ABC `retime` + `async2sync`, + hoist | 418.58 ps |
+
+`abc -retime` is not a valid option in Yosys 0.67; retiming needs `-dff` plus
+an explicit `retime,-o,<ps>` inside `-script`, and `async2sync` first. It makes
+`rst_n` the start-point and costs area.
+
+### 11.4 Verification, and where formal ran out
+
+The prefix-adder work in section 7 could be proven end to end because both
+sides had the *same* multiplier. This change alters the multiplier, so the
+whole-FMA sequential proof inherits the hard case and does not finish. What was
+actually run:
+
+| property | method | result |
+|:--|:--|:--|
+| every CSA layer preserves its row sum, mod 2**48, W=48, all 7 geometries | SAT | **proven, 7/7** |
+| `sum of partial-product rows == a*b`, W <= 8 | SAT | **proven** |
+| the same, W >= 10 | SAT | timeout (180 s) |
+| `(s + c) == a*b`, W = 24, direct miter | SAT | **did not converge** -- killed at 10 min, still solving 35,709 variables / 98,457 clauses |
+| whole-FMA sequential equivalence, `equiv_induct` | SAT | timeout (540 s) |
+| `(s + c) == a*b` at the real 24x24 width | simulation | **PASS -- 120,120 checks, 0 mismatches** (`tb/tb_csa_mul.v`) |
+| restructured FMA == original, cycle for cycle | simulation | **PASS -- 601,045 cycles, 0 mismatches, 0 X-leaks** (`tb/tb_fma_diff.v`) |
+
+The layer proofs are the ones that matter, because they are where the novel
+content is: the tree shifts each carry vector left and truncates to 48 bits,
+and those proofs are what check that the identity
+`x+y+z == (x^y^z) + 2*((x&y)|(x&z)|(y&z))` survives that truncation. What
+formal could NOT reach is `partial-product rows == a*b`, which is the textbook
+definition of binary multiplication rather than anything this design invented.
+
+This is the same wall the project already hit on `titan_apex_mult_seg`
+(docs/BUILD_LOG_2NM.md, "Where formal beat simulation"), and the remedy is the
+same one: simulation at full width.
+
+**Mutation testing is what makes the simulation worth anything.** Nine
+mutations were injected into the restructured logic; **seven were caught.** The
+two survivors are *not* gaps -- they are semantically equivalent to the
+original, and `syn/gt2n/prove_sticky_benign.ys` **proves** both. One of them
+(`<` vs `<=` in the sticky compare) is only benign because the design already
+ORs `den_shifted[0]`, which is the same bit.
+
+`tb_fma_diff` compares `valid_out` on every cycle and the result and flags on
+every cycle where both pipelines report valid. It deliberately does not compare
+results while the pipe is filling: gold yields `xxxxxxxx` there and the
+restructured version `X0000000`, because a mux on the adder's carry-out is less
+X-pessimistic than `if (mant_r[24])`. That is an unknown-value artefact of
+simulation, not a hardware difference -- so the test instead fails if an X ever
+reaches a result that is marked VALID, which is the case that would matter. It
+never did.
+
+Mutation testing also found a real hole in the stimulus and fixed it: the
+original "aimed at subnormal" vectors used exponents of 1..40, which puts the
+product at roughly 2**-125..2**-47, so `den_amt` was **always** past its clamp
+of 26 and the graded 1..25 shifts were never exercised at all. A block aimed at
+`ea + eb` in 102..127 was added, and it is what kills mutations M6-M8.
+
+### 11.5 Reproducing
+
+```bash
+GT2N_ROOT=/c/eda/GT2N OSS_CAD=/c/eda/oss-cad-suite   ./syn/gt2n/run_gt2n.sh titan_x7_fp32_fma_pipe   rtl/common/titan_x7_lzc.v rtl/common/titan_x7_prefix_add.v   rtl/common/titan_x7_csa_mul.v rtl/fpu/titan_x7_fp32_fma_pipe.v
+
+yosys -s syn/gt2n/prove_csa_parts.ys        # layer proofs
+yosys -s syn/gt2n/prove_sticky_benign.ys    # the two benign mutations
+```
+
+The toolchain is installed but off PATH; `. .	ools\eda-env.ps1` puts it on.
+yosys is a Windows binary and needs Windows-style paths (`C:/eda/GT2N/...`).
+One FMA synthesis run takes about 10 seconds, which is fast enough to iterate
+-- earlier sessions treated this flow as expensive and it is not.

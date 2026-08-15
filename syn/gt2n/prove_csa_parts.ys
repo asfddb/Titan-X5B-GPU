@@ -1,0 +1,12 @@
+# titan_x7_csa_mul24 == a*b, by decomposition. See prove_csa_parts.v for why
+# the direct miter (prove_csa_mul.ys) is not used: Wallace-tree-against-array
+# is the known-hard case for combinational equivalence and does not converge.
+#
+# PART 2 -- every reduction layer preserves the sum of its rows, mod 2**48.
+# Run one line per instantiated layer geometry; all seven must print
+# "SAT proof finished - no model found: SUCCESS".
+read_verilog rtl/common/titan_x7_csa_mul.v syn/gt2n/prove_csa_parts.v
+chparam -set W 48 -set NIN 24 -set NOUT 16 csa_layer_equiv
+hierarchy -top csa_layer_equiv
+proc; opt -full; flatten; opt -full
+sat -verify -prove diff 1'b0 csa_layer_equiv

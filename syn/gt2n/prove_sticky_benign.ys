@@ -1,0 +1,13 @@
+# Two mutations of E8's sticky logic survive tb/tb_fma_diff.v. They are not
+# gaps in that test -- they are semantically equivalent to the original, and
+# these two miters prove it. Keep them: without this, a future mutation run
+# reports two survivors and looks like a hole.
+read_verilog syn/gt2n/prove_sticky_benign.v
+hierarchy -top sticky_equiv
+proc; opt -full; flatten; opt -full
+sat -verify -prove diff 1'b0 sticky_equiv
+design -reset
+read_verilog syn/gt2n/prove_sticky_benign.v
+hierarchy -top clamp_equiv
+proc; opt -full; flatten; opt -full
+sat -verify -prove diff 1'b0 clamp_equiv
