@@ -1,0 +1,62 @@
+# Tiny Tapeout project information.
+#
+# Copy this, tt_um_titan_fma.v and rtl/fpu/titan_x5_fp32_fma.v into a clone of
+# tinytapeout/tt-verilog-template (source files go in src/), then follow that
+# repo's README. The GitHub Action there runs the hardening flow and tells you
+# whether it actually fits before you commit to a shuttle.
+
+project:
+  title:        "Titan X5 FP32 FMA"
+  author:       "Adhiraj"
+  discord:      ""
+  description:  "IEEE-754 single-precision fused multiply-add with true single rounding, taken from the Titan X5-B GPU"
+  language:     "Verilog"
+
+  # The core is a 6-stage pipeline. 50 MHz is a deliberately conservative
+  # starting point - the sky130 timing for this block has not been measured,
+  # and picking a number the silicon cannot hold is how a working design comes
+  # back dead.
+  clock_hz:     50000000
+
+  # 8x2 is the largest tile Tiny Tapeout offers. The OpenLane run in
+  # docs/ASIC_PHASE2_REPORT.md put this core at 0.234 mm2 on sky130, against
+  # roughly 0.29 mm2 of 8x2 tile - so it is plausible but tight, and only a
+  # real hardening run settles it. If it does not close, the first thing to
+  # try is a smaller multiplier or fewer rounding modes.
+  tiles:        "8x2"
+
+  top_module:   "tt_um_titan_fma"
+
+  source_files:
+    - "tt_um_titan_fma.v"
+    - "titan_x5_fp32_fma.v"
+
+# Byte-serial protocol: 12 bytes in (a, b, c - most significant byte first),
+# pulse start, wait for done, then 5 bytes out (result, then flags).
+pinout:
+  ui[0]: "operand byte in, bit 0"
+  ui[1]: "operand byte in, bit 1"
+  ui[2]: "operand byte in, bit 2"
+  ui[3]: "operand byte in, bit 3"
+  ui[4]: "operand byte in, bit 4"
+  ui[5]: "operand byte in, bit 5"
+  ui[6]: "operand byte in, bit 6"
+  ui[7]: "operand byte in, bit 7"
+
+  uo[0]: "result byte out, bit 0"
+  uo[1]: "result byte out, bit 1"
+  uo[2]: "result byte out, bit 2"
+  uo[3]: "result byte out, bit 3"
+  uo[4]: "result byte out, bit 4"
+  uo[5]: "result byte out, bit 5"
+  uo[6]: "result byte out, bit 6"
+  uo[7]: "result byte out, bit 7"
+
+  uio[0]: "wr - shift ui_in into the operand register"
+  uio[1]: "start - latch operands and launch the FMA"
+  uio[2]: "rm bit 0 - rounding mode"
+  uio[3]: "rm bit 1 - rounding mode"
+  uio[4]: "rd - advance the result shift register"
+  uio[5]: "unused"
+  uio[6]: "unused"
+  uio[7]: "done - result valid (output)"

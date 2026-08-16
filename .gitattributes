@@ -1,0 +1,9 @@
+# Shell scripts must keep LF endings. This repo is developed on Windows but
+# syn/gt2n/*.sh and tb/*.sh are run on Linux (see docs/HANDOFF_2NM_LINUX.md);
+# a CRLF shebang fails there with "bad interpreter: /usr/bin/env bash^M",
+# which is a confusing error for a file that looks perfectly fine.
+*.sh text eol=lf
+
+# Tcl and yosys scripts are consumed by the same Linux-side flows.
+*.tcl text eol=lf
+*.ys  text eol=lf

@@ -69,6 +69,32 @@ static inline int copy_to_user(void *dst, const void *src, unsigned long n)
 #endif
 
 // ---------------------------------------------------------------------------
+// TITAN_LOGV — per-object chatter, off by default.
+//
+// Logging every buffer allocation is exactly what you want when bringing the
+// driver up, and actively harmful inside a frame loop: titanLaunchKernel()
+// allocates a kernel parameter block on every launch, so a graphics workload
+// hits this once per frame. Running DOOM, the printf costs more than the blit
+// it is describing, and the useful startup lines scroll away in seconds.
+//
+// Set TITAN_VERBOSE=1 in the environment to get it back.
+// ---------------------------------------------------------------------------
+#ifdef __KERNEL__
+#define TITAN_LOGV(fmt, ...)  TITAN_LOG(fmt, ##__VA_ARGS__)
+#else
+#include <stdlib.h>
+static inline int titan_verbose(void)
+{
+    static int v = -1;                       // -1 = not yet looked up
+    if (v < 0)
+        v = (getenv("TITAN_VERBOSE") != NULL);
+    return v;
+}
+#define TITAN_LOGV(fmt, ...) \
+    do { if (titan_verbose()) TITAN_LOG(fmt, ##__VA_ARGS__); } while (0)
+#endif
+
+// ---------------------------------------------------------------------------
 // Device state
 // ---------------------------------------------------------------------------
 #define TITAN_VRAM_BYTES   (256u * 1024u * 1024u)   // 256 MiB simulated GDDR7
@@ -278,9 +304,9 @@ static long titan_ioctl_dispatch(unsigned int cmd, void *arg)
         ret = titan_bo_alloc(req.size, &req.handle, &req.gpu_addr);
         if (ret)
             return ret;
-        TITAN_LOG("gem_alloc: handle=%u gpu_addr=0x%08X size=%u KiB",
-                  req.handle, req.gpu_addr,
-                  titan_dev.bos[req.handle - 1].size / 1024);
+        TITAN_LOGV("gem_alloc: handle=%u gpu_addr=0x%08X size=%u KiB",
+                   req.handle, req.gpu_addr,
+                   titan_dev.bos[req.handle - 1].size / 1024);
         if (copy_to_user(arg, &req, sizeof(req)))
             return EINVAL_RET;
         return 0;

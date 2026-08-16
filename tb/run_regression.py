@@ -39,8 +39,32 @@ TB = os.path.abspath(os.path.dirname(__file__))
 RTL = os.path.abspath(os.path.join(TB, "..", "rtl"))
 
 
+# Sources that another source always drags in, but which no suite remembers to
+# list. iverilog resolves an unresolved instance by looking for a file named
+# <modulename>.v, so a module whose filename differs from its name is invisible
+# to it: titan_x7_csa_mul.v defines titan_x7_csa_mul24, and anything
+# instantiating that has to name the file explicitly.
+#
+# This is not hypothetical tidiness. Leaving it to each suite's own list is
+# exactly how fma8, sm7, sm7warp, apexlane and x7shim all came to report FAIL -
+# every one of them died with "Unknown module type: titan_x7_csa_mul24" during
+# elaboration, so none of them ever ran a single check. A compile error that
+# surfaces as a failing test is worse than one that stops the run, because it
+# looks like broken hardware instead of a broken file list.
+IMPLIED_SOURCES = {
+    "fpu/titan_x7_fp32_fma_pipe.v": ("common/titan_x7_csa_mul.v",),
+}
+
+
 def rtl_files(*rel):
-    return [os.path.join(RTL, r) for r in rel]
+    ordered = []
+    for r in rel:
+        for dep in IMPLIED_SOURCES.get(r, ()):
+            if dep not in rel and dep not in ordered:
+                ordered.append(dep)
+        if r not in ordered:
+            ordered.append(r)
+    return [os.path.join(RTL, r) for r in ordered]
 
 
 SUITES = {
